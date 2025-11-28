@@ -77,9 +77,9 @@ router.post('/', async (req, res) => {
     const periodDate = new Date(parseInt(year), parseInt(month) - 1, 1);
     
     // Check for duplicate
-    const existing = await prisma.invoice.findUnique({
-      where: { carrierId_invoiceNumber: { carrierId: parseInt(carrierId), invoiceNumber } }
-    });
+   const existing = await prisma.invoice.findFirst({
+  where: { carrierId: carrierId, invoiceNumber: invoiceNumber }
+});
     
     if (existing) {
       return res.status(400).json({ error: 'Invoice with this number already exists' });
