@@ -211,7 +211,6 @@ result.totals = {
     }
   });
   
-  
   return result;
 }
 
