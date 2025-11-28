@@ -210,7 +210,7 @@ result.totals = {
       });
     }
   });
-  
+
   return result;
 }
 
