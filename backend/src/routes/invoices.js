@@ -131,18 +131,18 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const periodDate = new Date(parseInt(year), parseInt(month) - 1, 1);
     
     // Check for duplicate
-    const existing = await prisma.invoice.findUnique({
-      where: { carrierId_invoiceNumber: { carrierId: parseInt(carrierId), invoiceNumber } }
-    });
+const existing = await prisma.invoice.findFirst({
+  where: { carrierId: parseInt(carrierId), invoiceNumber: invoiceNumber }
+});
     
     if (existing) {
       return res.status(400).json({ error: `Invoice ${invoiceNumber} already exists for this carrier` });
     }
     
     // Find matching proof
-    const proof = await prisma.proof.findUnique({
-      where: { carrierId_period: { carrierId: parseInt(carrierId), period } }
-    });
+const proof = await prisma.proof.findFirst({
+  where: { carrierId: parseInt(carrierId), period: period }
+});
     
     // Create invoice with placeholder data
     // In production, you would parse the PDF here
