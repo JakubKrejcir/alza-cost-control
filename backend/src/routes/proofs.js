@@ -182,7 +182,7 @@ function parseProofFromSumar(data) {
     totalDepo: findValue('DEPO'),
     totalPenalty: findValue('Pokuty'),
     grandTotal: findValue('Celková částka'),
-    totalDays: findValue('Odježděných dní'),
+    totalDepo: findValue('Odježděných dní'),
     totalKmCount: findValue('Výpočet KM'),
     totalRoutes: null
   };
