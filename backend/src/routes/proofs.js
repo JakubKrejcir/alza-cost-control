@@ -174,16 +174,15 @@ function parseProofFromSumar(data) {
     return row ? row[3] : null;
   };
   
-  // Totals
-  result.totals = {
-    totalFix: findValue('Cena FIX'),
-    totalKm: findValue('Cena KM'),
-    totalLinehaul: findValue('Linehaul'),
-    totalDepo: findValue('DEPO'),
-    totalPenalty: findValue('Pokuty'),
-    grandTotal: findValue('Celková částka'),
-    totalDepo: findValue('Odježděných dní'),
-  };
+// Totals
+result.totals = {
+  totalFix: findValue('Cena FIX'),
+  totalKm: findValue('Cena KM'),
+  totalLinehaul: findValue('Linehaul'),
+  totalDepo: findValue('DEPO'),
+  totalPenalty: findValue('Pokuty'),
+  grandTotal: findValue('Celková částka')
+};
   
   // Route details
   const routeTypes = [
@@ -212,8 +211,6 @@ function parseProofFromSumar(data) {
     }
   });
   
-  // Calculate total routes
-  result.totals.totalRoutes = result.routeDetails.reduce((sum, r) => sum + r.count, 0);
   
   return result;
 }
