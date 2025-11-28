@@ -445,14 +445,27 @@ async def parse_preview(
     
     return {
         'carrier': {
-            **carrier_info,
+            'name': carrier_info['name'],
+            'ico': carrier_info['ico'],
+            'dic': carrier_info['dic'],
+            'address': carrier_info['address'],
+            'bankAccount': carrier_info['bank_account'],
             'existsInDb': existing_carrier is not None,
             'existingData': {
                 'id': existing_carrier.id,
                 'name': existing_carrier.name
             } if existing_carrier else None
         },
-        'contract': contract_info,
-        'rates': price_rates,
+        'contract': {
+            'number': contract_info['number'],
+            'type': contract_info['type'],
+            'serviceType': contract_info['service_type'],
+            'validFrom': contract_info['valid_from'].isoformat() if contract_info['valid_from'] else None
+        },
+        'rates': {
+            'fixRates': [{'routeType': r['route_type'], 'rate': r['rate']} for r in price_rates['fix_rates']],
+            'kmRates': [{'routeType': r['route_type'], 'rate': r['rate']} for r in price_rates['km_rates']],
+            'depoRates': [{'depoName': r['depo_name'], 'rateType': r['rate_type'], 'rate': r['rate']} for r in price_rates['depo_rates']]
+        },
         'rawTextPreview': text[:2000]
     }
