@@ -89,19 +89,17 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'Sheet "Sumar" not found in XLSX' });
     }
     
-    const sumarData = XLSX.utils.sheet_to_json(sumarSheet, { header: 1 });
-    
     // Parse proof data from Sumar sheet
-    const proofData = parseProofFromSumar(sumarData);
+    const proofData = parseProofFromSumar(sumarSheet);
     
     // Parse period date
     const [month, year] = period.split('/');
     const periodDate = new Date(parseInt(year), parseInt(month) - 1, 1);
     
-// Check for existing proof
-const existing = await prisma.proof.findFirst({
-  where: { carrierId: parseInt(carrierId), period }
-});
+    // Check for existing proof
+    const existing = await prisma.proof.findFirst({
+      where: { carrierId: parseInt(carrierId), period }
+    });
     
     if (existing) {
       // Update existing
@@ -160,57 +158,181 @@ const existing = await prisma.proof.findFirst({
 });
 
 // Helper function to parse proof data from Sumar sheet
-function parseProofFromSumar(data) {
+function parseProofFromSumar(sheet) {
   const result = {
-    totals: {},
+    totals: {
+      totalFix: null,
+      totalKm: null,
+      totalLinehaul: null,
+      totalDepo: null,
+      totalPenalty: null,
+      grandTotal: null
+    },
     routeDetails: [],
     linehaulDetails: [],
     depoDetails: []
   };
   
-  // Find values by label in column B (index 1)
-  const findValue = (label) => {
-    const row = data.find(r => r[1] && String(r[1]).includes(label));
-    return row ? row[3] : null;
+  // Helper to get cell value (handles formulas by getting calculated value)
+  const getCellValue = (cellRef) => {
+    const cell = sheet[cellRef];
+    if (!cell) return null;
+    // Return the value (v) or the calculated result (w for formatted, v for raw)
+    return cell.v !== undefined ? cell.v : null;
   };
   
-// Totals
-result.totals = {
-  totalFix: findValue('Cena FIX'),
-  totalKm: findValue('Cena KM'),
-  totalLinehaul: findValue('Linehaul'),
-  totalDepo: findValue('DEPO'),
-  totalPenalty: findValue('Pokuty'),
-  grandTotal: findValue('Celková částka')
-};
+  // Helper to find row by label in column B
+  const findRowByLabel = (label) => {
+    const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1:Z100');
+    for (let row = range.s.r; row <= range.e.r; row++) {
+      const cellB = sheet[XLSX.utils.encode_cell({ r: row, c: 1 })]; // Column B
+      if (cellB && cellB.v && String(cellB.v).includes(label)) {
+        return row;
+      }
+    }
+    return null;
+  };
   
-  // Route details
+  // Helper to get value from column D of a found row
+  const getValueByLabel = (label) => {
+    const row = findRowByLabel(label);
+    if (row === null) return null;
+    const cell = sheet[XLSX.utils.encode_cell({ r: row, c: 3 })]; // Column D
+    return cell ? cell.v : null;
+  };
+  
+  // Parse totals
+  result.totals.totalFix = getValueByLabel('Cena FIX');
+  result.totals.totalKm = getValueByLabel('Cena KM');
+  result.totals.totalLinehaul = getValueByLabel('Linehaul');
+  result.totals.totalDepo = getValueByLabel('DEPO');
+  result.totals.totalPenalty = getValueByLabel('Pokuty');
+  result.totals.grandTotal = getValueByLabel('Celková částka');
+  
+  // Parse route details
   const routeTypes = [
-    { label: 'Počet tras LastMile při DR', type: 'DR', rate: 3200 },
-    { label: 'Počet tras LastMile při DPO LH', type: 'LH_DPO', rate: 2500 },
-    { label: 'Počet tras SD LH', type: 'LH_SD', rate: 1800 },
-    { label: 'Počet tras SD LH spojene', type: 'LH_SD_SPOJENE', rate: 2500 }
+    { label: 'Počet tras LastMile při DR', type: 'DR', rateLabel: 'Cena DR' },
+    { label: 'Počet tras LastMile při DPO LH', type: 'LH_DPO', rateLabel: 'Cena LastMile při LH DPO' },
+    { label: 'Počet tras SD LH', type: 'LH_SD', rateLabel: 'Cena LastMile při LH SD' },
+    { label: 'Počet tras SD LH spojene', type: 'LH_SD_SPOJENE', rateLabel: 'Cena LastMile při LH SD spojené' }
   ];
   
   routeTypes.forEach(rt => {
-    const count = findValue(rt.label);
-    if (count) {
-      // Get rate from proof if available
-      const rateLabel = rt.type === 'DR' ? 'Cena DR' : 
-                        rt.type === 'LH_DPO' ? 'Cena LastMile při LH DPO' :
-                        rt.type === 'LH_SD' ? 'Cena LastMile při LH SD' :
-                        'Cena LastMile při LH SD spojené';
-      const rate = findValue(rateLabel) || rt.rate;
-      
+    const count = getValueByLabel(rt.label);
+    const rate = getValueByLabel(rt.rateLabel);
+    
+    if (count && count > 0) {
+      const rateVal = rate || 0;
       result.routeDetails.push({
         routeType: rt.type,
         count: parseInt(count),
-        rate: parseFloat(rate),
-        amount: parseInt(count) * parseFloat(rate)
+        rate: parseFloat(rateVal),
+        amount: parseInt(count) * parseFloat(rateVal)
       });
     }
   });
-
+  
+  // Parse linehaul details from rows 27-45 (column H=description, I=count)
+  const linehaulRows = [
+    { row: 27, fromCode: 'CZLC4', desc: '2x Kamion dpo', toCode: 'Vratimov' },
+    { row: 28, fromCode: 'CZLC4', desc: '1x Kamion dpo', toCode: 'Vratimov' },
+    { row: 29, fromCode: 'CZLC4', desc: '1x Dodavka 6 300', toCode: 'Vratimov' },
+    { row: 30, fromCode: 'CZLC4', desc: '2x Dodavka SD', toCode: 'Vratimov' },
+    { row: 31, fromCode: 'CZLC4', desc: '1x Kamion SD', toCode: 'Vratimov' },
+    { row: 32, fromCode: 'CZLC4', desc: '3x Dodavka SD', toCode: 'Vratimov' },
+    { row: 33, fromCode: 'CZLC4', desc: '1x Kamion SD', toCode: 'Vratimov' },
+    { row: 34, fromCode: 'CZTC1', desc: '1x Solo bez vik', toCode: 'Vratimov' },
+    { row: 35, fromCode: 'CZTC1', desc: '5x Dodavka 6 300', toCode: 'Vratimov' },
+    { row: 36, fromCode: '', desc: 'Vratky', toCode: 'Vratimov' },
+    { row: 37, fromCode: 'CZLC4', desc: '3x kamion DPO', toCode: 'Nový Bydžov' },
+    { row: 38, fromCode: 'CZLC4', desc: '1x kamion DPO', toCode: 'Nový Bydžov' },
+    { row: 39, fromCode: 'CZLC4', desc: '1x kamion DPO', toCode: 'Nový Bydžov' },
+    { row: 40, fromCode: 'CZLC4', desc: '1x kamion SD', toCode: 'Nový Bydžov' },
+    { row: 41, fromCode: 'CZTC1', desc: '1x Kamion', toCode: 'Nový Bydžov' }
+  ];
+  
+  linehaulRows.forEach(lh => {
+    const daysCell = sheet[XLSX.utils.encode_cell({ r: lh.row - 1, c: 8 })]; // Column I (index 8)
+    const days = daysCell ? daysCell.v : null;
+    
+    if (days && days > 0) {
+      // Get rate from linehaul price table
+      let rate = 0;
+      const descLower = lh.desc.toLowerCase();
+      if (descLower.includes('kamion')) {
+        if (lh.toCode === 'Vratimov') {
+          rate = lh.fromCode === 'CZLC4' ? 24180 : 22000;
+        } else {
+          rate = lh.fromCode === 'CZLC4' ? 9950 : 9500;
+        }
+      } else if (descLower.includes('solo')) {
+        if (lh.toCode === 'Vratimov') {
+          rate = lh.fromCode === 'CZLC4' ? 16500 : 14800;
+        } else {
+          rate = lh.fromCode === 'CZLC4' ? 7750 : 7500;
+        }
+      } else if (descLower.includes('dodavka 6')) {
+        rate = lh.toCode === 'Vratimov' ? 6300 : 6300;
+      } else if (descLower.includes('dodavka')) {
+        if (lh.toCode === 'Vratimov') {
+          rate = lh.fromCode === 'CZLC4' ? 10100 : 9100;
+        } else {
+          rate = lh.fromCode === 'CZLC4' ? 5250 : 5000;
+        }
+      } else if (descLower.includes('vratky')) {
+        rate = 3700;
+      }
+      
+      result.linehaulDetails.push({
+        description: `${lh.fromCode} ${lh.desc}`.trim(),
+        fromCode: lh.fromCode || null,
+        toCode: lh.toCode,
+        vehicleType: descLower.includes('kamion') ? 'kamion' : 
+                     descLower.includes('solo') ? 'solo' : 
+                     descLower.includes('dodavka') ? 'dodavka' : 'other',
+        days: parseInt(days),
+        rate: rate,
+        total: parseInt(days) * rate
+      });
+    }
+  });
+  
+  // Parse DEPO details
+  const depoVratimov = getValueByLabel('DEPO Vratimov / Den');
+  const depoNBMesiac = getValueByLabel('DEPO Nový Bydžov / Mesiac');
+  const skladniciNB = getValueByLabel('3 Skladníci Nový Bydžov / Mesiac');
+  const daysWorked = getValueByLabel('Odježděných dní');
+  
+  if (depoVratimov && daysWorked) {
+    result.depoDetails.push({
+      depoName: 'Vratimov',
+      rateType: 'daily',
+      days: parseInt(daysWorked),
+      rate: parseFloat(depoVratimov),
+      amount: parseInt(daysWorked) * parseFloat(depoVratimov)
+    });
+  }
+  
+  if (depoNBMesiac) {
+    result.depoDetails.push({
+      depoName: 'Nový Bydžov',
+      rateType: 'monthly',
+      days: 1,
+      rate: parseFloat(depoNBMesiac),
+      amount: parseFloat(depoNBMesiac)
+    });
+  }
+  
+  if (skladniciNB) {
+    result.depoDetails.push({
+      depoName: 'Nový Bydžov - Skladníci',
+      rateType: 'monthly',
+      days: 1,
+      rate: parseFloat(skladniciNB),
+      amount: parseFloat(skladniciNB)
+    });
+  }
+  
   return result;
 }
 
