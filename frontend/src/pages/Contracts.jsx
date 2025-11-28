@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Upload as UploadIcon, FileText, CheckCircle, AlertCircle, Building, Calendar, DollarSign } from 'lucide-react'
 import axios from 'axios'
 
-await api.post('/contracts/parse-preview', formData)
+const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api' })
+
 
 export default function Contracts() {
   const [dragOver, setDragOver] = useState(false)
