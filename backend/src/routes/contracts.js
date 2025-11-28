@@ -383,7 +383,7 @@ router.get('/', async (req, res) => {
           select: { id: true, name: true }
         },
         _count: {
-          select: { priceConfigs: true }
+          select: { prices: true }
         }
       },
       orderBy: { validFrom: 'desc' }
