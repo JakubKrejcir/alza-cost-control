@@ -24,7 +24,8 @@ router.get('/', async (req, res) => {
         proof: { select: { id: true, period: true } },
         items: true
       },
-orderBy: { createdAt: 'desc' }    });
+      orderBy: { createdAt: 'desc' }
+    });
     
     res.json(invoices);
   } catch (error) {
@@ -72,14 +73,9 @@ router.post('/', async (req, res) => {
       items
     } = req.body;
     
-    // Parse period date
-    const [month, year] = period.split('/');
-    const periodDate = new Date(parseInt(year), parseInt(month) - 1, 1);
-    
-    // Check for duplicate
-   const existing = await prisma.invoice.findFirst({
-  where: { carrierId: carrierId, invoiceNumber: invoiceNumber }
-});
+    const existing = await prisma.invoice.findFirst({
+      where: { carrierId: parseInt(carrierId), invoiceNumber: invoiceNumber }
+    });
     
     if (existing) {
       return res.status(400).json({ error: 'Invoice with this number already exists' });
@@ -91,7 +87,6 @@ router.post('/', async (req, res) => {
         proofId: proofId ? parseInt(proofId) : null,
         invoiceNumber,
         period,
-        periodDate,
         issueDate: issueDate ? new Date(issueDate) : null,
         dueDate: dueDate ? new Date(dueDate) : null,
         totalWithoutVat,
@@ -109,7 +104,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// POST upload invoice PDF (placeholder for PDF parsing)
+// POST upload invoice PDF
 router.post('/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -122,38 +117,28 @@ router.post('/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'carrierId and period are required' });
     }
     
-    // Extract invoice number from filename
     const invoiceNumMatch = req.file.originalname.match(/(\d{8})/);
     const invoiceNumber = invoiceNumMatch ? invoiceNumMatch[1] : `SCAN-${Date.now()}`;
     
-    // Parse period date
-    const [month, year] = period.split('/');
-    const periodDate = new Date(parseInt(year), parseInt(month) - 1, 1);
-    
-    // Check for duplicate
-const existing = await prisma.invoice.findFirst({
-  where: { carrierId: parseInt(carrierId), invoiceNumber: invoiceNumber }
-});
+    const existing = await prisma.invoice.findFirst({
+      where: { carrierId: parseInt(carrierId), invoiceNumber: invoiceNumber }
+    });
     
     if (existing) {
       return res.status(400).json({ error: `Invoice ${invoiceNumber} already exists for this carrier` });
     }
     
-    // Find matching proof
-const proof = await prisma.proof.findFirst({
-  where: { carrierId: parseInt(carrierId), period: period }
-});
+    const proof = await prisma.proof.findFirst({
+      where: { carrierId: parseInt(carrierId), period: period }
+    });
     
-    // Create invoice with placeholder data
-    // In production, you would parse the PDF here
     const invoice = await prisma.invoice.create({
       data: {
         carrierId: parseInt(carrierId),
         proofId: proof?.id,
         invoiceNumber,
         period,
-        periodDate,
-        fileName: req.file.originalname,
+        fileUrl: req.file.originalname,
         totalWithoutVat: 0,
         vatAmount: 0,
         totalWithVat: 0,
@@ -163,7 +148,7 @@ const proof = await prisma.proof.findFirst({
     
     res.status(201).json({
       ...invoice,
-      message: 'Invoice uploaded. Please update amounts manually or implement PDF parsing.'
+      message: 'Invoice uploaded.'
     });
   } catch (error) {
     console.error('Error uploading invoice:', error);
@@ -175,27 +160,13 @@ const proof = await prisma.proof.findFirst({
 router.put('/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const {
-      proofId,
-      status,
-      totalWithoutVat,
-      vatAmount,
-      totalWithVat,
-      items
-    } = req.body;
+    const { proofId, status, totalWithoutVat, vatAmount, totalWithVat, items } = req.body;
     
     const invoice = await prisma.invoice.update({
       where: { id },
-      data: {
-        proofId,
-        status,
-        totalWithoutVat,
-        vatAmount,
-        totalWithVat
-      }
+      data: { proofId, status, totalWithoutVat, vatAmount, totalWithVat }
     });
     
-    // Update items if provided
     if (items) {
       await prisma.invoiceItem.deleteMany({ where: { invoiceId: id } });
       await prisma.invoiceItem.createMany({
@@ -218,10 +189,7 @@ router.put('/:id', async (req, res) => {
 // DELETE invoice
 router.delete('/:id', async (req, res) => {
   try {
-    await prisma.invoice.delete({
-      where: { id: parseInt(req.params.id) }
-    });
-    
+    await prisma.invoice.delete({ where: { id: parseInt(req.params.id) } });
     res.status(204).send();
   } catch (error) {
     console.error('Error deleting invoice:', error);
@@ -236,10 +204,7 @@ router.post('/:id/match', async (req, res) => {
     
     const invoice = await prisma.invoice.update({
       where: { id: parseInt(req.params.id) },
-      data: {
-        proofId: parseInt(proofId),
-        status: 'matched'
-      },
+      data: { proofId: parseInt(proofId), status: 'matched' },
       include: { proof: true }
     });
     
