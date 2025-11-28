@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Upload, DollarSign, Calendar, Truck, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Upload, DollarSign, Calendar, Truck, FileText, Menu, X } from 'lucide-react'
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/upload', label: 'Nahrát', icon: Upload },
+  { path: '/contracts', label: 'Smlouvy', icon: FileText },
   { path: '/prices', label: 'Ceníky', icon: DollarSign },
   { path: '/history', label: 'Historie', icon: Calendar },
   { path: '/carriers', label: 'Dopravci', icon: Truck },

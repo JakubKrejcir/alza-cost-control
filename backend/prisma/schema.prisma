@@ -1,3 +1,6 @@
+// Prisma schema for Alza Cost Control
+// Database: PostgreSQL
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,178 +10,211 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============================================================================
+// DOPRAVCI A DEPA
+// ============================================================================
+
 model Carrier {
-  id        Int        @id @default(autoincrement())
-  name      String
-  ico       String?
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // "Drivecool", "DPD", etc.
+  ico       String?  @unique
   dic       String?
   address   String?
   contact   String?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  depots    Depot[]
-  contracts Contract[]
-  prices    PriceConfig[]
-  proofs    Proof[]
-  invoices  Invoice[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  depots        Depot[]
+  priceConfigs  PriceConfig[]
+  proofs        Proof[]
+  invoices      Invoice[]
+  contracts     Contract[]
 }
 
 model Depot {
   id        Int      @id @default(autoincrement())
   carrierId Int
-  carrier   Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  name      String
-  code      String?
-  type      String?
+  name      String   // "Vratimov", "Nový Bydžov"
+  code      String?  // "CZLC4", "CZTC1"
+  type      String   // "depo", "tridirna", "logisticke_centrum"
   address   String?
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  carrier      Carrier       @relation(fields: [carrierId], references: [id])
+  proofs       Proof[]
   linehaulFrom LinehaulRate[] @relation("FromDepot")
   linehaulTo   LinehaulRate[] @relation("ToDepot")
-  proofs    Proof[]
 
-  @@index([carrierId])
+  @@unique([carrierId, name])
 }
 
+// ============================================================================
+// SMLOUVY A DODATKY
+// ============================================================================
+
 model Contract {
-  id          Int           @id @default(autoincrement())
+  id          Int       @id @default(autoincrement())
   carrierId   Int
-  carrier     Carrier       @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  number      String
-  type        String?
+  number      String    // "Dodatek č. 12"
+  type        String    // "alzabox", "tridirna", "drop20", "xl"
   validFrom   DateTime
   validTo     DateTime?
   documentUrl String?
   notes       String?
-  createdAt   DateTime      @default(now())
-  prices      PriceConfig[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  @@index([carrierId])
+  carrier      Carrier       @relation(fields: [carrierId], references: [id])
+  priceConfigs PriceConfig[]
+
+  @@index([carrierId, validFrom])
 }
 
-model PriceConfig {
-  id           Int            @id @default(autoincrement())
-  carrierId    Int
-  carrier      Carrier        @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  contractId   Int?
-  contract     Contract?      @relation(fields: [contractId], references: [id])
-  type         String
-  validFrom    DateTime
-  validTo      DateTime?
-  isActive     Boolean        @default(true)
-  createdAt    DateTime       @default(now())
-  fixRates     FixRate[]
-  kmRates      KmRate[]
-  depoRates    DepoRate[]
-  linehaulRates LinehaulRate[]
-  bonusRates   BonusRate[]
+// ============================================================================
+// CENÍKY
+// ============================================================================
 
-  @@index([carrierId])
-  @@index([type, validFrom])
+model PriceConfig {
+  id         Int       @id @default(autoincrement())
+  carrierId  Int
+  contractId Int?
+  type       String    // "alzabox", "tridirna", "novy_bydzov", "drop20"
+  validFrom  DateTime
+  validTo    DateTime?
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  carrier       Carrier        @relation(fields: [carrierId], references: [id])
+  contract      Contract?      @relation(fields: [contractId], references: [id])
+  fixRates      FixRate[]
+  kmRates       KmRate[]
+  depoRates     DepoRate[]
+  linehaulRates LinehaulRate[]
+  bonusRates    BonusRate[]
+
+  @@index([carrierId, type, validFrom])
 }
 
 model FixRate {
   id            Int         @id @default(autoincrement())
   priceConfigId Int
-  priceConfig   PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
-  routeType     String
+  routeType     String      // "direct_praha", "direct_vratimov", "lh_dpo", "lh_sd", "lh_sd_spojene"
   rate          Decimal     @db.Decimal(10, 2)
-  createdAt     DateTime    @default(now())
+  description   String?
 
-  @@index([priceConfigId])
+  priceConfig PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([priceConfigId, routeType])
 }
 
 model KmRate {
   id            Int         @id @default(autoincrement())
   priceConfigId Int
-  priceConfig   PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
-  routeType     String?
-  rate          Decimal     @db.Decimal(10, 4)
-  createdAt     DateTime    @default(now())
+  routeType     String      @default("default") // "direct_praha", "direct_vratimov", "default"
+  rate          Decimal     @db.Decimal(10, 2)
 
-  @@index([priceConfigId])
+  priceConfig PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([priceConfigId, routeType])
 }
 
 model DepoRate {
   id            Int         @id @default(autoincrement())
   priceConfigId Int
-  priceConfig   PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
-  depoName      String
-  rateType      String
-  rate          Decimal     @db.Decimal(10, 2)
-  createdAt     DateTime    @default(now())
+  depoName      String      // "Vratimov", "Nový Bydžov"
+  rateType      String      // "hourly", "daily", "monthly", "skladnici", "brigadnik"
+  rate          Decimal     @db.Decimal(12, 2)
+  description   String?
 
-  @@index([priceConfigId])
+  priceConfig PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([priceConfigId, depoName, rateType])
 }
 
 model LinehaulRate {
   id            Int         @id @default(autoincrement())
   priceConfigId Int
-  priceConfig   PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
   fromDepotId   Int?
-  fromDepot     Depot?      @relation("FromDepot", fields: [fromDepotId], references: [id])
   toDepotId     Int?
-  toDepot       Depot?      @relation("ToDepot", fields: [toDepotId], references: [id])
-  fromCode      String?
-  toCode        String?
-  vehicleType   String
+  fromCode      String      // "CZLC4", "CZTC1", "LCU", "LCZ"
+  toCode        String      // "Vratimov", "Nový Bydžov"
+  vehicleType   String      // "kamion", "solo", "dodavka", "dodavka_6300"
   rate          Decimal     @db.Decimal(10, 2)
-  isPosila      Boolean     @default(false)
+  isPosilа      Boolean     @default(false)
   description   String?
+
+  priceConfig PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
+  fromDepot   Depot?      @relation("FromDepot", fields: [fromDepotId], references: [id])
+  toDepot     Depot?      @relation("ToDepot", fields: [toDepotId], references: [id])
 
   @@index([priceConfigId, fromCode, toCode, vehicleType])
 }
 
 model BonusRate {
-  id            Int         @id @default(autoincrement())
-  priceConfigId Int
-  priceConfig   PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
-  qualityMin    Decimal     @db.Decimal(5, 2)
-  qualityMax    Decimal     @db.Decimal(5, 2)
-  bonusAmount   Decimal     @db.Decimal(10, 2)
-  totalWithBonus Decimal    @db.Decimal(10, 2)
-  createdAt     DateTime    @default(now())
+  id              Int         @id @default(autoincrement())
+  priceConfigId   Int
+  qualityMin      Decimal     @db.Decimal(5, 2) // e.g., 98.00
+  qualityMax      Decimal?    @db.Decimal(5, 2)
+  bonusAmount     Decimal     @db.Decimal(10, 2)
+  totalWithBonus  Decimal?    @db.Decimal(12, 2)
 
-  @@index([priceConfigId])
+  priceConfig PriceConfig @relation(fields: [priceConfigId], references: [id], onDelete: Cascade)
+
+  @@index([priceConfigId, qualityMin])
 }
 
+// ============================================================================
+// PROOFY (měsíční podklady od dopravce)
+// ============================================================================
+
 model Proof {
-  id             Int       @id @default(autoincrement())
-  carrierId      Int
-  carrier        Carrier   @relation(fields: [carrierId], references: [id], onDelete: Cascade)
-  depotId        Int?
-  depot          Depot?    @relation(fields: [depotId], references: [id])
-  period         String
-  periodDate     DateTime
-  fileName       String?
-  fileUrl        String?
-  status         String    @default("pending")
-  totalFix       Decimal?  @db.Decimal(12, 2)
-  totalKm        Decimal?  @db.Decimal(12, 2)
-  totalLinehaul  Decimal?  @db.Decimal(12, 2)
-  totalDepo      Decimal?  @db.Decimal(12, 2)
-  totalBonus     Decimal?  @db.Decimal(12, 2)
-  totalPenalty   Decimal?  @db.Decimal(12, 2)
-  grandTotal     Decimal?  @db.Decimal(12, 2)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id          Int      @id @default(autoincrement())
+  carrierId   Int
+  depotId     Int?
+  period      String   // "10/2025"
+  periodDate  DateTime // 2025-10-01
+  fileName    String?
+  fileUrl     String?
+  status      String   @default("pending") // "pending", "verified", "disputed"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Celkové částky
+  totalFix      Decimal? @db.Decimal(12, 2)
+  totalKm       Decimal? @db.Decimal(12, 2)
+  totalLinehaul Decimal? @db.Decimal(12, 2)
+  totalDepo     Decimal? @db.Decimal(12, 2)
+  totalPenalty  Decimal? @db.Decimal(12, 2)
+  grandTotal    Decimal? @db.Decimal(12, 2)
+
+  // Počty
+  totalDays     Int?
+  totalKmCount  Decimal? @db.Decimal(12, 3)
+  totalRoutes   Int?
+
+  carrier        Carrier          @relation(fields: [carrierId], references: [id])
+  depot          Depot?           @relation(fields: [depotId], references: [id])
   routeDetails   ProofRouteDetail[]
   linehaulDetails ProofLinehaulDetail[]
   depoDetails    ProofDepoDetail[]
   invoices       Invoice[]
   analyses       ProofAnalysis[]
 
-  @@index([carrierId])
-  @@index([period])
+  @@unique([carrierId, period])
+  @@index([period, carrierId])
 }
 
 model ProofRouteDetail {
   id        Int     @id @default(autoincrement())
   proofId   Int
-  proof     Proof   @relation(fields: [proofId], references: [id], onDelete: Cascade)
-  routeType String
+  routeType String  // "DR", "LH_DPO", "LH_SD", "LH_SD_SPOJENE"
   count     Int
   rate      Decimal @db.Decimal(10, 2)
   amount    Decimal @db.Decimal(12, 2)
+
+  proof Proof @relation(fields: [proofId], references: [id], onDelete: Cascade)
 
   @@index([proofId])
 }
@@ -186,93 +222,132 @@ model ProofRouteDetail {
 model ProofLinehaulDetail {
   id          Int     @id @default(autoincrement())
   proofId     Int
-  proof       Proof   @relation(fields: [proofId], references: [id], onDelete: Cascade)
-  description String
-  fromCode    String?
-  toCode      String?
-  vehicleType String?
-  days        Int?
-  perDay      Int?
+  description String  // "CZLC4 2x Kamion DPO"
+  fromCode    String? // "CZLC4", "CZTC1"
+  toDepot     String? // "Vratimov", "Nový Bydžov"
+  vehicleType String? // "kamion", "solo", "dodavka"
+  days        Int
+  perDay      Int
   rate        Decimal @db.Decimal(10, 2)
   total       Decimal @db.Decimal(12, 2)
+
+  proof Proof @relation(fields: [proofId], references: [id], onDelete: Cascade)
 
   @@index([proofId])
 }
 
 model ProofDepoDetail {
-  id       Int     @id @default(autoincrement())
-  proofId  Int
-  proof    Proof   @relation(fields: [proofId], references: [id], onDelete: Cascade)
-  depoName String
-  rateType String
-  days     Int?
-  rate     Decimal @db.Decimal(10, 2)
-  amount   Decimal @db.Decimal(12, 2)
+  id          Int     @id @default(autoincrement())
+  proofId     Int
+  depoName    String  // "Vratimov", "Nový Bydžov"
+  rateType    String  // "daily", "monthly", "skladnici"
+  days        Int?
+  rate        Decimal @db.Decimal(12, 2)
+  amount      Decimal @db.Decimal(12, 2)
+  description String?
+
+  proof Proof @relation(fields: [proofId], references: [id], onDelete: Cascade)
 
   @@index([proofId])
 }
 
+// ============================================================================
+// FAKTURY
+// ============================================================================
+
 model Invoice {
   id              Int      @id @default(autoincrement())
   carrierId       Int
-  carrier         Carrier  @relation(fields: [carrierId], references: [id], onDelete: Cascade)
   proofId         Int?
-  proof           Proof?   @relation(fields: [proofId], references: [id])
   invoiceNumber   String
-  period          String
+  period          String   // "10/2025"
+  periodDate      DateTime
   issueDate       DateTime?
   dueDate         DateTime?
-  totalWithoutVat Decimal? @db.Decimal(12, 2)
-  vatAmount       Decimal? @db.Decimal(12, 2)
-  totalWithVat    Decimal? @db.Decimal(12, 2)
-  status          String   @default("pending")
+  fileName        String?
   fileUrl         String?
+  status          String   @default("pending") // "pending", "matched", "disputed", "paid"
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
-  items           InvoiceItem[]
 
-  @@index([carrierId])
-  @@index([period])
-  @@index([proofId])
+  totalWithoutVat Decimal @db.Decimal(12, 2)
+  vatAmount       Decimal @db.Decimal(12, 2)
+  totalWithVat    Decimal @db.Decimal(12, 2)
+
+  carrier Carrier        @relation(fields: [carrierId], references: [id])
+  proof   Proof?         @relation(fields: [proofId], references: [id])
+  items   InvoiceItem[]
+
+  @@unique([carrierId, invoiceNumber])
+  @@index([period, carrierId])
 }
 
 model InvoiceItem {
   id          Int     @id @default(autoincrement())
   invoiceId   Int
-  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  itemType    String
+  itemType    String  // "fix", "km", "linehaul", "depo"
   description String?
   amount      Decimal @db.Decimal(12, 2)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
 }
 
+// ============================================================================
+// ANALÝZY A REPORTY
+// ============================================================================
+
 model ProofAnalysis {
-  id              Int      @id @default(autoincrement())
-  proofId         Int
-  proof           Proof    @relation(fields: [proofId], references: [id], onDelete: Cascade)
-  status          String
-  errorsJson      String?
-  warningsJson    String?
-  okJson          String?
-  diffFix         Decimal? @db.Decimal(12, 2)
-  diffKm          Decimal? @db.Decimal(12, 2)
-  diffLinehaul    Decimal? @db.Decimal(12, 2)
-  diffDepo        Decimal? @db.Decimal(12, 2)
-  missingRatesJson String?
-  createdAt       DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  proofId   Int
+  createdAt DateTime @default(now())
+
+  // Výsledky analýzy
+  status           String // "ok", "warning", "error"
+  errorsJson       Json?  // Array of error messages
+  warningsJson     Json?  // Array of warning messages
+  okJson           Json?  // Array of OK messages
+  
+  // Rozdíly
+  fixExpected      Decimal? @db.Decimal(12, 2)
+  fixActual        Decimal? @db.Decimal(12, 2)
+  fixDifference    Decimal? @db.Decimal(12, 2)
+  unexplainedFix   Decimal? @db.Decimal(12, 2)
+  
+  kmExpected       Decimal? @db.Decimal(12, 2)
+  kmActual         Decimal? @db.Decimal(12, 2)
+  kmDifference     Decimal? @db.Decimal(12, 2)
+  
+  linehaulExpected Decimal? @db.Decimal(12, 2)
+  linehaulActual   Decimal? @db.Decimal(12, 2)
+  linehaulDiff     Decimal? @db.Decimal(12, 2)
+  
+  depoExpected     Decimal? @db.Decimal(12, 2)
+  depoActual       Decimal? @db.Decimal(12, 2)
+  depoDifference   Decimal? @db.Decimal(12, 2)
+
+  // Chybějící sazby
+  missingRatesJson Json? // Array of missing rate descriptions
+
+  proof Proof @relation(fields: [proofId], references: [id], onDelete: Cascade)
 
   @@index([proofId])
 }
 
+// ============================================================================
+// AUDIT LOG
+// ============================================================================
+
 model AuditLog {
   id         Int      @id @default(autoincrement())
-  entityType String
+  entityType String   // "proof", "invoice", "price_config"
   entityId   Int
-  action     String
+  action     String   // "create", "update", "delete", "verify"
   userId     String?
-  changes    String?
+  changes    Json?
   createdAt  DateTime @default(now())
 
   @@index([entityType, entityId])
+  @@index([createdAt])
 }
