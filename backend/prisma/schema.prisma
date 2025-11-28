@@ -138,8 +138,8 @@ model LinehaulRate {
   priceConfigId Int
   fromDepotId   Int?
   toDepotId     Int?
-  fromCode      String      // "CZLC4", "CZTC1", "LCU", "LCZ"
-  toCode        String      // "Vratimov", "Nový Bydžov"
+  fromCode      String?      // "CZLC4", "CZTC1", "LCU", "LCZ"
+  toCode        String?      // "Vratimov", "Nový Bydžov"
   vehicleType   String      // "kamion", "solo", "dodavka", "dodavka_6300"
   rate          Decimal     @db.Decimal(10, 2)
   isPosilа      Boolean     @default(false)
