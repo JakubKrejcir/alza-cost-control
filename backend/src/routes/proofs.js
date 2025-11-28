@@ -183,8 +183,6 @@ function parseProofFromSumar(data) {
     totalPenalty: findValue('Pokuty'),
     grandTotal: findValue('Celková částka'),
     totalDepo: findValue('Odježděných dní'),
-    totalKmCount: findValue('Výpočet KM'),
-    totalRoutes: null
   };
   
   // Route details
