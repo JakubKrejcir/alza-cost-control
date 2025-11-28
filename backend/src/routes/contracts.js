@@ -37,13 +37,14 @@ function extractCarrierInfo(text) {
   }
 
   // Find carrier name - look for "s.r.o." pattern near the IČO we found
-  if (carrier.ico) {
-    const namePattern = new RegExp(`([A-Za-zÀ-ž][A-Za-zÀ-ž\\s]+(?:s\\.r\\.o\\.|a\\.s\\.))\\s*(?:se sídlem|IČO[:\\s]*${carrier.ico})`, 'i');
-    const nameMatch = text.match(namePattern);
-    if (nameMatch) {
-      carrier.name = nameMatch[1].trim();
-    }
+if (carrier.ico) {
+  const namePattern = new RegExp(`([A-Za-zÀ-ž][A-Za-zÀ-ž\\s]+(?:s\\.r\\.o\\.|a\\.s\\.))\\s*(?:se sídlem|IČO[:\\s]*${carrier.ico})`, 'i');
+  const nameMatch = text.match(namePattern);
+  if (nameMatch) {
+    // Remove leading "a " if present (conjunction between Alza and carrier)
+    carrier.name = nameMatch[1].trim().replace(/^a\s+/i, '');
   }
+}
 
   // Alternative name extraction
   if (!carrier.name) {
