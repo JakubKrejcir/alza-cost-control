@@ -98,10 +98,10 @@ router.post('/upload', upload.single('file'), async (req, res) => {
     const [month, year] = period.split('/');
     const periodDate = new Date(parseInt(year), parseInt(month) - 1, 1);
     
-    // Check for existing proof
-    const existing = await prisma.proof.findUnique({
-      where: { carrierId_period: { carrierId: parseInt(carrierId), period } }
-    });
+// Check for existing proof
+const existing = await prisma.proof.findFirst({
+  where: { carrierId: parseInt(carrierId), period }
+});
     
     if (existing) {
       // Update existing
