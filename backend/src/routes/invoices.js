@@ -24,8 +24,7 @@ router.get('/', async (req, res) => {
         proof: { select: { id: true, period: true } },
         items: true
       },
-      orderBy: { periodDate: 'desc' }
-    });
+orderBy: { createdAt: 'desc' }    });
     
     res.json(invoices);
   } catch (error) {
