@@ -22,14 +22,15 @@ app = FastAPI(
     title="Alza Cost Control API",
     description="Backend API pro kontrolu nákladů na dopravu",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    redirect_slashes=False  # Disable automatic redirects
 )
 
 # CORS - allow all origins for now
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # Must be False when allow_origins is "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
