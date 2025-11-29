@@ -15,12 +15,14 @@ import {
   Settings,
   LogOut,
   HelpCircle,
-  ChevronDown
+  ChevronDown,
+  Route
 } from 'lucide-react'
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/upload', label: 'Nahrát', icon: Upload },
+  { path: '/plans', label: 'Plánování', icon: Route },
   { path: '/contracts', label: 'Smlouvy', icon: FileText },
   { path: '/prices', label: 'Ceníky', icon: DollarSign },
   { path: '/history', label: 'Historie', icon: Calendar },

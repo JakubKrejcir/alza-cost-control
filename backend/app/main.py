@@ -9,11 +9,16 @@ from fastapi.responses import JSONResponse
 
 from app.database import engine, Base
 from app.routers import carriers, depots, contracts, prices, proofs, invoices, analysis
+from app.routers import plans
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup - tables already exist from Prisma, no need to create
+    # Startup - create tables if needed
+    async with engine.begin() as conn:
+        # Import plan models to register them
+        from app.routers.plans import Plan, PlanRoute, PlanComparison
+        await conn.run_sync(Base.metadata.create_all)
     yield
     # Shutdown: dispose engine
     await engine.dispose()
@@ -64,3 +69,4 @@ app.include_router(prices.router, prefix="/api/prices", tags=["Prices"])
 app.include_router(proofs.router, prefix="/api/proofs", tags=["Proofs"])
 app.include_router(invoices.router, prefix="/api/invoices", tags=["Invoices"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
+app.include_router(plans.router, prefix="/api/plans", tags=["Plans"])
