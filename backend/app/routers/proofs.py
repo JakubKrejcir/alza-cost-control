@@ -20,60 +20,6 @@ from app.schemas import ProofResponse, ProofDetailResponse, ProofUpdate
 router = APIRouter()
 
 
-@router.get("/", response_model=List[ProofResponse])
-async def get_proofs(
-    carrier_id: Optional[int] = Query(None),
-    period: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get all proofs with filters"""
-    query = select(Proof).options(
-        selectinload(Proof.carrier),
-        selectinload(Proof.depot)
-    )
-    
-    filters = []
-    if carrier_id:
-        filters.append(Proof.carrier_id == carrier_id)
-    if period:
-        filters.append(Proof.period == period)
-    if status:
-        filters.append(Proof.status == status)
-    
-    if filters:
-        query = query.where(and_(*filters))
-    
-    query = query.order_by(Proof.period_date.desc())
-    
-    result = await db.execute(query)
-    return result.scalars().all()
-
-
-@router.get("/{proof_id}", response_model=ProofDetailResponse)
-async def get_proof(proof_id: int, db: AsyncSession = Depends(get_db)):
-    """Get single proof by ID with all details"""
-    result = await db.execute(
-        select(Proof)
-        .options(
-            selectinload(Proof.carrier),
-            selectinload(Proof.depot),
-            selectinload(Proof.route_details),
-            selectinload(Proof.linehaul_details),
-            selectinload(Proof.depo_details),
-            selectinload(Proof.invoices),
-            selectinload(Proof.analyses),
-        )
-        .where(Proof.id == proof_id)
-    )
-    proof = result.scalar_one_or_none()
-    
-    if not proof:
-        raise HTTPException(status_code=404, detail="Proof not found")
-    
-    return proof
-
-
 def parse_proof_from_xlsx(file_content: bytes) -> dict:
     """Parse proof data from XLSX Sumar sheet"""
     wb = openpyxl.load_workbook(BytesIO(file_content), data_only=True)
@@ -97,20 +43,18 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
         'depo_details': [],
     }
     
-    # Helper to find row by label in column B
     def find_row_by_label(label: str) -> Optional[int]:
         for row in range(1, sheet.max_row + 1):
-            cell_value = sheet.cell(row=row, column=2).value  # Column B
+            cell_value = sheet.cell(row=row, column=2).value
             if cell_value and label in str(cell_value):
                 return row
         return None
     
-    # Helper to get value from column D of found row
     def get_value_by_label(label: str) -> Optional[float]:
         row = find_row_by_label(label)
         if row is None:
             return None
-        value = sheet.cell(row=row, column=4).value  # Column D
+        value = sheet.cell(row=row, column=4).value
         if value is not None:
             try:
                 return float(value)
@@ -118,7 +62,6 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
                 return None
         return None
     
-    # Parse totals
     result['totals']['total_fix'] = get_value_by_label('Cena FIX')
     result['totals']['total_km'] = get_value_by_label('Cena KM')
     result['totals']['total_linehaul'] = get_value_by_label('Linehaul')
@@ -126,7 +69,6 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
     result['totals']['total_penalty'] = get_value_by_label('Pokuty')
     result['totals']['grand_total'] = get_value_by_label('Celková částka')
     
-    # Parse route details
     route_types = [
         {'label': 'Počet tras LastMile při DR', 'type': 'DR', 'rate_label': 'Cena DR'},
         {'label': 'Počet tras LastMile při DPO LH', 'type': 'LH_DPO', 'rate_label': 'Cena LastMile při LH DPO'},
@@ -137,7 +79,6 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
     for rt in route_types:
         count = get_value_by_label(rt['label'])
         rate = get_value_by_label(rt['rate_label'])
-        
         if count and count > 0:
             rate_val = rate or 0
             result['route_details'].append({
@@ -147,7 +88,6 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
                 'amount': Decimal(str(int(count) * float(rate_val)))
             })
     
-    # Parse DEPO details
     depo_vratimov = get_value_by_label('DEPO Vratimov / Den')
     depo_nb_mesiac = get_value_by_label('DEPO Nový Bydžov / Mesiac')
     skladnici_nb = get_value_by_label('3 Skladníci Nový Bydžov / Mesiac')
@@ -183,6 +123,54 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
     return result
 
 
+async def get_proof_by_id(proof_id: int, db: AsyncSession):
+    """Helper to get proof with all details"""
+    result = await db.execute(
+        select(Proof)
+        .options(
+            selectinload(Proof.carrier),
+            selectinload(Proof.depot),
+            selectinload(Proof.route_details),
+            selectinload(Proof.linehaul_details),
+            selectinload(Proof.depo_details),
+            selectinload(Proof.invoices),
+            selectinload(Proof.analyses),
+        )
+        .where(Proof.id == proof_id)
+    )
+    return result.scalar_one_or_none()
+
+
+@router.get("", response_model=List[ProofResponse])
+async def get_proofs(
+    carrier_id: Optional[int] = Query(None),
+    period: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all proofs with filters"""
+    query = select(Proof).options(
+        selectinload(Proof.carrier),
+        selectinload(Proof.depot)
+    )
+    
+    filters = []
+    if carrier_id:
+        filters.append(Proof.carrier_id == carrier_id)
+    if period:
+        filters.append(Proof.period == period)
+    if status:
+        filters.append(Proof.status == status)
+    
+    if filters:
+        query = query.where(and_(*filters))
+    
+    query = query.order_by(Proof.period_date.desc())
+    
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
 @router.post("/upload", response_model=ProofDetailResponse, status_code=201)
 async def upload_proof(
     file: UploadFile = File(...),
@@ -191,17 +179,14 @@ async def upload_proof(
     db: AsyncSession = Depends(get_db)
 ):
     """Upload and parse proof XLSX"""
-    # Verify carrier exists
     carrier_result = await db.execute(
         select(Carrier).where(Carrier.id == carrier_id)
     )
     if not carrier_result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Carrier not found")
     
-    # Read file
     content = await file.read()
     
-    # Parse XLSX
     try:
         proof_data = parse_proof_from_xlsx(content)
     except ValueError as e:
@@ -209,14 +194,12 @@ async def upload_proof(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse XLSX: {str(e)}")
     
-    # Parse period date
     try:
         month, year = period.split('/')
         period_date = datetime(int(year), int(month), 1)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid period format. Use MM/YYYY")
     
-    # Check for existing proof
     existing_result = await db.execute(
         select(Proof).where(
             and_(Proof.carrier_id == carrier_id, Proof.period == period)
@@ -225,8 +208,6 @@ async def upload_proof(
     existing = existing_result.scalar_one_or_none()
     
     if existing:
-        # Update existing proof
-        # Delete old details
         await db.execute(
             ProofRouteDetail.__table__.delete().where(ProofRouteDetail.proof_id == existing.id)
         )
@@ -237,27 +218,22 @@ async def upload_proof(
             ProofDepoDetail.__table__.delete().where(ProofDepoDetail.proof_id == existing.id)
         )
         
-        # Update totals
         for field, value in proof_data['totals'].items():
             if value is not None:
                 setattr(existing, field, Decimal(str(value)))
         
         existing.file_name = file.filename
         
-        # Add new details
         for detail in proof_data['route_details']:
             db.add(ProofRouteDetail(proof_id=existing.id, **detail))
-        
         for detail in proof_data['linehaul_details']:
             db.add(ProofLinehaulDetail(proof_id=existing.id, **detail))
-        
         for detail in proof_data['depo_details']:
             db.add(ProofDepoDetail(proof_id=existing.id, **detail))
         
         await db.commit()
-        return await get_proof(existing.id, db)
+        return await get_proof_by_id(existing.id, db)
     
-    # Create new proof
     proof = Proof(
         carrier_id=carrier_id,
         period=period,
@@ -273,18 +249,24 @@ async def upload_proof(
     db.add(proof)
     await db.flush()
     
-    # Add details
     for detail in proof_data['route_details']:
         db.add(ProofRouteDetail(proof_id=proof.id, **detail))
-    
     for detail in proof_data['linehaul_details']:
         db.add(ProofLinehaulDetail(proof_id=proof.id, **detail))
-    
     for detail in proof_data['depo_details']:
         db.add(ProofDepoDetail(proof_id=proof.id, **detail))
     
     await db.commit()
-    return await get_proof(proof.id, db)
+    return await get_proof_by_id(proof.id, db)
+
+
+@router.get("/{proof_id}", response_model=ProofDetailResponse)
+async def get_proof(proof_id: int, db: AsyncSession = Depends(get_db)):
+    """Get single proof by ID with all details"""
+    proof = await get_proof_by_id(proof_id, db)
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    return proof
 
 
 @router.put("/{proof_id}", response_model=ProofResponse)

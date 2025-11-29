@@ -22,28 +22,21 @@ router = APIRouter()
 def extract_carrier_info(text: str) -> dict:
     """Extract carrier info from PDF text"""
     carrier = {
-        'name': None,
-        'ico': None,
-        'dic': None,
-        'address': None,
-        'bank_account': None
+        'name': None, 'ico': None, 'dic': None, 'address': None, 'bank_account': None
     }
     
-    # Extract IČO (8 digits) - find the one that's NOT Alza (27082440)
     ico_matches = re.findall(r'IČO?[:\s]*(\d{8})', text, re.IGNORECASE)
     for ico in ico_matches:
         if ico != '27082440':
             carrier['ico'] = ico
             break
     
-    # Extract DIČ
     dic_matches = re.findall(r'DIČ[:\s]*(CZ\d{8,10})', text, re.IGNORECASE)
     for dic in dic_matches:
         if dic.upper() != 'CZ27082440':
             carrier['dic'] = dic.upper()
             break
     
-    # Find carrier name - look for "s.r.o." or "a.s." pattern
     if carrier['ico']:
         name_pattern = re.search(
             rf'([A-Za-zÀ-ž][A-Za-zÀ-ž\s]+(?:s\.r\.o\.|a\.s\.))\s*(?:se\s+sídlem|IČO?[:\s]*{carrier["ico"]})',
@@ -51,10 +44,8 @@ def extract_carrier_info(text: str) -> dict:
         )
         if name_pattern:
             carrier['name'] = name_pattern.group(1).strip()
-            # Remove leading "a " if present
             carrier['name'] = re.sub(r'^a\s+', '', carrier['name'], flags=re.IGNORECASE)
     
-    # Alternative name extraction
     if not carrier['name']:
         alt_match = re.search(
             r'(?:Za\s+)?([A-Za-zÀ-ž][A-Za-zÀ-ž\s]+(?:s\.r\.o\.|a\.s\.))\s*\n.*jednatel',
@@ -63,14 +54,12 @@ def extract_carrier_info(text: str) -> dict:
         if alt_match and 'alza' not in alt_match.group(1).lower():
             carrier['name'] = alt_match.group(1).strip()
     
-    # Extract address
     address_matches = re.findall(r'se\s+sídlem[:\s]*([^\n]+)', text, re.IGNORECASE)
     for addr in address_matches:
-        if 'jankovcova' not in addr.lower():  # Not Alza
+        if 'jankovcova' not in addr.lower():
             carrier['address'] = addr.strip()
             break
     
-    # Extract bank account
     bank_match = re.search(r'č\.\s*bankovního\s*účtu[:\s]*(\d+/\d+)', text, re.IGNORECASE)
     if bank_match:
         carrier['bank_account'] = bank_match.group(1)
@@ -80,19 +69,12 @@ def extract_carrier_info(text: str) -> dict:
 
 def extract_contract_info(text: str) -> dict:
     """Extract contract info from PDF text"""
-    contract = {
-        'number': None,
-        'type': None,
-        'valid_from': None,
-        'service_type': None
-    }
+    contract = {'number': None, 'type': None, 'valid_from': None, 'service_type': None}
     
-    # Extract "Dodatek č. X"
     dodatek_match = re.search(r'Dodatek\s*č\.\s*(\d+)', text, re.IGNORECASE)
     if dodatek_match:
         contract['number'] = f"Dodatek č. {dodatek_match.group(1)}"
     
-    # Extract effective date
     date_match = re.search(
         r'(?:účinnosti\s*dnem|platn[ýé]\s*od)[:\s]*(\d{1,2})\.(\d{1,2})\.(\d{4})',
         text, re.IGNORECASE
@@ -101,45 +83,25 @@ def extract_contract_info(text: str) -> dict:
         day, month, year = date_match.groups()
         contract['valid_from'] = datetime(int(year), int(month), int(day))
     
-    # Extract service type
     if 'DROP 2.0' in text:
         contract['service_type'] = 'DROP 2.0'
         contract['type'] = 'DROP'
     elif 'AlzaBox' in text:
         contract['service_type'] = 'AlzaBox'
         contract['type'] = 'AlzaBox'
-    elif 'Třídírna' in text or 'Tridirna' in text:
-        contract['service_type'] = 'Třídírna'
-        contract['type'] = 'Třídírna'
-    elif 'Nový Bydžov' in text:
-        contract['service_type'] = 'Nový Bydžov'
-        contract['type'] = 'Depo'
     
     return contract
 
 
 def extract_price_rates(text: str) -> dict:
     """Extract price rates from PDF text"""
-    rates = {
-        'fix_rates': [],
-        'km_rates': [],
-        'depo_rates': []
-    }
+    rates = {'fix_rates': [], 'km_rates': [], 'depo_rates': []}
     
-    # Extract DROP 2.0 route rates
     route_patterns = [
         (r'^A\s+(\d[\d\s]*)[,-]', 'DROP_A'),
         (r'^B\s+(\d[\d\s]*)[,-]', 'DROP_B'),
         (r'^C\s+(\d[\d\s]*)[,-]', 'DROP_C'),
-        (r'^D\s+(\d[\d\s]*)[,-]', 'DROP_D'),
-        (r'^E\s+(\d[\d\s]*)[,-]', 'DROP_E'),
-        (r'^F\s+(\d[\d\s]*)[,-]', 'DROP_F'),
-        (r'^G\s+(\d[\d\s]*)[,-]', 'DROP_G'),
-        (r'^H\s+(\d[\d\s]*)[,-]', 'DROP_H'),
-        (r'^I\s+(\d[\d\s]*)[,-]', 'DROP_I'),
         (r'Dopoledne\s+(\d[\d\s]*)[,-]', 'DROP_Dopoledne'),
-        (r'Posila[^\d]*(\d[\d\s]*)[,-]', 'DROP_Posila'),
-        (r'Sobotn[íi]\s+trasa\s+(\d[\d\s]*)[,-]', 'DROP_Sobota'),
     ]
     
     for pattern, route_type in route_patterns:
@@ -153,24 +115,6 @@ def extract_price_rates(text: str) -> dict:
             except ValueError:
                 pass
     
-    # Extract FIX rates (DIRECT Praha, DIRECT Vratimov)
-    direct_praha = re.search(r'DIRECT\s*Praha[^\d]*(\d[\d\s]*)', text, re.IGNORECASE)
-    if direct_praha:
-        try:
-            rate = int(direct_praha.group(1).replace(' ', ''))
-            rates['fix_rates'].append({'route_type': 'FIX_DIRECT_Praha', 'rate': rate})
-        except ValueError:
-            pass
-    
-    direct_vratimov = re.search(r'DIRECT\s*Vratimov[^\d]*(\d[\d\s]*)', text, re.IGNORECASE)
-    if direct_vratimov:
-        try:
-            rate = int(direct_vratimov.group(1).replace(' ', ''))
-            rates['fix_rates'].append({'route_type': 'FIX_DIRECT_Vratimov', 'rate': rate})
-        except ValueError:
-            pass
-    
-    # Extract Kč/km rate
     km_match = re.search(r'(\d+[,.]?\d*)\s*Kč\s*/\s*km', text, re.IGNORECASE)
     if km_match:
         try:
@@ -179,19 +123,12 @@ def extract_price_rates(text: str) -> dict:
         except ValueError:
             pass
     
-    # Extract DEPO hourly rate
-    depo_hourly = re.search(r'(?:hodinová\s*sazba|sazba\s*DEPO)[^\d]*(\d[\d\s]*)\s*Kč', text, re.IGNORECASE)
-    if depo_hourly:
-        try:
-            rate = int(depo_hourly.group(1).replace(' ', ''))
-            rates['depo_rates'].append({'depo_name': 'standard', 'rate_type': 'hourly', 'rate': rate})
-        except ValueError:
-            pass
-    
     return rates
 
 
-@router.get("/", response_model=List[ContractResponse])
+# ==== STATIC ROUTES FIRST ====
+
+@router.get("", response_model=List[ContractResponse])
 async def get_contracts(
     carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
@@ -208,32 +145,12 @@ async def get_contracts(
     return result.scalars().all()
 
 
-@router.get("/{contract_id}", response_model=ContractResponse)
-async def get_contract(contract_id: int, db: AsyncSession = Depends(get_db)):
-    """Get single contract by ID with price configs"""
-    result = await db.execute(
-        select(Contract)
-        .options(
-            selectinload(Contract.carrier),
-            selectinload(Contract.prices)
-        )
-        .where(Contract.id == contract_id)
-    )
-    contract = result.scalar_one_or_none()
-    
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
-    
-    return contract
-
-
-@router.post("/", response_model=ContractResponse, status_code=201)
+@router.post("", response_model=ContractResponse, status_code=201)
 async def create_contract(
     contract_data: ContractCreate, 
     db: AsyncSession = Depends(get_db)
 ):
     """Create new contract"""
-    # Verify carrier exists
     carrier_result = await db.execute(
         select(Carrier).where(Carrier.id == contract_data.carrier_id)
     )
@@ -247,48 +164,12 @@ async def create_contract(
     return contract
 
 
-@router.put("/{contract_id}", response_model=ContractResponse)
-async def update_contract(
-    contract_id: int, 
-    contract_data: ContractUpdate, 
-    db: AsyncSession = Depends(get_db)
-):
-    """Update contract"""
-    result = await db.execute(select(Contract).where(Contract.id == contract_id))
-    contract = result.scalar_one_or_none()
-    
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
-    
-    update_data = contract_data.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(contract, field, value)
-    
-    await db.commit()
-    await db.refresh(contract)
-    return contract
-
-
-@router.delete("/{contract_id}", status_code=204)
-async def delete_contract(contract_id: int, db: AsyncSession = Depends(get_db)):
-    """Delete contract"""
-    result = await db.execute(select(Contract).where(Contract.id == contract_id))
-    contract = result.scalar_one_or_none()
-    
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
-    
-    await db.delete(contract)
-    await db.commit()
-
-
 @router.post("/upload-pdf")
 async def upload_contract_pdf(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
     """Upload and parse contract PDF"""
-    # Read PDF
     content = await file.read()
     
     try:
@@ -299,19 +180,16 @@ async def upload_contract_pdf(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Chyba při čtení PDF: {str(e)}")
     
-    # Extract data
     carrier_info = extract_carrier_info(text)
     contract_info = extract_contract_info(text)
     price_rates = extract_price_rates(text)
     
-    # Validate
     if not carrier_info['ico']:
         raise HTTPException(
             status_code=400,
             detail="Nepodařilo se extrahovat IČO dopravce z dokumentu"
         )
     
-    # Find or create carrier
     carrier_result = await db.execute(
         select(Carrier).where(Carrier.ico == carrier_info['ico'])
     )
@@ -329,7 +207,6 @@ async def upload_contract_pdf(
         db.add(carrier)
         await db.flush()
     
-    # Create contract
     contract = Contract(
         carrier_id=carrier.id,
         number=contract_info['number'] or 'Neznámý dodatek',
@@ -341,7 +218,6 @@ async def upload_contract_pdf(
     db.add(contract)
     await db.flush()
     
-    # Create price config if we have rates
     price_config = None
     has_rates = (
         len(price_rates['fix_rates']) > 0 or
@@ -360,7 +236,6 @@ async def upload_contract_pdf(
         db.add(price_config)
         await db.flush()
         
-        # Add rates
         for rate in price_rates['fix_rates']:
             db.add(FixRate(
                 price_config_id=price_config.id,
@@ -433,7 +308,6 @@ async def parse_preview(
     contract_info = extract_contract_info(text)
     price_rates = extract_price_rates(text)
     
-    # Check if carrier exists
     existing_carrier = None
     if carrier_info['ico']:
         result = await db.execute(
@@ -469,3 +343,59 @@ async def parse_preview(
         },
         'rawTextPreview': text[:2000]
     }
+
+
+# ==== DYNAMIC ROUTES LAST ====
+
+@router.get("/{contract_id}", response_model=ContractResponse)
+async def get_contract(contract_id: int, db: AsyncSession = Depends(get_db)):
+    """Get single contract by ID with price configs"""
+    result = await db.execute(
+        select(Contract)
+        .options(
+            selectinload(Contract.carrier),
+            selectinload(Contract.prices)
+        )
+        .where(Contract.id == contract_id)
+    )
+    contract = result.scalar_one_or_none()
+    
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    return contract
+
+
+@router.put("/{contract_id}", response_model=ContractResponse)
+async def update_contract(
+    contract_id: int, 
+    contract_data: ContractUpdate, 
+    db: AsyncSession = Depends(get_db)
+):
+    """Update contract"""
+    result = await db.execute(select(Contract).where(Contract.id == contract_id))
+    contract = result.scalar_one_or_none()
+    
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    update_data = contract_data.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(contract, field, value)
+    
+    await db.commit()
+    await db.refresh(contract)
+    return contract
+
+
+@router.delete("/{contract_id}", status_code=204)
+async def delete_contract(contract_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete contract"""
+    result = await db.execute(select(Contract).where(Contract.id == contract_id))
+    contract = result.scalar_one_or_none()
+    
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+    
+    await db.delete(contract)
+    await db.commit()
