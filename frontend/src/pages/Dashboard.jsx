@@ -1,9 +1,21 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { format, subMonths } from 'date-fns'
 import { cs } from 'date-fns/locale'
-import { AlertCircle, CheckCircle, AlertTriangle, FileText, TrendingUp } from 'lucide-react'
-import { analysis, proofs, invoices } from '../lib/api'
+import { 
+  TrendingUp, 
+  TrendingDown,
+  CheckCircle, 
+  AlertTriangle, 
+  FileText, 
+  Calendar,
+  ChevronRight,
+  MoreVertical,
+  Activity,
+  PieChart
+} from 'lucide-react'
+import { analysis, proofs, invoices, carriers } from '../lib/api'
 
 function formatCZK(amount) {
   if (amount == null) return '—'
@@ -12,6 +24,13 @@ function formatCZK(amount) {
     currency: 'CZK',
     maximumFractionDigits: 0 
   }).format(amount)
+}
+
+function formatShort(amount) {
+  if (amount == null) return '—'
+  if (amount >= 1000000) return `${(amount / 1000000).toFixed(1)}M`
+  if (amount >= 1000) return `${(amount / 1000).toFixed(0)}K`
+  return amount.toString()
 }
 
 function getPeriodOptions() {
@@ -24,12 +43,50 @@ function getPeriodOptions() {
   return options
 }
 
+// Simple donut chart component
+function DonutChart({ value, max, color, size = 120 }) {
+  const percentage = Math.round((value / max) * 100) || 0
+  const radius = (size - 12) / 2
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (percentage / 100) * circumference
+  
+  return (
+    <div className="progress-ring" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth="10"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth="10"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div className="progress-ring-value">
+        <span className="text-2xl font-bold">{percentage}%</span>
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
+  const navigate = useNavigate()
   const [selectedPeriod, setSelectedPeriod] = useState(getPeriodOptions()[0])
 
-  const { data: dashboardData, isLoading } = useQuery({
-    queryKey: ['dashboard', selectedPeriod],
-    queryFn: () => analysis.getDashboard({ period: selectedPeriod })
+  const { data: carrierList } = useQuery({
+    queryKey: ['carriers'],
+    queryFn: carriers.getAll
   })
 
   const { data: periodProofs } = useQuery({
@@ -42,6 +99,11 @@ export default function Dashboard() {
     queryFn: () => invoices.getAll({ period: selectedPeriod })
   })
 
+  const { data: allProofs } = useQuery({
+    queryKey: ['proofs'],
+    queryFn: () => proofs.getAll()
+  })
+
   const proof = periodProofs?.[0]
   const invoiceList = periodInvoices || []
   
@@ -49,180 +111,371 @@ export default function Dashboard() {
   const totalProof = proof ? parseFloat(proof.grandTotal || 0) : 0
   const remaining = totalProof - totalInvoiced
 
+  // Calculate category breakdown
+  const fixAmount = proof ? parseFloat(proof.totalFix || 0) : 0
+  const kmAmount = proof ? parseFloat(proof.totalKm || 0) : 0
+  const linehaulAmount = proof ? parseFloat(proof.totalLinehaul || 0) : 0
+  const depoAmount = proof ? parseFloat(proof.totalDepo || 0) : 0
+
+  // Recent activity from proofs
+  const recentProofs = (allProofs || []).slice(0, 4)
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-gray-400 text-sm mt-1">Přehled nákladů na dopravu</p>
+          <h1 className="text-2xl font-bold text-gray-800">Přehled</h1>
+          <div className="flex items-center gap-2 mt-1">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-green-400 flex items-center justify-center">
+              <span className="text-white text-xs font-bold">TB</span>
+            </div>
+            <span className="text-gray-600 font-medium">TransportBrain</span>
+            <span className="badge badge-success text-xs">
+              <span className="status-dot success mr-1"></span>
+              LIVE
+            </span>
+          </div>
         </div>
         
-        <select
-          value={selectedPeriod}
-          onChange={(e) => setSelectedPeriod(e.target.value)}
-          className="input w-full sm:w-48"
-        >
-          {getPeriodOptions().map(period => (
-            <option key={period} value={period}>
-              {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
-              <FileText className="w-5 h-5 text-blue-400" />
-            </div>
-            <span className="text-gray-400 text-sm">Proof</span>
-          </div>
-          <div className="text-2xl font-bold">{formatCZK(totalProof)}</div>
-          <div className="text-xs text-gray-500 mt-1">
-            {proof ? 'Nahráno' : 'Chybí proof'}
-          </div>
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center">
-              <CheckCircle className="w-5 h-5 text-green-400" />
-            </div>
-            <span className="text-gray-400 text-sm">Fakturováno</span>
-          </div>
-          <div className="text-2xl font-bold">{formatCZK(totalInvoiced)}</div>
-          <div className="text-xs text-gray-500 mt-1">
-            {invoiceList.length} faktur
-          </div>
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center">
-              <TrendingUp className="w-5 h-5 text-orange-400" />
-            </div>
-            <span className="text-gray-400 text-sm">Zbývá</span>
-          </div>
-          <div className={`text-2xl font-bold ${remaining > 0 ? 'text-orange-400' : 'text-green-400'}`}>
-            {formatCZK(remaining)}
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {remaining > 0 ? 'K dofakturování' : 'Kompletní'}
-          </div>
-        </div>
-
-        <div className="card p-5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-              !proof ? 'bg-red-500/20' : remaining > 1000 ? 'bg-yellow-500/20' : 'bg-green-500/20'
-            }`}>
-              {!proof ? (
-                <AlertCircle className="w-5 h-5 text-red-400" />
-              ) : remaining > 1000 ? (
-                <AlertTriangle className="w-5 h-5 text-yellow-400" />
-              ) : (
-                <CheckCircle className="w-5 h-5 text-green-400" />
-              )}
-            </div>
-            <span className="text-gray-400 text-sm">Status</span>
-          </div>
-          <div className="text-lg font-semibold">
-            {!proof ? 'Chybí data' : remaining > 1000 ? 'Neúplné' : 'OK'}
-          </div>
-          <div className="text-xs text-gray-500 mt-1">
-            {!proof ? 'Nahrajte proof' : remaining > 1000 ? 'Chybí faktury' : 'Vše sedí'}
-          </div>
+        <div className="date-picker">
+          <Calendar size={16} className="text-gray-400" />
+          <select
+            value={selectedPeriod}
+            onChange={(e) => setSelectedPeriod(e.target.value)}
+            className="bg-transparent border-none focus:outline-none text-sm text-gray-600 cursor-pointer"
+          >
+            {getPeriodOptions().map(period => (
+              <option key={period} value={period}>
+                {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {/* Proof Detail */}
-      {proof && (
-        <div className="card overflow-hidden">
+      {/* Main Grid */}
+      <div className="grid grid-cols-12 gap-6">
+        
+        {/* Revenue Card - Large */}
+        <div className="col-span-5 card">
           <div className="card-header">
-            <h2 className="font-semibold">Detail proofu — {selectedPeriod}</h2>
+            <div>
+              <div className="card-title">
+                <Activity size={16} className="text-blue-500" />
+                Náklady
+              </div>
+              <div className="card-subtitle">Přehled období</div>
+            </div>
+            <button className="menu-dots">
+              <MoreVertical size={16} />
+            </button>
           </div>
-          <div className="p-6">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
-              <div>
-                <div className="text-sm text-gray-400 mb-1">FIX</div>
-                <div className="text-xl font-semibold">{formatCZK(proof.totalFix)}</div>
+          <div className="card-body">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-xs text-gray-400 uppercase tracking-wide">Celkem</span>
+              <span className="text-3xl font-bold text-gray-800">{formatShort(totalProof)}</span>
+              <span className="text-xs text-gray-400">Kč</span>
+            </div>
+            
+            {/* Mini bar chart placeholder */}
+            <div className="h-24 flex items-end gap-1 mb-4">
+              {[40, 65, 45, 80, 55, 90, 70, 85, 60, 75, 95, 70].map((h, i) => (
+                <div 
+                  key={i} 
+                  className="flex-1 bg-blue-100 rounded-t hover:bg-blue-200 transition-colors"
+                  style={{ height: `${h}%` }}
+                />
+              ))}
+            </div>
+            
+            <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                <span className="text-gray-500">FIX</span>
               </div>
-              <div>
-                <div className="text-sm text-gray-400 mb-1">KM</div>
-                <div className="text-xl font-semibold">{formatCZK(proof.totalKm)}</div>
+              <div className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                <span className="text-gray-500">KM</span>
               </div>
-              <div>
-                <div className="text-sm text-gray-400 mb-1">Linehaul</div>
-                <div className="text-xl font-semibold">{formatCZK(proof.totalLinehaul)}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-400 mb-1">Depo</div>
-                <div className="text-xl font-semibold">{formatCZK(proof.totalDepo)}</div>
+              <div className="flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-orange-500"></span>
+                <span className="text-gray-500">Linehaul</span>
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Invoices List */}
-      <div className="card overflow-hidden">
-        <div className="card-header flex items-center justify-between">
-          <h2 className="font-semibold">Faktury — {selectedPeriod}</h2>
-          <span className="badge badge-info">{invoiceList.length} faktur</span>
-        </div>
-        
-        {invoiceList.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>Žádné faktury pro toto období</p>
+          <div className="px-5 py-3 border-t border-gray-50">
+            <button 
+              onClick={() => proof && navigate(`/proof/${proof.id}`)}
+              className="link-arrow"
+            >
+              Zobrazit detail <ChevronRight size={14} />
+            </button>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Číslo faktury</th>
-                  <th>Typ</th>
-                  <th className="text-right">Částka</th>
-                  <th className="text-right">DPH</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoiceList.map(invoice => (
-                  <tr key={invoice.id}>
-                    <td className="font-medium">{invoice.invoiceNumber}</td>
-                    <td>
-                      <div className="flex flex-wrap gap-1">
+        </div>
+
+        {/* Invoiced Progress */}
+        <div className="col-span-3 card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">
+                <PieChart size={16} className="text-green-500" />
+                Fakturováno
+              </div>
+              <div className="card-subtitle">Stav období</div>
+            </div>
+          </div>
+          <div className="card-body flex flex-col items-center">
+            <DonutChart 
+              value={totalInvoiced} 
+              max={totalProof || 1} 
+              color="#48bb78" 
+            />
+            <div className="mt-4 text-center">
+              <div className="text-2xl font-bold text-gray-800">{formatCZK(totalInvoiced)}</div>
+              <div className="text-xs text-gray-400">z {formatCZK(totalProof)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Activity Monitor */}
+        <div className="col-span-4 card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">
+                <Activity size={16} className="text-blue-500" />
+                Aktivita
+              </div>
+              <div className="card-subtitle">Poslední změny</div>
+            </div>
+          </div>
+          <div className="card-body">
+            {/* Status alert */}
+            {proof && remaining <= 1000 ? (
+              <div className="alert-success flex items-center gap-3 mb-4">
+                <CheckCircle className="text-green-500" size={20} />
+                <div>
+                  <div className="font-medium text-green-800 text-sm">Vše v pořádku</div>
+                  <div className="text-xs text-green-600">Fakturace je kompletní</div>
+                </div>
+              </div>
+            ) : proof ? (
+              <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3 mb-4">
+                <AlertTriangle className="text-orange-500" size={20} />
+                <div>
+                  <div className="font-medium text-orange-800 text-sm">Pozor</div>
+                  <div className="text-xs text-orange-600">Zbývá {formatCZK(remaining)}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex items-center gap-3 mb-4">
+                <FileText className="text-gray-400" size={20} />
+                <div>
+                  <div className="font-medium text-gray-600 text-sm">Chybí data</div>
+                  <div className="text-xs text-gray-400">Nahrajte proof</div>
+                </div>
+              </div>
+            )}
+
+            {/* Activity items */}
+            <div className="space-y-1">
+              {recentProofs.map((p, idx) => (
+                <div key={p.id} className="activity-item">
+                  <div className={`w-2 h-2 rounded-full mt-2 ${
+                    idx === 0 ? 'bg-green-500' : 'bg-gray-300'
+                  }`} />
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-gray-700">
+                      Proof {p.period}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {formatCZK(p.grandTotal)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="px-5 py-3 border-t border-gray-50">
+            <button onClick={() => navigate('/history')} className="link-arrow">
+              Zobrazit vše <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* Breakdown Card */}
+        <div className="col-span-4 card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">
+                <PieChart size={16} className="text-orange-500" />
+                Rozpad nákladů
+              </div>
+              <div className="card-subtitle">Aktuální období</div>
+            </div>
+            <button className="menu-dots">
+              <MoreVertical size={16} />
+            </button>
+          </div>
+          <div className="card-body">
+            <div className="flex items-center gap-6">
+              {/* Simple donut representation */}
+              <div className="relative w-32 h-32">
+                <svg viewBox="0 0 36 36" className="w-full h-full">
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" strokeWidth="3" />
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#4299e1" strokeWidth="3" 
+                    strokeDasharray={`${(fixAmount/totalProof)*100 || 0} 100`} 
+                    strokeDashoffset="0" 
+                    transform="rotate(-90 18 18)" />
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#48bb78" strokeWidth="3" 
+                    strokeDasharray={`${(kmAmount/totalProof)*100 || 0} 100`} 
+                    strokeDashoffset={`-${(fixAmount/totalProof)*100 || 0}`}
+                    transform="rotate(-90 18 18)" />
+                  <circle cx="18" cy="18" r="15.9" fill="none" stroke="#ed8936" strokeWidth="3" 
+                    strokeDasharray={`${(linehaulAmount/totalProof)*100 || 0} 100`} 
+                    strokeDashoffset={`-${((fixAmount+kmAmount)/totalProof)*100 || 0}`}
+                    transform="rotate(-90 18 18)" />
+                </svg>
+              </div>
+              
+              {/* Legend */}
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded bg-blue-500"></span>
+                    <span className="text-sm text-gray-600">FIX</span>
+                  </div>
+                  <span className="text-sm font-medium">{formatShort(fixAmount)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded bg-green-500"></span>
+                    <span className="text-sm text-gray-600">KM</span>
+                  </div>
+                  <span className="text-sm font-medium">{formatShort(kmAmount)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded bg-orange-500"></span>
+                    <span className="text-sm text-gray-600">Linehaul</span>
+                  </div>
+                  <span className="text-sm font-medium">{formatShort(linehaulAmount)}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 rounded bg-purple-500"></span>
+                    <span className="text-sm text-gray-600">DEPO</span>
+                  </div>
+                  <span className="text-sm font-medium">{formatShort(depoAmount)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="px-5 py-3 border-t border-gray-50">
+            <button onClick={() => navigate('/prices')} className="link-arrow">
+              Zobrazit ceníky <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+
+        {/* Invoices Table */}
+        <div className="col-span-8 card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">
+                <FileText size={16} className="text-blue-500" />
+                Faktury
+              </div>
+              <div className="card-subtitle">{invoiceList.length} faktur v období</div>
+            </div>
+            <button className="menu-dots">
+              <MoreVertical size={16} />
+            </button>
+          </div>
+          
+          {invoiceList.length === 0 ? (
+            <div className="p-8 text-center">
+              <FileText className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+              <p className="text-gray-400 text-sm">Žádné faktury</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Číslo</th>
+                    <th>Typ</th>
+                    <th className="text-right">Částka</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoiceList.slice(0, 5).map(invoice => (
+                    <tr key={invoice.id}>
+                      <td className="font-medium text-gray-800">{invoice.invoiceNumber}</td>
+                      <td>
                         {invoice.items?.map((item, idx) => (
-                          <span key={idx} className="badge badge-info">
-                            {(item.itemType || '').toUpperCase()}
+                          <span key={idx} className="badge badge-info mr-1">
+                            {(item.itemType || '').replace('ALZABOXY ', '')}
                           </span>
                         ))}
-                      </div>
-                    </td>
-                    <td className="text-right font-medium">{formatCZK(invoice.totalWithoutVat)}</td>
-                    <td className="text-right text-gray-400">{formatCZK(invoice.vatAmount)}</td>
-                    <td>
-                      <span className={`badge ${
-                        invoice.status === 'matched' ? 'badge-success' :
-                        invoice.status === 'disputed' ? 'badge-error' :
-                        'badge-warning'
-                      }`}>
-                        {invoice.status === 'matched' ? 'Spárováno' :
-                         invoice.status === 'disputed' ? 'Sporná' :
-                         'Ke kontrole'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      </td>
+                      <td className="text-right font-medium">{formatCZK(invoice.totalWithoutVat)}</td>
+                      <td>
+                        <span className={`badge ${
+                          invoice.status === 'matched' ? 'badge-success' :
+                          invoice.status === 'disputed' ? 'badge-error' :
+                          'badge-warning'
+                        }`}>
+                          {invoice.status === 'matched' ? 'OK' :
+                           invoice.status === 'disputed' ? 'Sporná' :
+                           'Čeká'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="px-5 py-3 border-t border-gray-50">
+            <button onClick={() => navigate('/upload')} className="link-arrow">
+              Zobrazit vše <ChevronRight size={14} />
+            </button>
           </div>
-        )}
+        </div>
+
+        {/* Carriers Quick View */}
+        <div className="col-span-4 card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">
+                <Truck size={16} className="text-purple-500" />
+                Dopravci
+              </div>
+              <div className="card-subtitle">Přehled</div>
+            </div>
+          </div>
+          <div className="card-body space-y-3">
+            {(carrierList || []).slice(0, 4).map(carrier => (
+              <div key={carrier.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold">
+                  {carrier.name.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-800 truncate">{carrier.name}</div>
+                  <div className="text-xs text-gray-400">{carrier.proofsCount || 0} proofů</div>
+                </div>
+                <ChevronRight size={16} className="text-gray-300" />
+              </div>
+            ))}
+          </div>
+          <div className="px-5 py-3 border-t border-gray-50">
+            <button onClick={() => navigate('/carriers')} className="link-arrow">
+              Zobrazit vše <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

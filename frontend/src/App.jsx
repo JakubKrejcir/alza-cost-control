@@ -6,6 +6,7 @@ import Prices from './pages/Prices'
 import History from './pages/History'
 import Carriers from './pages/Carriers'
 import Contracts from './pages/Contracts'
+import ProofDetail from './pages/ProofDetail'
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
         <Route path="history" element={<History />} />
         <Route path="carriers" element={<Carriers />} />
         <Route path="contracts" element={<Contracts />} />
+        <Route path="proof/:id" element={<ProofDetail />} />
       </Route>
     </Routes>
   )

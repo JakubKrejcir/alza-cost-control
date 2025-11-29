@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, subMonths } from 'date-fns'
 import { cs } from 'date-fns/locale'
-import { Upload as UploadIcon, FileSpreadsheet, FileText, CheckCircle, AlertCircle, X, Trash2 } from 'lucide-react'
+import { Upload as UploadIcon, FileSpreadsheet, FileText, CheckCircle, AlertCircle, X, Trash2, ExternalLink } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { proofs, invoices, carriers } from '../lib/api'
 
 function formatCZK(amount) {
@@ -31,6 +32,7 @@ export default function Upload() {
   const [uploadResults, setUploadResults] = useState([])
   
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const { data: carrierList } = useQuery({
     queryKey: ['carriers'],
@@ -309,13 +311,22 @@ export default function Upload() {
         <div className="card overflow-hidden">
           <div className="card-header flex items-center justify-between">
             <h2 className="font-semibold">Proof — {selectedPeriod}</h2>
-            <button
-              onClick={() => handleDeleteProof(currentProof)}
-              className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400"
-              title="Smazat proof"
-            >
-              <Trash2 size={18} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => navigate(`/proof/${currentProof.id}`)}
+                className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-alza-orange"
+                title="Zobrazit detail"
+              >
+                <ExternalLink size={18} />
+              </button>
+              <button
+                onClick={() => handleDeleteProof(currentProof)}
+                className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400"
+                title="Smazat proof"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
           </div>
           <div className="p-6">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">

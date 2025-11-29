@@ -102,6 +102,217 @@ def analyze_proof(proof: Proof, price_config: Optional[PriceConfig]) -> dict:
     return result
 
 
+def get_comprehensive_proof_detail(proof: Proof, price_config: Optional[PriceConfig]) -> dict:
+    """Get comprehensive proof detail with all breakdowns"""
+    
+    # Build fix rates map from price config
+    fix_rates_map = {}
+    km_rate_config = None
+    depo_rates_map = {}
+    linehaul_rates_map = {}
+    
+    if price_config:
+        fix_rates_map = {r.route_type: float(r.rate) for r in price_config.fix_rates}
+        if price_config.km_rates:
+            km_rate_config = float(price_config.km_rates[0].rate)
+        depo_rates_map = {f"{r.depo_name}_{r.rate_type}": float(r.rate) for r in price_config.depo_rates}
+        for r in price_config.linehaul_rates:
+            key = f"{r.from_code or ''}_{r.to_code or ''}_{r.vehicle_type}"
+            linehaul_rates_map[key] = float(r.rate)
+    
+    # Route details with comparison
+    route_details = []
+    total_routes_calculated = Decimal('0')
+    for route in proof.route_details:
+        config_rate = fix_rates_map.get(route.route_type)
+        calculated = route.count * route.rate
+        total_routes_calculated += calculated
+        
+        route_details.append({
+            'routeType': route.route_type,
+            'count': route.count,
+            'proofRate': float(route.rate),
+            'configRate': config_rate,
+            'amount': float(route.amount),
+            'calculatedAmount': float(calculated),
+            'difference': float(route.amount - calculated) if route.amount else 0,
+            'status': 'ok' if config_rate and abs(float(route.rate) - config_rate) < 1 else 'warning' if config_rate else 'missing'
+        })
+    
+    # Depo details with comparison
+    depo_details = []
+    total_depo_calculated = Decimal('0')
+    for depo in proof.depo_details:
+        config_key = f"{depo.depo_name}_{depo.rate_type}"
+        config_rate = depo_rates_map.get(config_key)
+        calculated = (depo.days or 1) * depo.rate
+        total_depo_calculated += calculated
+        
+        depo_details.append({
+            'depoName': depo.depo_name,
+            'rateType': depo.rate_type,
+            'days': depo.days,
+            'proofRate': float(depo.rate),
+            'configRate': config_rate,
+            'amount': float(depo.amount),
+            'calculatedAmount': float(calculated),
+            'status': 'ok' if config_rate else 'missing'
+        })
+    
+    # Linehaul details
+    linehaul_details = []
+    total_linehaul_calculated = Decimal('0')
+    for lh in proof.linehaul_details:
+        calculated = lh.total or (lh.rate * (lh.days or 1) * (lh.per_day or 1))
+        total_linehaul_calculated += calculated
+        
+        linehaul_details.append({
+            'description': lh.description,
+            'fromCode': lh.from_code,
+            'toCode': lh.to_code,
+            'vehicleType': lh.vehicle_type,
+            'days': lh.days,
+            'perDay': lh.per_day,
+            'rate': float(lh.rate),
+            'total': float(lh.total),
+            'calculatedTotal': float(calculated)
+        })
+    
+    # Invoice breakdown by type
+    invoice_by_type = {
+        'fix': {'invoiced': 0, 'invoices': []},
+        'km': {'invoiced': 0, 'invoices': []},
+        'linehaul': {'invoiced': 0, 'invoices': []},
+        'depo': {'invoiced': 0, 'invoices': []}
+    }
+    
+    for inv in proof.invoices:
+        for item in inv.items:
+            item_type_lower = (item.item_type or '').lower()
+            # Match item type to category
+            for cat in ['fix', 'km', 'linehaul', 'depo']:
+                if cat in item_type_lower:
+                    invoice_by_type[cat]['invoiced'] += float(item.amount or 0)
+                    invoice_by_type[cat]['invoices'].append({
+                        'invoiceId': inv.id,
+                        'invoiceNumber': inv.invoice_number,
+                        'amount': float(item.amount or 0),
+                        'description': item.description
+                    })
+                    break
+    
+    # Build invoice status
+    invoice_status = []
+    type_labels = {'fix': 'FIX', 'km': 'KM', 'linehaul': 'Linehaul', 'depo': 'DEPO'}
+    for t, label in type_labels.items():
+        proof_amount = float(getattr(proof, f'total_{t}', None) or 0)
+        invoiced = invoice_by_type[t]['invoiced']
+        remaining = proof_amount - invoiced
+        
+        status = 'ok'
+        if proof_amount > 0 and invoiced == 0:
+            status = 'missing'
+        elif abs(remaining) > 100:
+            status = 'partial'
+        
+        invoice_status.append({
+            'type': t,
+            'label': label,
+            'proofAmount': proof_amount,
+            'invoicedAmount': invoiced,
+            'remaining': remaining,
+            'status': status,
+            'invoices': invoice_by_type[t]['invoices']
+        })
+    
+    # Summary totals
+    summary = {
+        'totalFix': float(proof.total_fix or 0),
+        'totalKm': float(proof.total_km or 0),
+        'totalLinehaul': float(proof.total_linehaul or 0),
+        'totalDepo': float(proof.total_depo or 0),
+        'totalBonus': float(proof.total_bonus or 0),
+        'totalPenalty': float(proof.total_penalty or 0),
+        'grandTotal': float(proof.grand_total or 0),
+        'totalInvoiced': sum(inv['invoicedAmount'] for inv in invoice_status),
+        'totalRemaining': sum(inv['remaining'] for inv in invoice_status),
+    }
+    
+    # Validation checks
+    checks = []
+    
+    # Check 1: FIX calculation matches
+    fix_diff = abs(float(proof.total_fix or 0) - float(total_routes_calculated))
+    checks.append({
+        'name': 'FIX výpočet',
+        'description': 'Součet tras odpovídá celkovému FIX',
+        'status': 'ok' if fix_diff < 100 else 'warning',
+        'expected': float(total_routes_calculated),
+        'actual': float(proof.total_fix or 0),
+        'difference': fix_diff
+    })
+    
+    # Check 2: DEPO calculation matches
+    depo_diff = abs(float(proof.total_depo or 0) - float(total_depo_calculated))
+    checks.append({
+        'name': 'DEPO výpočet',
+        'description': 'Součet DEPO položek odpovídá celkovému DEPO',
+        'status': 'ok' if depo_diff < 100 else 'warning',
+        'expected': float(total_depo_calculated),
+        'actual': float(proof.total_depo or 0),
+        'difference': depo_diff
+    })
+    
+    # Check 3: Has price config
+    checks.append({
+        'name': 'Ceník',
+        'description': 'Existuje aktivní ceník pro toto období',
+        'status': 'ok' if price_config else 'warning',
+        'message': 'Ceník nalezen' if price_config else 'Chybí aktivní ceník'
+    })
+    
+    # Check 4: All types invoiced
+    missing_invoices = [s['label'] for s in invoice_status if s['status'] == 'missing' and s['proofAmount'] > 0]
+    checks.append({
+        'name': 'Fakturace',
+        'description': 'Všechny typy jsou vyfakturovány',
+        'status': 'ok' if not missing_invoices else 'warning',
+        'message': 'Kompletní' if not missing_invoices else f"Chybí: {', '.join(missing_invoices)}"
+    })
+    
+    # Check 5: No overfakturace
+    overfakturace = [s['label'] for s in invoice_status if s['remaining'] < -100]
+    checks.append({
+        'name': 'Přefakturace',
+        'description': 'Fakturováno není více než proof',
+        'status': 'ok' if not overfakturace else 'error',
+        'message': 'OK' if not overfakturace else f"Přefakturováno: {', '.join(overfakturace)}"
+    })
+    
+    # Overall status
+    has_error = any(c['status'] == 'error' for c in checks)
+    has_warning = any(c['status'] == 'warning' for c in checks)
+    overall_status = 'error' if has_error else 'warning' if has_warning else 'ok'
+    
+    return {
+        'proofId': proof.id,
+        'carrierId': proof.carrier_id,
+        'carrierName': proof.carrier.name if proof.carrier else None,
+        'period': proof.period,
+        'periodDate': proof.period_date.isoformat() if proof.period_date else None,
+        'fileName': proof.file_name,
+        'status': overall_status,
+        'summary': summary,
+        'routeDetails': route_details,
+        'depoDetails': depo_details,
+        'linehaulDetails': linehaul_details,
+        'invoiceStatus': invoice_status,
+        'checks': checks,
+        'hasPriceConfig': price_config is not None,
+        'priceConfigId': price_config.id if price_config else None
+    }
+
+
 @router.post("/proof/{proof_id}", response_model=ProofAnalysisResponse)
 async def analyze_proof_endpoint(proof_id: int, db: AsyncSession = Depends(get_db)):
     """Analyze proof against price config"""
@@ -168,6 +379,54 @@ async def analyze_proof_endpoint(proof_id: int, db: AsyncSession = Depends(get_d
     await db.refresh(analysis)
     
     return analysis
+
+
+@router.get("/proof/{proof_id}/detail")
+async def get_proof_detail(proof_id: int, db: AsyncSession = Depends(get_db)):
+    """Get comprehensive proof detail with all breakdowns"""
+    # Get proof with all details
+    result = await db.execute(
+        select(Proof)
+        .options(
+            selectinload(Proof.carrier),
+            selectinload(Proof.route_details),
+            selectinload(Proof.linehaul_details),
+            selectinload(Proof.depo_details),
+            selectinload(Proof.invoices).selectinload(Invoice.items)
+        )
+        .where(Proof.id == proof_id)
+    )
+    proof = result.scalar_one_or_none()
+    
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    
+    # Get active price config
+    price_config_result = await db.execute(
+        select(PriceConfig)
+        .options(
+            selectinload(PriceConfig.fix_rates),
+            selectinload(PriceConfig.km_rates),
+            selectinload(PriceConfig.depo_rates),
+            selectinload(PriceConfig.linehaul_rates)
+        )
+        .where(
+            and_(
+                PriceConfig.carrier_id == proof.carrier_id,
+                PriceConfig.is_active == True,
+                PriceConfig.valid_from <= proof.period_date,
+                or_(
+                    PriceConfig.valid_to == None,
+                    PriceConfig.valid_to >= proof.period_date
+                )
+            )
+        )
+        .order_by(PriceConfig.valid_from.desc())
+        .limit(1)
+    )
+    price_config = price_config_result.scalar_one_or_none()
+    
+    return get_comprehensive_proof_detail(proof, price_config)
 
 
 @router.get("/proof/{proof_id}", response_model=ProofAnalysisResponse)
