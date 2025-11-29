@@ -91,7 +91,6 @@ export const invoices = {
 export const analysis = {
   analyzeProof: (proofId) => api.post(`/analysis/proof/${proofId}`).then(r => r.data),
   getProofAnalysis: (proofId) => api.get(`/analysis/proof/${proofId}`).then(r => r.data),
-  getProofDetail: (proofId) => api.get(`/analysis/proof/${proofId}/detail`).then(r => r.data),
   getDashboard: (params) => api.get('/analysis/dashboard', { params }).then(r => r.data)
 }
 

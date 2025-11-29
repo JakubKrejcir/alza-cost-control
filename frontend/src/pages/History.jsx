@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { format, subMonths } from 'date-fns'
 import { cs } from 'date-fns/locale'
-import { CheckCircle, AlertTriangle, AlertCircle, FileText, Eye } from 'lucide-react'
+import { CheckCircle, AlertTriangle, AlertCircle, FileText } from 'lucide-react'
 import { proofs, invoices } from '../lib/api'
 
 function formatCZK(amount) {
@@ -77,7 +77,6 @@ export default function History() {
               <th className="text-right">Proof částka</th>
               <th className="text-right">Fakturováno</th>
               <th className="text-center">Status</th>
-              <th className="w-16"></th>
             </tr>
           </thead>
           <tbody>
@@ -86,7 +85,11 @@ export default function History() {
               const hasData = proof || periodInvoices.length > 0
               
               return (
-                <tr key={period}>
+                <tr 
+                  key={period}
+                  className="cursor-pointer hover:bg-white/[0.03]"
+                  onClick={() => navigate(`/dashboard?period=${period}`)}
+                >
                   <td className="font-medium">
                     {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
                   </td>
@@ -133,17 +136,6 @@ export default function History() {
                         <AlertCircle className="w-3 h-3 mr-1" />
                         Rozdíl
                       </span>
-                    )}
-                  </td>
-                  <td>
-                    {proof && (
-                      <button
-                        onClick={() => navigate(`/proof/${proof.id}`)}
-                        className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-alza-orange"
-                        title="Zobrazit detail"
-                      >
-                        <Eye size={16} />
-                      </button>
                     )}
                   </td>
                 </tr>

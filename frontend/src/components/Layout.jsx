@@ -1,83 +1,87 @@
-import { NavLink, Outlet } from 'react-router-dom'
-import { 
-  LayoutDashboard, 
-  Upload, 
-  DollarSign, 
-  History, 
-  Truck, 
-  FileText,
-  Settings,
-  HelpCircle,
-  LogOut
-} from 'lucide-react'
+import { useState } from 'react'
+import { Outlet, NavLink, useLocation } from 'react-router-dom'
+import { LayoutDashboard, Upload, DollarSign, Calendar, Truck, FileText, Menu, X } from 'lucide-react'
 
 const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/upload', icon: Upload, label: 'Nahrát' },
-  { to: '/carriers', icon: Truck, label: 'Dopravci' },
-  { to: '/contracts', icon: FileText, label: 'Smlouvy' },
-  { to: '/prices', icon: DollarSign, label: 'Ceníky' },
-  { to: '/history', icon: History, label: 'Historie' },
-]
-
-const bottomItems = [
-  { to: '/help', icon: HelpCircle, label: 'Nápověda' },
-  { to: '/settings', icon: Settings, label: 'Nastavení' },
+  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/upload', label: 'Nahrát', icon: Upload },
+  { path: '/contracts', label: 'Smlouvy', icon: FileText },
+  { path: '/prices', label: 'Ceníky', icon: DollarSign },
+  { path: '/history', label: 'Historie', icon: Calendar },
+  { path: '/carriers', label: 'Dopravci', icon: Truck },
 ]
 
 export default function Layout() {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const location = useLocation()
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        {/* Logo */}
-        <div className="p-5 border-b border-gray-100">
+    <div className="min-h-screen bg-alza-dark text-white">
+      {/* Header */}
+      <header className="sticky top-0 z-50 bg-alza-dark/95 backdrop-blur border-b border-white/10">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
-              <Truck className="w-5 h-5 text-white" />
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-alza-orange to-alza-orange-light flex items-center justify-center font-bold text-black">
+              A
             </div>
-            <div>
-              <h1 className="font-bold text-gray-800">TransportBrain</h1>
-              <p className="text-xs text-gray-400">Cost Control</p>
-            </div>
+            <h1 className="text-lg font-semibold hidden sm:block">Cost Control</h1>
           </div>
-        </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 py-4">
-          {navItems.map(item => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
-            >
-              <item.icon size={20} />
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-        </nav>
+          {/* Desktop Navigation */}
+          <nav className="hidden md:flex items-center gap-1">
+            {navItems.map(({ path, label, icon: Icon }) => (
+              <NavLink
+                key={path}
+                to={path}
+                className={({ isActive }) =>
+                  `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    isActive
+                      ? 'bg-gradient-to-r from-alza-orange to-alza-orange-light text-black'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`
+                }
+              >
+                <Icon size={18} />
+                {label}
+              </NavLink>
+            ))}
+          </nav>
 
-        {/* Bottom items */}
-        <div className="border-t border-gray-100 py-4">
-          {bottomItems.map(item => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}
-            >
-              <item.icon size={20} />
-              <span>{item.label}</span>
-            </NavLink>
-          ))}
-          <button className="sidebar-link w-full text-left text-red-500 hover:text-red-600 hover:bg-red-50">
-            <LogOut size={20} />
-            <span>Odhlásit</span>
+          {/* Mobile menu button */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="md:hidden p-2 rounded-lg hover:bg-white/5"
+          >
+            {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
         </div>
-      </aside>
+
+        {/* Mobile Navigation */}
+        {mobileMenuOpen && (
+          <nav className="md:hidden px-4 pb-4 space-y-1">
+            {navItems.map(({ path, label, icon: Icon }) => (
+              <NavLink
+                key={path}
+                to={path}
+                onClick={() => setMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+                    isActive
+                      ? 'bg-gradient-to-r from-alza-orange to-alza-orange-light text-black'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  }`
+                }
+              >
+                <Icon size={20} />
+                {label}
+              </NavLink>
+            ))}
+          </nav>
+        )}
+      </header>
 
       {/* Main Content */}
-      <main className="main-content">
+      <main className="max-w-7xl mx-auto px-4 py-6">
         <Outlet />
       </main>
     </div>
