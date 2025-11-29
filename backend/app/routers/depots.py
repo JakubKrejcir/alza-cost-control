@@ -14,7 +14,7 @@ from app.schemas import DepotCreate, DepotUpdate, DepotResponse
 router = APIRouter()
 
 
-@router.get("/", response_model=List[DepotResponse])
+@router.get("", response_model=List[DepotResponse])
 async def get_depots(
     carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
@@ -51,7 +51,7 @@ async def get_depot(depot_id: int, db: AsyncSession = Depends(get_db)):
     return depot
 
 
-@router.post("/", response_model=DepotResponse, status_code=201)
+@router.post("", response_model=DepotResponse, status_code=201)
 async def create_depot(depot_data: DepotCreate, db: AsyncSession = Depends(get_db)):
     """Create new depot"""
     # Verify carrier exists

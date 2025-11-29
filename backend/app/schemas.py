@@ -1,10 +1,27 @@
 """
 Pydantic schemas for request/response validation
+All Response classes use camelCase for JavaScript frontend compatibility
 """
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
+
+
+def to_camel(string: str) -> str:
+    """Convert snake_case to camelCase"""
+    components = string.split('_')
+    return components[0] + ''.join(x.title() for x in components[1:])
+
+
+class CamelModel(BaseModel):
+    """Base model with camelCase serialization for responses"""
+    model_config = ConfigDict(
+        from_attributes=True,
+        alias_generator=to_camel,
+        populate_by_name=True,
+        by_alias=True
+    )
 
 
 # =============================================================================
@@ -30,10 +47,13 @@ class CarrierUpdate(BaseModel):
     contact: Optional[str] = None
 
 
-class CarrierResponse(CarrierBase):
-    model_config = ConfigDict(from_attributes=True)
-    
+class CarrierResponse(CamelModel):
     id: int
+    name: str
+    ico: Optional[str] = None
+    dic: Optional[str] = None
+    address: Optional[str] = None
+    contact: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -62,11 +82,13 @@ class DepotUpdate(DepotBase):
     pass
 
 
-class DepotResponse(DepotBase):
-    model_config = ConfigDict(from_attributes=True)
-    
+class DepotResponse(CamelModel):
     id: int
     carrier_id: int
+    name: str
+    code: Optional[str] = None
+    type: Optional[str] = None
+    address: Optional[str] = None
     created_at: datetime
 
 
@@ -95,11 +117,15 @@ class ContractUpdate(BaseModel):
     notes: Optional[str] = None
 
 
-class ContractResponse(ContractBase):
-    model_config = ConfigDict(from_attributes=True)
-    
+class ContractResponse(CamelModel):
     id: int
     carrier_id: int
+    number: str
+    type: Optional[str] = None
+    valid_from: datetime
+    valid_to: Optional[datetime] = None
+    document_url: Optional[str] = None
+    notes: Optional[str] = None
     created_at: datetime
 
 
@@ -111,9 +137,10 @@ class FixRateBase(BaseModel):
     rate: Decimal
 
 
-class FixRateResponse(FixRateBase):
-    model_config = ConfigDict(from_attributes=True)
+class FixRateResponse(CamelModel):
     id: int
+    route_type: str
+    rate: Decimal
 
 
 class KmRateBase(BaseModel):
@@ -121,9 +148,10 @@ class KmRateBase(BaseModel):
     rate: Decimal
 
 
-class KmRateResponse(KmRateBase):
-    model_config = ConfigDict(from_attributes=True)
+class KmRateResponse(CamelModel):
     id: int
+    route_type: Optional[str] = None
+    rate: Decimal
 
 
 class DepoRateBase(BaseModel):
@@ -132,9 +160,11 @@ class DepoRateBase(BaseModel):
     rate: Decimal
 
 
-class DepoRateResponse(DepoRateBase):
-    model_config = ConfigDict(from_attributes=True)
+class DepoRateResponse(CamelModel):
     id: int
+    depo_name: str
+    rate_type: str
+    rate: Decimal
 
 
 class LinehaulRateBase(BaseModel):
@@ -148,9 +178,16 @@ class LinehaulRateBase(BaseModel):
     description: Optional[str] = None
 
 
-class LinehaulRateResponse(LinehaulRateBase):
-    model_config = ConfigDict(from_attributes=True)
+class LinehaulRateResponse(CamelModel):
     id: int
+    from_depot_id: Optional[int] = None
+    to_depot_id: Optional[int] = None
+    from_code: Optional[str] = None
+    to_code: Optional[str] = None
+    vehicle_type: str
+    rate: Decimal
+    is_posila: bool = False
+    description: Optional[str] = None
 
 
 class BonusRateBase(BaseModel):
@@ -160,9 +197,12 @@ class BonusRateBase(BaseModel):
     total_with_bonus: Decimal
 
 
-class BonusRateResponse(BonusRateBase):
-    model_config = ConfigDict(from_attributes=True)
+class BonusRateResponse(CamelModel):
     id: int
+    quality_min: Decimal
+    quality_max: Decimal
+    bonus_amount: Decimal
+    total_with_bonus: Decimal
 
 
 class PriceConfigBase(BaseModel):
@@ -194,12 +234,14 @@ class PriceConfigUpdate(BaseModel):
     bonus_rates: Optional[List[BonusRateBase]] = None
 
 
-class PriceConfigResponse(PriceConfigBase):
-    model_config = ConfigDict(from_attributes=True)
-    
+class PriceConfigResponse(CamelModel):
     id: int
     carrier_id: int
     contract_id: Optional[int] = None
+    type: str
+    valid_from: datetime
+    valid_to: Optional[datetime] = None
+    is_active: bool = True
     created_at: datetime
     fix_rates: List[FixRateResponse] = []
     km_rates: List[KmRateResponse] = []
@@ -211,19 +253,16 @@ class PriceConfigResponse(PriceConfigBase):
 # =============================================================================
 # PROOF SCHEMAS
 # =============================================================================
-class ProofRouteDetailBase(BaseModel):
+class ProofRouteDetailResponse(CamelModel):
+    id: int
     route_type: str
     count: int
     rate: Decimal
     amount: Decimal
 
 
-class ProofRouteDetailResponse(ProofRouteDetailBase):
-    model_config = ConfigDict(from_attributes=True)
+class ProofLinehaulDetailResponse(CamelModel):
     id: int
-
-
-class ProofLinehaulDetailBase(BaseModel):
     description: str
     from_code: Optional[str] = None
     to_code: Optional[str] = None
@@ -234,22 +273,13 @@ class ProofLinehaulDetailBase(BaseModel):
     total: Decimal
 
 
-class ProofLinehaulDetailResponse(ProofLinehaulDetailBase):
-    model_config = ConfigDict(from_attributes=True)
+class ProofDepoDetailResponse(CamelModel):
     id: int
-
-
-class ProofDepoDetailBase(BaseModel):
     depo_name: str
     rate_type: str
     days: Optional[int] = None
     rate: Decimal
     amount: Decimal
-
-
-class ProofDepoDetailResponse(ProofDepoDetailBase):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
 
 
 class ProofBase(BaseModel):
@@ -273,13 +303,20 @@ class ProofUpdate(BaseModel):
     status: Optional[str] = None
 
 
-class ProofResponse(ProofBase):
-    model_config = ConfigDict(from_attributes=True)
-    
+class ProofResponse(CamelModel):
     id: int
     carrier_id: int
     depot_id: Optional[int] = None
+    period: str
     period_date: datetime
+    status: str = "pending"
+    total_fix: Optional[Decimal] = None
+    total_km: Optional[Decimal] = None
+    total_linehaul: Optional[Decimal] = None
+    total_depo: Optional[Decimal] = None
+    total_bonus: Optional[Decimal] = None
+    total_penalty: Optional[Decimal] = None
+    grand_total: Optional[Decimal] = None
     file_name: Optional[str] = None
     file_url: Optional[str] = None
     created_at: datetime
@@ -301,9 +338,11 @@ class InvoiceItemBase(BaseModel):
     amount: Decimal
 
 
-class InvoiceItemResponse(InvoiceItemBase):
-    model_config = ConfigDict(from_attributes=True)
+class InvoiceItemResponse(CamelModel):
     id: int
+    item_type: str
+    description: Optional[str] = None
+    amount: Decimal
 
 
 class InvoiceBase(BaseModel):
@@ -332,12 +371,18 @@ class InvoiceUpdate(BaseModel):
     items: Optional[List[InvoiceItemBase]] = None
 
 
-class InvoiceResponse(InvoiceBase):
-    model_config = ConfigDict(from_attributes=True)
-    
+class InvoiceResponse(CamelModel):
     id: int
     carrier_id: int
     proof_id: Optional[int] = None
+    invoice_number: str
+    period: str
+    issue_date: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    total_without_vat: Optional[Decimal] = None
+    vat_amount: Optional[Decimal] = None
+    total_with_vat: Optional[Decimal] = None
+    status: str = "pending"
     file_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -345,6 +390,7 @@ class InvoiceResponse(InvoiceBase):
 
 
 class InvoiceParsedData(BaseModel):
+    """Data extracted from invoice PDF - internal use"""
     invoice_number: Optional[str] = None
     variable_symbol: Optional[str] = None
     issue_date: Optional[datetime] = None
@@ -364,9 +410,7 @@ class InvoiceParsedData(BaseModel):
 # =============================================================================
 # ANALYSIS SCHEMAS
 # =============================================================================
-class ProofAnalysisResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    
+class ProofAnalysisResponse(CamelModel):
     id: int
     proof_id: int
     status: str
@@ -381,7 +425,7 @@ class ProofAnalysisResponse(BaseModel):
     created_at: datetime
 
 
-class DashboardSummary(BaseModel):
+class DashboardSummary(CamelModel):
     id: int
     carrier: str
     period: str

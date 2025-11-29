@@ -19,7 +19,7 @@ from app.schemas import (
 router = APIRouter()
 
 
-@router.get("/", response_model=List[PriceConfigResponse])
+@router.get("", response_model=List[PriceConfigResponse])
 async def get_price_configs(
     carrier_id: Optional[int] = Query(None),
     type: Optional[str] = Query(None),
@@ -120,7 +120,7 @@ async def get_price_config(price_config_id: int, db: AsyncSession = Depends(get_
     return price_config
 
 
-@router.post("/", response_model=PriceConfigResponse, status_code=201)
+@router.post("", response_model=PriceConfigResponse, status_code=201)
 async def create_price_config(
     config_data: PriceConfigCreate,
     db: AsyncSession = Depends(get_db)
