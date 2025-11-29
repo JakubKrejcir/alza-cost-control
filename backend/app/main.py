@@ -12,9 +12,7 @@ from app.routers import carriers, depots, contracts, prices, proofs, invoices, a
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Startup - tables already exist from Prisma, no need to create
     yield
     # Shutdown: dispose engine
     await engine.dispose()
