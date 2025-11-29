@@ -18,7 +18,7 @@ export const carriers = {
 
 // Depots
 export const depots = {
-  getAll: (carrierId) => api.get('/depots', { params: { carrierId } }).then(r => r.data),
+  getAll: (carrierId) => api.get('/depots', { params: { carrier_id: carrierId } }).then(r => r.data),
   getOne: (id) => api.get(`/depots/${id}`).then(r => r.data),
   create: (data) => api.post('/depots', data).then(r => r.data),
   update: (id, data) => api.put(`/depots/${id}`, data).then(r => r.data),
@@ -27,7 +27,7 @@ export const depots = {
 
 // Contracts
 export const contracts = {
-  getAll: (carrierId) => api.get('/contracts', { params: { carrierId } }).then(r => r.data),
+  getAll: (carrierId) => api.get('/contracts', { params: { carrier_id: carrierId } }).then(r => r.data),
   getOne: (id) => api.get(`/contracts/${id}`).then(r => r.data),
   create: (data) => api.post('/contracts', data).then(r => r.data),
   update: (id, data) => api.put(`/contracts/${id}`, data).then(r => r.data),
@@ -38,7 +38,7 @@ export const contracts = {
 export const prices = {
   getAll: (params) => api.get('/prices', { params }).then(r => r.data),
   getActive: (carrierId, type, date) => 
-    api.get('/prices/active', { params: { carrierId, type, date } }).then(r => r.data),
+    api.get('/prices/active', { params: { carrier_id: carrierId, type, date } }).then(r => r.data),
   getOne: (id) => api.get(`/prices/${id}`).then(r => r.data),
   create: (data) => api.post('/prices', data).then(r => r.data),
   update: (id, data) => api.put(`/prices/${id}`, data).then(r => r.data),
@@ -52,7 +52,7 @@ export const proofs = {
   upload: (file, carrierId, period) => {
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('carrierId', carrierId)
+    formData.append('carrier_id', carrierId)
     formData.append('period', period)
     return api.post('/proofs/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
@@ -70,7 +70,7 @@ export const invoices = {
   upload: (file, carrierId, period) => {
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('carrierId', carrierId)
+    formData.append('carrier_id', carrierId)
     formData.append('period', period)
     return api.post('/invoices/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
@@ -78,7 +78,7 @@ export const invoices = {
   },
   update: (id, data) => api.put(`/invoices/${id}`, data).then(r => r.data),
   delete: (id) => api.delete(`/invoices/${id}`),
-  match: (id, proofId) => api.post(`/invoices/${id}/match`, { proofId }).then(r => r.data)
+  match: (id, proofId) => api.post(`/invoices/${id}/match`, { proof_id: proofId }).then(r => r.data)
 }
 
 // Analysis
