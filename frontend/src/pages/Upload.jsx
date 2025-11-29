@@ -2,8 +2,17 @@ import { useState, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, subMonths } from 'date-fns'
 import { cs } from 'date-fns/locale'
-import { Upload as UploadIcon, FileSpreadsheet, FileText, CheckCircle, AlertCircle, X } from 'lucide-react'
+import { Upload as UploadIcon, FileSpreadsheet, FileText, CheckCircle, AlertCircle, X, Trash2 } from 'lucide-react'
 import { proofs, invoices, carriers } from '../lib/api'
+
+function formatCZK(amount) {
+  if (amount == null) return '—'
+  return new Intl.NumberFormat('cs-CZ', { 
+    style: 'currency', 
+    currency: 'CZK',
+    maximumFractionDigits: 0 
+  }).format(amount)
+}
 
 function getPeriodOptions() {
   const options = []
@@ -26,6 +35,26 @@ export default function Upload() {
   const { data: carrierList } = useQuery({
     queryKey: ['carriers'],
     queryFn: carriers.getAll
+  })
+
+  // Fetch invoices for selected carrier and period
+  const { data: invoiceList, isLoading: loadingInvoices } = useQuery({
+    queryKey: ['invoices', selectedCarrier, selectedPeriod],
+    queryFn: () => invoices.getAll({ 
+      carrier_id: selectedCarrier, 
+      period: selectedPeriod 
+    }),
+    enabled: !!selectedCarrier
+  })
+
+  // Fetch proofs for selected carrier and period
+  const { data: proofList } = useQuery({
+    queryKey: ['proofs', selectedCarrier, selectedPeriod],
+    queryFn: () => proofs.getAll({ 
+      carrier_id: selectedCarrier, 
+      period: selectedPeriod 
+    }),
+    enabled: !!selectedCarrier
   })
 
   const uploadProofMutation = useMutation({
@@ -70,6 +99,32 @@ export default function Upload() {
     }
   })
 
+  const deleteInvoiceMutation = useMutation({
+    mutationFn: (id) => invoices.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['invoices'])
+    }
+  })
+
+  const deleteProofMutation = useMutation({
+    mutationFn: (id) => proofs.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['proofs'])
+    }
+  })
+
+  const handleDeleteInvoice = (invoice) => {
+    if (confirm(`Opravdu smazat fakturu "${invoice.invoiceNumber}"?`)) {
+      deleteInvoiceMutation.mutate(invoice.id)
+    }
+  }
+
+  const handleDeleteProof = (proof) => {
+    if (confirm(`Opravdu smazat proof pro období "${proof.period}"? Toto může ovlivnit spárované faktury.`)) {
+      deleteProofMutation.mutate(proof.id)
+    }
+  }
+
   const handleFiles = useCallback((files) => {
     if (!selectedCarrier) {
       alert('Vyberte dopravce')
@@ -110,6 +165,7 @@ export default function Upload() {
   }, [])
 
   const isUploading = uploadProofMutation.isPending || uploadInvoiceMutation.isPending
+  const currentProof = proofList?.[0]
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -245,6 +301,124 @@ export default function Upload() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Current Proof */}
+      {selectedCarrier && currentProof && (
+        <div className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="font-semibold">Proof — {selectedPeriod}</h2>
+            <button
+              onClick={() => handleDeleteProof(currentProof)}
+              className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400"
+              title="Smazat proof"
+            >
+              <Trash2 size={18} />
+            </button>
+          </div>
+          <div className="p-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="text-gray-400">FIX:</span>
+                <span className="ml-2 font-medium">{formatCZK(currentProof.totalFix)}</span>
+              </div>
+              <div>
+                <span className="text-gray-400">KM:</span>
+                <span className="ml-2 font-medium">{formatCZK(currentProof.totalKm)}</span>
+              </div>
+              <div>
+                <span className="text-gray-400">Linehaul:</span>
+                <span className="ml-2 font-medium">{formatCZK(currentProof.totalLinehaul)}</span>
+              </div>
+              <div>
+                <span className="text-gray-400">Celkem:</span>
+                <span className="ml-2 font-medium text-alza-orange">{formatCZK(currentProof.grandTotal)}</span>
+              </div>
+            </div>
+            {currentProof.fileName && (
+              <div className="mt-3 text-xs text-gray-500">
+                Soubor: {currentProof.fileName}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Invoices List */}
+      {selectedCarrier && (
+        <div className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="font-semibold">Nahrané faktury — {selectedPeriod}</h2>
+            <span className="badge badge-info">{invoiceList?.length || 0} faktur</span>
+          </div>
+          
+          {loadingInvoices ? (
+            <div className="p-8 text-center text-gray-500">
+              Načítám...
+            </div>
+          ) : !invoiceList?.length ? (
+            <div className="p-8 text-center text-gray-500">
+              <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>Žádné faktury pro toto období</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Číslo faktury</th>
+                    <th>Typ</th>
+                    <th className="text-right">Částka bez DPH</th>
+                    <th className="text-right">DPH</th>
+                    <th className="text-right">Celkem</th>
+                    <th>Status</th>
+                    <th className="w-16"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoiceList.map(invoice => (
+                    <tr key={invoice.id}>
+                      <td className="font-medium">{invoice.invoiceNumber}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          {invoice.items?.map((item, idx) => (
+                            <span key={idx} className="badge badge-info">
+                              {(item.itemType || '').replace('ALZABOXY ', '').toUpperCase()}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="text-right">{formatCZK(invoice.totalWithoutVat)}</td>
+                      <td className="text-right text-gray-400">{formatCZK(invoice.vatAmount)}</td>
+                      <td className="text-right font-medium">{formatCZK(invoice.totalWithVat)}</td>
+                      <td>
+                        <span className={`badge ${
+                          invoice.status === 'matched' ? 'badge-success' :
+                          invoice.status === 'disputed' ? 'badge-error' :
+                          'badge-warning'
+                        }`}>
+                          {invoice.status === 'matched' ? 'Spárováno' :
+                           invoice.status === 'disputed' ? 'Sporná' :
+                           'Ke kontrole'}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          onClick={() => handleDeleteInvoice(invoice)}
+                          disabled={deleteInvoiceMutation.isPending}
+                          className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400 disabled:opacity-50"
+                          title="Smazat fakturu"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
