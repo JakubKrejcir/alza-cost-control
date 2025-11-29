@@ -23,16 +23,17 @@ app = FastAPI(
     description="Backend API pro kontrolu nákladů na dopravu",
     version="2.0.0",
     lifespan=lifespan,
-    redirect_slashes=False  # Disable automatic redirects
+    redirect_slashes=True  # Enable automatic redirects
 )
 
-# CORS - allow all origins for now
+# CORS - allow all origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,  # Must be False when allow_origins is "*"
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Health check

@@ -14,7 +14,7 @@ from app.schemas import CarrierCreate, CarrierUpdate, CarrierResponse, CarrierWi
 router = APIRouter()
 
 
-@router.get("/", response_model=List[CarrierWithCounts])
+@router.get("", response_model=List[CarrierWithCounts])
 async def get_carriers(db: AsyncSession = Depends(get_db)):
     """Get all carriers with counts"""
     result = await db.execute(
@@ -75,7 +75,7 @@ async def get_carrier(carrier_id: int, db: AsyncSession = Depends(get_db)):
     return carrier
 
 
-@router.post("/", response_model=CarrierResponse, status_code=201)
+@router.post("", response_model=CarrierResponse, status_code=201)
 async def create_carrier(carrier_data: CarrierCreate, db: AsyncSession = Depends(get_db)):
     """Create new carrier"""
     carrier = Carrier(**carrier_data.model_dump())
