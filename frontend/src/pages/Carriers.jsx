@@ -136,7 +136,7 @@ export default function Carriers() {
                 </div>
               </div>
               
-              {/* Stats */}
+              {/* Stats - using camelCase from backend */}
               <div className="flex gap-6 mt-4 pt-4 border-t border-white/5">
                 <div className="flex items-center gap-2 text-sm text-gray-400">
                   <Building size={16} />
@@ -144,11 +144,15 @@ export default function Carriers() {
                 </div>
                 <div className="flex items-center gap-2 text-sm text-gray-400">
                   <FileText size={16} />
-                  {carrier._count?.proofs || 0} proofů
+                  {carrier.proofsCount || 0} proofů
                 </div>
                 <div className="flex items-center gap-2 text-sm text-gray-400">
                   <FileText size={16} />
-                  {carrier._count?.invoices || 0} faktur
+                  {carrier.invoicesCount || 0} faktur
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-400">
+                  <FileText size={16} />
+                  {carrier.contractsCount || 0} smluv
                 </div>
               </div>
               

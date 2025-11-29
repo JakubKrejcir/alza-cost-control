@@ -142,7 +142,7 @@ export default function Dashboard() {
       {proof && (
         <div className="card overflow-hidden">
           <div className="card-header">
-            <h2 className="font-semibold">Detail proofu – {selectedPeriod}</h2>
+            <h2 className="font-semibold">Detail proofu — {selectedPeriod}</h2>
           </div>
           <div className="p-6">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-6">
@@ -170,7 +170,7 @@ export default function Dashboard() {
       {/* Invoices List */}
       <div className="card overflow-hidden">
         <div className="card-header flex items-center justify-between">
-          <h2 className="font-semibold">Faktury – {selectedPeriod}</h2>
+          <h2 className="font-semibold">Faktury — {selectedPeriod}</h2>
           <span className="badge badge-info">{invoiceList.length} faktur</span>
         </div>
         
@@ -199,7 +199,7 @@ export default function Dashboard() {
                       <div className="flex flex-wrap gap-1">
                         {invoice.items?.map((item, idx) => (
                           <span key={idx} className="badge badge-info">
-                            {item.itemType.toUpperCase()}
+                            {(item.itemType || '').toUpperCase()}
                           </span>
                         ))}
                       </div>

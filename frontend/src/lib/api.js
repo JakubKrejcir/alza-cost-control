@@ -78,7 +78,13 @@ export const invoices = {
   },
   update: (id, data) => api.put(`/invoices/${id}`, data).then(r => r.data),
   delete: (id) => api.delete(`/invoices/${id}`),
-  match: (id, proofId) => api.post(`/invoices/${id}/match`, { proof_id: proofId }).then(r => r.data)
+  match: (id, proofId) => {
+    const formData = new FormData()
+    formData.append('proof_id', proofId)
+    return api.post(`/invoices/${id}/match`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(r => r.data)
+  }
 }
 
 // Analysis
