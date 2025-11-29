@@ -1,50 +1,56 @@
 """
-Plans API Router - Upload and parse planning XLSX files, compare with proofs
+Plans API Router - for comparing planned routes with actual proofs
 """
 from typing import List, Optional
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 from decimal import Decimal
 from io import BytesIO
 import re
-import json
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, Mapped, mapped_column, relationship
+from sqlalchemy import String, Integer, Boolean, DateTime, Date, ForeignKey, Text, Numeric
 import openpyxl
 
-from app.database import get_db
-from app.models import Carrier, Proof, ProofRouteDetail
+from app.database import get_db, Base
+from app.models import Carrier, Proof
 
 router = APIRouter()
 
 
-# ============================================================================
-# MODELS (inline for now - should be in models.py)
-# ============================================================================
-from sqlalchemy import String, Integer, Boolean, DateTime, Date, ForeignKey, Text, Numeric
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-from app.database import Base
-
+# =============================================================================
+# MODELS
+# =============================================================================
 
 class Plan(Base):
-    """Planning document - represents a daily/weekly route plan"""
+    """Planning document - represents a route plan for a date range"""
     __tablename__ = "Plan"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     carrier_id: Mapped[int] = mapped_column("carrierId", ForeignKey("Carrier.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(255))
-    plan_date: Mapped[date] = mapped_column("planDate", Date)
-    period: Mapped[Optional[str]] = mapped_column(String(20))
+    
+    # Date range for which this plan is valid
+    valid_from: Mapped[date] = mapped_column("validFrom", Date)
+    valid_to: Mapped[date] = mapped_column("validTo", Date)
+    
+    period: Mapped[Optional[str]] = mapped_column(String(20))  # MM/YYYY for grouping
     file_name: Mapped[Optional[str]] = mapped_column("fileName", String(255))
     
-    total_routes: Mapped[int] = mapped_column("totalRoutes", Integer, default=0)  # Last mile routes
-    linehauls_per_batch: Mapped[int] = mapped_column("linehaulsPerBatch", Integer, default=2)  # LH-LH = 2
-    total_distance_km: Mapped[Optional[Decimal]] = mapped_column("totalDistanceKm", Numeric(10, 2))
-    total_stops: Mapped[Optional[int]] = mapped_column("totalStops", Integer)
+    # Per-day metrics
+    routes_per_day: Mapped[int] = mapped_column("routesPerDay", Integer, default=0)
+    linehauls_per_batch: Mapped[int] = mapped_column("linehaulsPerBatch", Integer, default=2)
+    distance_per_day_km: Mapped[Optional[Decimal]] = mapped_column("distancePerDayKm", Numeric(10, 2))
+    stops_per_day: Mapped[Optional[int]] = mapped_column("stopsPerDay", Integer)
     
-    routes_dr: Mapped[int] = mapped_column("routesDr", Integer, default=0)  # Direct routes
-    routes_lh: Mapped[int] = mapped_column("routesLh", Integer, default=0)  # Routes with linehaul
+    routes_dr_per_day: Mapped[int] = mapped_column("routesDrPerDay", Integer, default=0)
+    routes_lh_per_day: Mapped[int] = mapped_column("routesLhPerDay", Integer, default=0)
+    
+    # Calculated totals for the entire period
+    working_days: Mapped[int] = mapped_column("workingDays", Integer, default=1)
+    total_routes: Mapped[int] = mapped_column("totalRoutes", Integer, default=0)
+    total_distance_km: Mapped[Optional[Decimal]] = mapped_column("totalDistanceKm", Numeric(10, 2))
     
     status: Mapped[str] = mapped_column(String(50), default="active")
     notes: Mapped[Optional[str]] = mapped_column(Text)
@@ -57,18 +63,17 @@ class Plan(Base):
 
 
 class PlanRoute(Base):
-    """Individual route in a plan"""
+    """Individual route in a plan (template for a day)"""
     __tablename__ = "PlanRoute"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     plan_id: Mapped[int] = mapped_column("planId", ForeignKey("Plan.id", ondelete="CASCADE"))
     
     vehicle_id: Mapped[str] = mapped_column("vehicleId", String(100))
-    route_code: Mapped[Optional[str]] = mapped_column("routeCode", String(50))
+    route_code: Mapped[Optional[str]] = mapped_column("routeCode", String(20))
     route_type: Mapped[str] = mapped_column("routeType", String(50))
-    
     start_location: Mapped[Optional[str]] = mapped_column("startLocation", String(255))
-    distance_km: Mapped[Optional[Decimal]] = mapped_column("distanceKm", Numeric(10, 2))
+    distance_km: Mapped[Decimal] = mapped_column("distanceKm", Numeric(10, 2), default=0)
     work_time_minutes: Mapped[Optional[int]] = mapped_column("workTimeMinutes", Integer)
     stops_count: Mapped[Optional[int]] = mapped_column("stopsCount", Integer)
 
@@ -76,70 +81,70 @@ class PlanRoute(Base):
 
 
 class PlanComparison(Base):
-    """Comparison between a plan and actual proof"""
+    """Comparison of aggregated plans with a proof"""
     __tablename__ = "PlanComparison"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plan_id: Mapped[int] = mapped_column("planId", ForeignKey("Plan.id", ondelete="CASCADE"))
     proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
     
+    # Which plans were included (comma-separated IDs)
+    plan_ids: Mapped[str] = mapped_column("planIds", Text)
+    
+    # Aggregated plan totals
+    plans_count: Mapped[int] = mapped_column("plansCount", Integer, default=0)
+    total_working_days: Mapped[int] = mapped_column("totalWorkingDays", Integer, default=0)
     routes_planned: Mapped[int] = mapped_column("routesPlanned", Integer, default=0)
     routes_actual: Mapped[int] = mapped_column("routesActual", Integer, default=0)
     routes_difference: Mapped[int] = mapped_column("routesDifference", Integer, default=0)
     
-    distance_planned_km: Mapped[Optional[Decimal]] = mapped_column("distancePlannedKm", Numeric(10, 2))
-    distance_actual_km: Mapped[Optional[Decimal]] = mapped_column("distanceActualKm", Numeric(10, 2))
+    distance_planned_km: Mapped[Optional[Decimal]] = mapped_column("distancePlannedKm", Numeric(12, 2))
     
-    cost_planned: Mapped[Optional[Decimal]] = mapped_column("costPlanned", Numeric(12, 2))
     cost_actual: Mapped[Optional[Decimal]] = mapped_column("costActual", Numeric(12, 2))
-    cost_difference: Mapped[Optional[Decimal]] = mapped_column("costDifference", Numeric(12, 2))
     
     extra_routes: Mapped[int] = mapped_column("extraRoutes", Integer, default=0)
     missing_routes: Mapped[int] = mapped_column("missingRoutes", Integer, default=0)
     combined_routes: Mapped[int] = mapped_column("combinedRoutes", Integer, default=0)
-    reinforcements: Mapped[int] = mapped_column("reinforcements", Integer, default=0)
     
     differences_json: Mapped[Optional[str]] = mapped_column("differencesJson", Text)
-    status: Mapped[str] = mapped_column(String(50), default="pending")
+    status: Mapped[str] = mapped_column(String(50), default="completed")
     notes: Mapped[Optional[str]] = mapped_column(Text)
     
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
-    plan: Mapped["Plan"] = relationship()
-    proof: Mapped["Proof"] = relationship()
 
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
 
-# ============================================================================
-# PARSING FUNCTIONS
-# ============================================================================
+def count_working_days(start: date, end: date) -> int:
+    """Count working days (Mon-Fri) between two dates inclusive"""
+    count = 0
+    current = start
+    while current <= end:
+        if current.weekday() < 5:  # Monday = 0, Friday = 4
+            count += 1
+        current += timedelta(days=1)
+    return max(count, 1)
+
 
 def parse_plan_from_xlsx(file_content: bytes, plan_date: date) -> dict:
     """Parse planning data from XLSX file
     
-    Understanding of route types:
-    - LH-LH = 2 linehaul trips for the ENTIRE batch of deliveries (not per route!)
-             These are large trucks that bring goods for ALL last mile routes
-    - LH = 1 linehaul trip for the entire batch
-    - DR = Direct route (no linehaul, directly from warehouse)
-    
-    DPO = "Do půlnoci objednáš" - morning delivery (ordered before midnight)
-    SD = Same Day - evening delivery (ordered before noon)
-    
-    LH_SD_SPOJENE in proof = 2 last mile routes combined into 1 vehicle
+    LH-LH = 2 linehaul TRUCKS for ALL routes in the batch (not per route!)
     """
     wb = openpyxl.load_workbook(BytesIO(file_content), data_only=True)
     
     result = {
         'routes': [],
-        'total_routes': 0,  # Number of last mile routes (vehicles/deliveries)
-        'linehauls_per_batch': 0,  # Number of linehaul trucks per delivery batch (typically 2 for LH-LH)
+        'total_routes': 0,
+        'linehauls_per_batch': 0,
         'total_distance_km': Decimal('0'),
         'total_stops': 0,
-        'routes_dr': 0,  # Direct routes (no linehaul)
-        'routes_lh': 0,  # Routes served by linehaul
+        'routes_dr': 0,
+        'routes_lh': 0,
     }
     
-    # Try to find Routes sheet
+    # Find Routes sheet
     routes_sheet = None
     for name in ['Routes', 'Trasy', 'routes']:
         if name in wb.sheetnames:
@@ -165,7 +170,7 @@ def parse_plan_from_xlsx(file_content: bytes, plan_date: date) -> dict:
     if not header_row:
         raise ValueError("Could not find header row in Routes sheet")
     
-    # Map common column names
+    # Map column names
     col_map = {
         'vehicle_id': next((headers.get(k) for k in ['identifikátor vozidla', 'vehicle', 'vozidlo', 'trasa'] if k in headers), None),
         'carrier': next((headers.get(k) for k in ['dopravce', 'carrier'] if k in headers), None),
@@ -176,7 +181,6 @@ def parse_plan_from_xlsx(file_content: bytes, plan_date: date) -> dict:
         'route_type': next((headers.get(k) for k in ['dr/lh', 'typ', 'type', 'route_type'] if k in headers), None),
     }
     
-    # Track linehaul type (LH-LH means 2 trucks for the batch)
     linehaul_type_detected = None
     
     # Parse routes
@@ -188,22 +192,19 @@ def parse_plan_from_xlsx(file_content: bytes, plan_date: date) -> dict:
         
         vehicle_id = str(row[col_map['vehicle_id']]) if col_map['vehicle_id'] is not None else str(row[0])
         
-        # Extract route code (letter) from vehicle_id like "Moravskoslezsko A" -> "A"
         route_code_match = re.search(r'[A-Z]$', vehicle_id.strip())
         route_code = route_code_match.group(0) if route_code_match else vehicle_id[-1] if vehicle_id else None
         
-        # Get route type
         route_type_raw = row[col_map['route_type']] if col_map['route_type'] is not None else 'LH'
         route_type = str(route_type_raw) if route_type_raw else 'LH'
         
-        # Detect linehaul type for the batch
+        # Detect linehaul type for the batch (once)
         if linehaul_type_detected is None and route_type:
             linehaul_count = route_type.upper().count('LH')
             if linehaul_count > 0:
-                result['linehauls_per_batch'] = linehaul_count  # LH-LH = 2, LH = 1
+                result['linehauls_per_batch'] = linehaul_count
                 linehaul_type_detected = route_type
         
-        # Categorize route
         is_direct = 'DR' in route_type.upper() and 'LH' not in route_type.upper()
         
         if is_direct:
@@ -213,7 +214,7 @@ def parse_plan_from_xlsx(file_content: bytes, plan_date: date) -> dict:
             result['routes_lh'] += 1
             route_type_normalized = 'LH'
         
-        # Get distance
+        # Distance
         distance_km = Decimal('0')
         if col_map['distance'] is not None and row[col_map['distance']]:
             try:
@@ -221,7 +222,7 @@ def parse_plan_from_xlsx(file_content: bytes, plan_date: date) -> dict:
             except:
                 pass
         
-        # Get stops count
+        # Stops
         stops_count = 0
         if col_map['stops'] is not None and row[col_map['stops']]:
             try:
@@ -229,7 +230,7 @@ def parse_plan_from_xlsx(file_content: bytes, plan_date: date) -> dict:
             except:
                 pass
         
-        # Get work time in minutes
+        # Work time
         work_time_minutes = 0
         if col_map['work_time'] is not None and row[col_map['work_time']]:
             work_time = row[col_map['work_time']]
@@ -259,57 +260,58 @@ def parse_plan_from_xlsx(file_content: bytes, plan_date: date) -> dict:
     return result
 
 
-def compare_plan_with_proof(plan_data: dict, proof: Proof, plan_routes: list) -> dict:
-    """Compare plan with actual proof data
+def aggregate_plans_for_period(plans: List[Plan]) -> dict:
+    """Aggregate multiple plans into totals for comparison with proof"""
+    aggregated = {
+        'plan_ids': [p.id for p in plans],
+        'plans_count': len(plans),
+        'total_working_days': sum(p.working_days for p in plans),
+        'total_routes': sum(p.total_routes for p in plans),
+        'total_routes_dr': sum(p.routes_dr_per_day * p.working_days for p in plans),
+        'total_routes_lh': sum(p.routes_lh_per_day * p.working_days for p in plans),
+        'total_distance_km': sum(float(p.total_distance_km or 0) for p in plans),
+        'routes_per_day_avg': 0,
+        'linehauls_per_batch': plans[0].linehauls_per_batch if plans else 2,
+    }
     
-    Plan contains:
-    - total_routes: number of last mile delivery routes (vehicles/vans)
-    - linehauls_per_batch: number of linehaul trucks for the entire batch (LH-LH = 2)
-    - routes_lh: routes served by linehaul
-    - routes_dr: direct routes
+    if aggregated['total_working_days'] > 0:
+        aggregated['routes_per_day_avg'] = aggregated['total_routes'] / aggregated['total_working_days']
     
-    Proof contains:
-    - route_details with types: DR, LH_DPO, LH_SD, LH_SD_SPOJENE
-    - LH_DPO = morning last mile routes (DPO delivery)
-    - LH_SD = evening last mile routes (Same Day delivery)
-    - LH_SD_SPOJENE = two last mile routes combined into one vehicle
-    - DR = direct routes (no linehaul)
-    
-    Note: LH-LH means 2 linehaul TRUCKS for ALL routes in the batch,
-    not 2 linehauls per route!
-    """
+    return aggregated
+
+
+def compare_aggregated_plans_with_proof(aggregated: dict, proof: Proof) -> dict:
+    """Compare aggregated plans with actual proof data"""
     comparison = {
-        # Last mile routes comparison
-        'routes_planned': plan_data['total_routes'],
+        'plans_count': aggregated['plans_count'],
+        'plan_ids': aggregated['plan_ids'],
+        'total_working_days': aggregated['total_working_days'],
+        
+        'routes_planned': aggregated['total_routes'],
         'routes_actual': 0,
         'routes_difference': 0,
         
-        # Linehaul trucks (for the entire batch)
-        'linehauls_per_batch': plan_data.get('linehauls_per_batch', 2),
+        'linehauls_per_batch': aggregated['linehauls_per_batch'],
         
-        # Distance
-        'distance_planned_km': float(plan_data['total_distance_km']),
+        'distance_planned_km': aggregated['total_distance_km'],
         'distance_actual_km': 0,
         
-        # Costs
-        'cost_planned': 0,
         'cost_actual': float(proof.grand_total or 0),
-        'cost_difference': 0,
         
-        # Route breakdown
         'extra_routes': 0,
         'missing_routes': 0,
-        'combined_routes': 0,  # LH_SD_SPOJENE count (2 routes merged into 1)
+        'combined_routes': 0,
         
-        # Detailed comparison
         'differences': [],
         'route_comparison': [],
         
         'plan_breakdown': {
-            'total_routes': plan_data['total_routes'],
-            'routes_with_linehaul': plan_data['routes_lh'],
-            'direct_routes': plan_data['routes_dr'],
-            'linehauls_per_batch': plan_data.get('linehauls_per_batch', 2),
+            'total_routes': aggregated['total_routes'],
+            'routes_lh': aggregated['total_routes_lh'],
+            'routes_dr': aggregated['total_routes_dr'],
+            'working_days': aggregated['total_working_days'],
+            'routes_per_day_avg': aggregated['routes_per_day_avg'],
+            'linehauls_per_batch': aggregated['linehauls_per_batch'],
         },
         'proof_breakdown': {
             'lh_dpo': 0,
@@ -325,19 +327,16 @@ def compare_plan_with_proof(plan_data: dict, proof: Proof, plan_routes: list) ->
         route_type = route_detail.route_type.upper()
         count = route_detail.count
         
-        # Update proof breakdown
-        if 'DPO' in route_type or route_type == 'LH_DPO':
+        if 'DPO' in route_type:
             comparison['proof_breakdown']['lh_dpo'] += count
         elif 'SPOJENE' in route_type or 'SPOJENÉ' in route_type:
             comparison['proof_breakdown']['lh_sd_spojene'] += count
             comparison['combined_routes'] += count
-        elif 'SD' in route_type or route_type == 'LH_SD':
+        elif 'SD' in route_type:
             comparison['proof_breakdown']['lh_sd'] += count
         elif 'DR' in route_type:
             comparison['proof_breakdown']['dr'] += count
     
-    # Calculate actual total routes
-    # LH_SD_SPOJENE = 1 vehicle doing 2 routes, so count as 1 for vehicle comparison
     comparison['routes_actual'] = (
         comparison['proof_breakdown']['lh_dpo'] +
         comparison['proof_breakdown']['lh_sd'] +
@@ -346,38 +345,27 @@ def compare_plan_with_proof(plan_data: dict, proof: Proof, plan_routes: list) ->
     )
     comparison['proof_breakdown']['total_routes'] = comparison['routes_actual']
     
-    # How many "logical routes" were actually covered
-    # Combined routes = 1 vehicle covers 2 routes
-    logical_routes_covered = (
-        comparison['proof_breakdown']['lh_dpo'] +
-        comparison['proof_breakdown']['lh_sd'] +
-        (comparison['proof_breakdown']['lh_sd_spojene'] * 2) +  # Each combined = 2 routes
-        comparison['proof_breakdown']['dr']
-    )
-    
     comparison['routes_difference'] = comparison['routes_actual'] - comparison['routes_planned']
     
-    # Build route type comparison
-    # Compare LH routes (plan) vs LH_DPO + LH_SD + LH_SD_SPOJENE (proof)
-    planned_lh = plan_data['routes_lh']
-    actual_lh_vehicles = (
+    # Route type comparison
+    planned_lh = aggregated['total_routes_lh']
+    actual_lh = (
         comparison['proof_breakdown']['lh_dpo'] + 
         comparison['proof_breakdown']['lh_sd'] + 
         comparison['proof_breakdown']['lh_sd_spojene']
     )
-    lh_diff = actual_lh_vehicles - planned_lh
+    lh_diff = actual_lh - planned_lh
     
     comparison['route_comparison'].append({
         'type': 'Last Mile trasy (LH)',
         'planned': planned_lh,
-        'actual': actual_lh_vehicles,
+        'actual': actual_lh,
         'difference': lh_diff,
         'status': 'ok' if lh_diff == 0 else 'extra' if lh_diff > 0 else 'missing',
         'note': f'DPO: {comparison["proof_breakdown"]["lh_dpo"]}, SD: {comparison["proof_breakdown"]["lh_sd"]}, Spojené: {comparison["proof_breakdown"]["lh_sd_spojene"]}'
     })
     
-    # Compare DR routes
-    planned_dr = plan_data['routes_dr']
+    planned_dr = aggregated['total_routes_dr']
     actual_dr = comparison['proof_breakdown']['dr']
     dr_diff = actual_dr - planned_dr
     
@@ -390,28 +378,16 @@ def compare_plan_with_proof(plan_data: dict, proof: Proof, plan_routes: list) ->
         'note': ''
     })
     
-    # Info about linehaul trucks
     comparison['route_comparison'].append({
         'type': 'Linehaul kamiony',
-        'planned': plan_data.get('linehauls_per_batch', 2),
-        'actual': plan_data.get('linehauls_per_batch', 2),  # Same as planned (from proof linehaul section)
+        'planned': aggregated['linehauls_per_batch'],
+        'actual': aggregated['linehauls_per_batch'],
         'difference': 0,
         'status': 'info',
-        'note': 'LH-LH = 2 kamiony pro celý rozvoz'
+        'note': f'LH-LH = {aggregated["linehauls_per_batch"]} kamiony/den'
     })
     
-    # Info about combined routes
-    if comparison['combined_routes'] > 0:
-        comparison['route_comparison'].append({
-            'type': 'Spojené trasy',
-            'planned': 0,
-            'actual': comparison['combined_routes'],
-            'difference': comparison['combined_routes'],
-            'status': 'info',
-            'note': f'{comparison["combined_routes"]} vozidel pokrývá {comparison["combined_routes"] * 2} tras'
-        })
-    
-    # Generate differences list
+    # Generate differences
     if lh_diff > 0:
         comparison['extra_routes'] += lh_diff
         comparison['differences'].append({
@@ -451,18 +427,15 @@ def compare_plan_with_proof(plan_data: dict, proof: Proof, plan_routes: list) ->
             'type': 'info',
             'category': 'Efektivita',
             'count': comparison['combined_routes'],
-            'message': f'Spojeno {comparison["combined_routes"]} tras do jednoho vozidla (úspora {comparison["combined_routes"]} vozidel)'
+            'message': f'Spojeno {comparison["combined_routes"]} tras (úspora {comparison["combined_routes"]} vozidel)'
         })
-    
-    # Cost difference
-    comparison['cost_difference'] = comparison['cost_actual'] - comparison['cost_planned']
     
     return comparison
 
 
-# ============================================================================
+# =============================================================================
 # API ENDPOINTS
-# ============================================================================
+# =============================================================================
 
 @router.get("")
 async def get_plans(
@@ -470,7 +443,7 @@ async def get_plans(
     period: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all plans with optional filters"""
+    """Get all plans with filters"""
     query = select(Plan).options(selectinload(Plan.carrier))
     
     filters = []
@@ -482,7 +455,7 @@ async def get_plans(
     if filters:
         query = query.where(and_(*filters))
     
-    query = query.order_by(Plan.plan_date.desc())
+    query = query.order_by(Plan.valid_from.desc())
     
     result = await db.execute(query)
     plans = result.scalars().all()
@@ -492,28 +465,37 @@ async def get_plans(
         'carrierId': p.carrier_id,
         'carrierName': p.carrier.name if p.carrier else None,
         'name': p.name,
-        'planDate': p.plan_date.isoformat() if p.plan_date else None,
+        'validFrom': p.valid_from.isoformat(),
+        'validTo': p.valid_to.isoformat(),
         'period': p.period,
-        'fileName': p.file_name,
+        'workingDays': p.working_days,
+        'routesPerDay': p.routes_per_day,
         'totalRoutes': p.total_routes,
         'totalDistanceKm': float(p.total_distance_km) if p.total_distance_km else 0,
-        'totalStops': p.total_stops,
-        'routesDr': p.routes_dr,
-        'routesLh': p.routes_lh,
+        'linehaulsPerBatch': p.linehauls_per_batch,
+        'routesDrPerDay': p.routes_dr_per_day,
+        'routesLhPerDay': p.routes_lh_per_day,
         'status': p.status,
         'createdAt': p.created_at.isoformat() if p.created_at else None,
     } for p in plans]
 
 
-@router.post("/upload")
+@router.post("/upload", status_code=201)
 async def upload_plan(
     file: UploadFile = File(...),
     carrier_id: int = Form(...),
-    plan_date: str = Form(...),  # YYYY-MM-DD format
+    valid_from: str = Form(...),  # Only require start date
     db: AsyncSession = Depends(get_db)
 ):
-    """Upload and parse planning XLSX file"""
-    # Verify carrier exists
+    """Upload and parse planning XLSX file
+    
+    valid_to is automatically calculated:
+    - If there's a next plan, valid_to = next_plan.valid_from - 1 day
+    - If no next plan, valid_to = end of month
+    
+    When uploading a new plan, previous plan's valid_to is also updated.
+    """
+    # Validate carrier
     carrier_result = await db.execute(
         select(Carrier).where(Carrier.id == carrier_id)
     )
@@ -523,57 +505,113 @@ async def upload_plan(
     
     # Parse date
     try:
-        parsed_date = datetime.strptime(plan_date, '%Y-%m-%d').date()
+        parsed_from = date.fromisoformat(valid_from)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     
-    # Calculate period (MM/YYYY)
-    period = parsed_date.strftime('%m/%Y')
+    period = parsed_from.strftime("%m/%Y")
     
-    # Read file content
+    # Calculate valid_to as end of month (will be adjusted if another plan is uploaded)
+    if parsed_from.month == 12:
+        end_of_month = date(parsed_from.year + 1, 1, 1) - timedelta(days=1)
+    else:
+        end_of_month = date(parsed_from.year, parsed_from.month + 1, 1) - timedelta(days=1)
+    
+    parsed_to = end_of_month
+    
+    # Check for existing plans in this period and update their valid_to if needed
+    existing_plans_result = await db.execute(
+        select(Plan)
+        .where(and_(
+            Plan.carrier_id == carrier_id,
+            Plan.period == period,
+            Plan.valid_from < parsed_from  # Plans that start before this one
+        ))
+        .order_by(Plan.valid_from.desc())
+    )
+    previous_plan = existing_plans_result.scalars().first()
+    
+    if previous_plan:
+        # Update previous plan's valid_to to day before this plan starts
+        previous_plan.valid_to = parsed_from - timedelta(days=1)
+        previous_plan.working_days = count_working_days(previous_plan.valid_from, previous_plan.valid_to)
+        previous_plan.total_routes = previous_plan.routes_per_day * previous_plan.working_days
+        if previous_plan.distance_per_day_km:
+            previous_plan.total_distance_km = previous_plan.distance_per_day_km * previous_plan.working_days
+    
+    # Check for plans that start after this one (to set our valid_to)
+    next_plans_result = await db.execute(
+        select(Plan)
+        .where(and_(
+            Plan.carrier_id == carrier_id,
+            Plan.period == period,
+            Plan.valid_from > parsed_from
+        ))
+        .order_by(Plan.valid_from.asc())
+    )
+    next_plan = next_plans_result.scalars().first()
+    
+    if next_plan:
+        # Our valid_to is day before next plan starts
+        parsed_to = next_plan.valid_from - timedelta(days=1)
+    
+    working_days = count_working_days(parsed_from, parsed_to)
+    
+    # Parse file
     content = await file.read()
     
-    # Parse XLSX
     try:
-        plan_data = parse_plan_from_xlsx(content, parsed_date)
+        plan_data = parse_plan_from_xlsx(content, parsed_from)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse XLSX: {str(e)}")
     
-    # Create plan record
+    # Create plan
     plan = Plan(
         carrier_id=carrier_id,
-        name=file.filename or f"Plan {plan_date}",
-        plan_date=parsed_date,
+        name=file.filename or f"Plan od {valid_from}",
+        valid_from=parsed_from,
+        valid_to=parsed_to,
         period=period,
         file_name=file.filename,
-        total_routes=plan_data['total_routes'],
+        routes_per_day=plan_data['total_routes'],
         linehauls_per_batch=plan_data['linehauls_per_batch'],
-        total_distance_km=plan_data['total_distance_km'],
-        total_stops=plan_data['total_stops'],
-        routes_dr=plan_data['routes_dr'],
-        routes_lh=plan_data['routes_lh'],
+        distance_per_day_km=plan_data['total_distance_km'],
+        stops_per_day=plan_data['total_stops'],
+        routes_dr_per_day=plan_data['routes_dr'],
+        routes_lh_per_day=plan_data['routes_lh'],
+        working_days=working_days,
+        total_routes=plan_data['total_routes'] * working_days,
+        total_distance_km=plan_data['total_distance_km'] * working_days if plan_data['total_distance_km'] else None,
         status='active'
     )
     db.add(plan)
     await db.flush()
     
-    # Create route records
-    for route_data in plan_data['routes']:
-        route = PlanRoute(
+    for route in plan_data['routes']:
+        db.add(PlanRoute(
             plan_id=plan.id,
-            vehicle_id=route_data['vehicle_id'],
-            route_code=route_data['route_code'],
-            route_type=route_data['route_type'],
-            start_location=route_data['start_location'],
-            distance_km=route_data['distance_km'],
-            work_time_minutes=route_data['work_time_minutes'],
-            stops_count=route_data['stops_count'],
-        )
-        db.add(route)
+            vehicle_id=route['vehicle_id'],
+            route_code=route['route_code'],
+            route_type=route['route_type'],
+            start_location=route['start_location'],
+            distance_km=route['distance_km'],
+            work_time_minutes=route['work_time_minutes'],
+            stops_count=route['stops_count'],
+        ))
     
     await db.commit()
+    
+    # Prepare info about updated previous plan
+    updated_previous = None
+    if previous_plan:
+        updated_previous = {
+            'id': previous_plan.id,
+            'name': previous_plan.name,
+            'validTo': previous_plan.valid_to.isoformat(),
+            'workingDays': previous_plan.working_days,
+        }
     
     return {
         'success': True,
@@ -581,13 +619,17 @@ async def upload_plan(
         'data': {
             'id': plan.id,
             'name': plan.name,
-            'planDate': plan.plan_date.isoformat(),
+            'validFrom': plan.valid_from.isoformat(),
+            'validTo': plan.valid_to.isoformat(),
+            'validToNote': 'Konec měsíce' if parsed_to == end_of_month else 'Den před dalším plánem',
             'period': plan.period,
+            'workingDays': plan.working_days,
+            'routesPerDay': plan.routes_per_day,
             'totalRoutes': plan.total_routes,
             'totalDistanceKm': float(plan.total_distance_km) if plan.total_distance_km else 0,
             'linehaulsPerBatch': plan.linehauls_per_batch,
-            'routesDr': plan.routes_dr,
-            'routesLh': plan.routes_lh,
+            'routesDrPerDay': plan.routes_dr_per_day,
+            'routesLhPerDay': plan.routes_lh_per_day,
             'routes': [{
                 'vehicleId': r['vehicle_id'],
                 'routeCode': r['route_code'],
@@ -596,8 +638,39 @@ async def upload_plan(
                 'distanceKm': float(r['distance_km']),
                 'stopsCount': r['stops_count'],
             } for r in plan_data['routes']]
-        }
+        },
+        'updatedPreviousPlan': updated_previous
     }
+
+
+@router.get("/by-period/{period}")
+async def get_plans_by_period(
+    period: str,
+    carrier_id: int = Query(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get all plans for a specific period (MM/YYYY) and carrier"""
+    result = await db.execute(
+        select(Plan)
+        .options(selectinload(Plan.carrier))
+        .where(and_(
+            Plan.carrier_id == carrier_id,
+            Plan.period == period
+        ))
+        .order_by(Plan.valid_from)
+    )
+    plans = result.scalars().all()
+    
+    return [{
+        'id': p.id,
+        'name': p.name,
+        'validFrom': p.valid_from.isoformat(),
+        'validTo': p.valid_to.isoformat(),
+        'workingDays': p.working_days,
+        'routesPerDay': p.routes_per_day,
+        'totalRoutes': p.total_routes,
+        'linehaulsPerBatch': p.linehauls_per_batch,
+    } for p in plans]
 
 
 @router.get("/{plan_id}")
@@ -605,10 +678,7 @@ async def get_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
     """Get plan details with routes"""
     result = await db.execute(
         select(Plan)
-        .options(
-            selectinload(Plan.carrier),
-            selectinload(Plan.routes)
-        )
+        .options(selectinload(Plan.carrier), selectinload(Plan.routes))
         .where(Plan.id == plan_id)
     )
     plan = result.scalar_one_or_none()
@@ -621,46 +691,36 @@ async def get_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
         'carrierId': plan.carrier_id,
         'carrierName': plan.carrier.name if plan.carrier else None,
         'name': plan.name,
-        'planDate': plan.plan_date.isoformat() if plan.plan_date else None,
+        'validFrom': plan.valid_from.isoformat(),
+        'validTo': plan.valid_to.isoformat(),
         'period': plan.period,
-        'fileName': plan.file_name,
+        'workingDays': plan.working_days,
+        'routesPerDay': plan.routes_per_day,
         'totalRoutes': plan.total_routes,
         'totalDistanceKm': float(plan.total_distance_km) if plan.total_distance_km else 0,
-        'totalStops': plan.total_stops,
-        'routesDr': plan.routes_dr,
-        'routesLh': plan.routes_lh,
+        'linehaulsPerBatch': plan.linehauls_per_batch,
+        'routesDrPerDay': plan.routes_dr_per_day,
+        'routesLhPerDay': plan.routes_lh_per_day,
         'status': plan.status,
         'routes': [{
             'id': r.id,
             'vehicleId': r.vehicle_id,
             'routeCode': r.route_code,
             'routeType': r.route_type,
-            'startLocation': r.start_location,
             'distanceKm': float(r.distance_km) if r.distance_km else 0,
-            'workTimeMinutes': r.work_time_minutes,
             'stopsCount': r.stops_count,
         } for r in plan.routes]
     }
 
 
-@router.post("/{plan_id}/compare/{proof_id}")
-async def compare_plan_with_proof_endpoint(
-    plan_id: int,
+@router.post("/compare-with-proof/{proof_id}")
+async def compare_plans_with_proof(
     proof_id: int,
+    plan_ids: List[int] = Query(...),
     db: AsyncSession = Depends(get_db)
 ):
-    """Compare a plan with a proof"""
-    # Get plan with routes
-    plan_result = await db.execute(
-        select(Plan)
-        .options(selectinload(Plan.routes))
-        .where(Plan.id == plan_id)
-    )
-    plan = plan_result.scalar_one_or_none()
-    if not plan:
-        raise HTTPException(status_code=404, detail="Plan not found")
-    
-    # Get proof with details
+    """Compare multiple plans with a proof"""
+    # Get proof
     proof_result = await db.execute(
         select(Proof)
         .options(
@@ -673,95 +733,73 @@ async def compare_plan_with_proof_endpoint(
     if not proof:
         raise HTTPException(status_code=404, detail="Proof not found")
     
-    # Verify same carrier
-    if plan.carrier_id != proof.carrier_id:
-        raise HTTPException(status_code=400, detail="Plan and proof must belong to the same carrier")
+    # Get plans
+    plans_result = await db.execute(
+        select(Plan)
+        .options(selectinload(Plan.carrier))
+        .where(Plan.id.in_(plan_ids))
+        .order_by(Plan.valid_from)
+    )
+    plans = plans_result.scalars().all()
     
-    # Build plan data dict
-    plan_data = {
-        'total_routes': plan.total_routes,
-        'total_distance_km': plan.total_distance_km or Decimal('0'),
-        'routes_dr': plan.routes_dr,
-        'routes_lh': plan.routes_lh,
-    }
+    if not plans:
+        raise HTTPException(status_code=400, detail="No plans found")
     
-    # Run comparison
-    comparison = compare_plan_with_proof(plan_data, proof, plan.routes)
+    # Verify all plans are for same carrier as proof
+    for plan in plans:
+        if plan.carrier_id != proof.carrier_id:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Plan {plan.id} is for different carrier"
+            )
+    
+    # Aggregate plans and compare
+    aggregated = aggregate_plans_for_period(plans)
+    comparison = compare_aggregated_plans_with_proof(aggregated, proof)
     
     # Save comparison
-    comp_record = PlanComparison(
-        plan_id=plan_id,
+    import json
+    plan_comparison = PlanComparison(
         proof_id=proof_id,
-        routes_planned=comparison['routes_planned'],
+        plan_ids=','.join(str(pid) for pid in plan_ids),
+        plans_count=len(plans),
+        total_working_days=aggregated['total_working_days'],
+        routes_planned=aggregated['total_routes'],
         routes_actual=comparison['routes_actual'],
         routes_difference=comparison['routes_difference'],
-        distance_planned_km=Decimal(str(comparison['distance_planned_km'])),
-        distance_actual_km=Decimal(str(comparison.get('distance_actual_km', 0))),
-        cost_planned=Decimal(str(comparison['cost_planned'])),
+        distance_planned_km=Decimal(str(aggregated['total_distance_km'])),
         cost_actual=Decimal(str(comparison['cost_actual'])),
-        cost_difference=Decimal(str(comparison['cost_difference'])),
         extra_routes=comparison['extra_routes'],
         missing_routes=comparison['missing_routes'],
         combined_routes=comparison['combined_routes'],
-        reinforcements=comparison['reinforcements'],
         differences_json=json.dumps(comparison['differences']),
-        status='pending'
+        status='completed'
     )
-    db.add(comp_record)
+    db.add(plan_comparison)
     await db.commit()
-    await db.refresh(comp_record)
     
     return {
-        'id': comp_record.id,
-        'planId': plan_id,
-        'proofId': proof_id,
-        'plan': {
-            'name': plan.name,
-            'planDate': plan.plan_date.isoformat() if plan.plan_date else None,
-            'totalRoutes': plan.total_routes,
-        },
+        'success': True,
+        'comparison': comparison,
+        'plans': [{
+            'id': p.id,
+            'name': p.name,
+            'validFrom': p.valid_from.isoformat(),
+            'validTo': p.valid_to.isoformat(),
+            'workingDays': p.working_days,
+            'totalRoutes': p.total_routes,
+        } for p in plans],
         'proof': {
+            'id': proof.id,
             'period': proof.period,
             'grandTotal': float(proof.grand_total) if proof.grand_total else 0,
-        },
-        'comparison': comparison
+        }
     }
 
 
-@router.get("/{plan_id}/comparisons")
-async def get_plan_comparisons(plan_id: int, db: AsyncSession = Depends(get_db)):
-    """Get all comparisons for a plan"""
-    result = await db.execute(
-        select(PlanComparison)
-        .options(selectinload(PlanComparison.proof))
-        .where(PlanComparison.plan_id == plan_id)
-        .order_by(PlanComparison.created_at.desc())
-    )
-    comparisons = result.scalars().all()
-    
-    return [{
-        'id': c.id,
-        'planId': c.plan_id,
-        'proofId': c.proof_id,
-        'proofPeriod': c.proof.period if c.proof else None,
-        'routesPlanned': c.routes_planned,
-        'routesActual': c.routes_actual,
-        'routesDifference': c.routes_difference,
-        'costPlanned': float(c.cost_planned) if c.cost_planned else 0,
-        'costActual': float(c.cost_actual) if c.cost_actual else 0,
-        'costDifference': float(c.cost_difference) if c.cost_difference else 0,
-        'extraRoutes': c.extra_routes,
-        'missingRoutes': c.missing_routes,
-        'combinedRoutes': c.combined_routes,
-        'reinforcements': c.reinforcements,
-        'status': c.status,
-        'createdAt': c.created_at.isoformat() if c.created_at else None,
-    } for c in comparisons]
-
-
-@router.delete("/{plan_id}")
+@router.delete("/{plan_id}", status_code=204)
 async def delete_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
-    """Delete a plan"""
+    """Delete plan"""
     result = await db.execute(select(Plan).where(Plan.id == plan_id))
     plan = result.scalar_one_or_none()
     
@@ -770,5 +808,3 @@ async def delete_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
     
     await db.delete(plan)
     await db.commit()
-    
-    return {"success": True, "message": "Plan deleted"}
