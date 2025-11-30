@@ -317,25 +317,87 @@ async def get_route_plan_by_id(plan_id: int, db: AsyncSession) -> Optional[Route
 
 
 async def update_route_plan_validity(carrier_id: int, db: AsyncSession, plan_type: str = None):
-    """Update valid_to dates for all plans of a carrier (optionally filtered by plan_type)"""
-    query = select(RoutePlan).where(RoutePlan.carrier_id == carrier_id)
+    """
+    Update valid_to dates for all plans of a carrier.
     
-    if plan_type:
-        query = query.where(RoutePlan.plan_type == plan_type)
+    Logic: Plans are grouped by validFrom (period start). 
+    All plans in a period end when the next period starts.
     
-    query = query.order_by(RoutePlan.valid_from.asc())
+    Example:
+    - Period 1 (2025-10-10): DPO + SD plans -> valid_to = 2025-10-23
+    - Period 2 (2025-10-24): BOTH plan -> valid_to = None (current)
+    """
+    # Get all unique validFrom dates for this carrier
+    result = await db.execute(
+        select(RoutePlan.valid_from)
+        .where(RoutePlan.carrier_id == carrier_id)
+        .distinct()
+        .order_by(RoutePlan.valid_from.asc())
+    )
+    periods = [row[0] for row in result.fetchall()]
+    
+    # For each period, set valid_to based on next period
+    for i, period_start in enumerate(periods):
+        # Get all plans for this period
+        plans_result = await db.execute(
+            select(RoutePlan).where(
+                and_(
+                    RoutePlan.carrier_id == carrier_id,
+                    RoutePlan.valid_from == period_start
+                )
+            )
+        )
+        plans = plans_result.scalars().all()
+        
+        # Determine valid_to
+        if i + 1 < len(periods):
+            # There's a next period - end day before it starts
+            valid_to = periods[i + 1] - timedelta(days=1)
+        else:
+            # Last period - no end date
+            valid_to = None
+        
+        # Update all plans in this period
+        for plan in plans:
+            plan.valid_to = valid_to
+
+
+async def delete_plans_for_date(
+    carrier_id: int, 
+    valid_from: datetime, 
+    db: AsyncSession,
+    exclude_plan_type: Optional[str] = None
+) -> int:
+    """
+    Delete all plans for a specific carrier and date.
+    
+    Args:
+        carrier_id: Carrier ID
+        valid_from: The date (period start)
+        db: Database session
+        exclude_plan_type: If set, don't delete plans of this type (for partial updates)
+    
+    Returns:
+        Number of deleted plans
+    """
+    query = select(RoutePlan).where(
+        and_(
+            RoutePlan.carrier_id == carrier_id,
+            RoutePlan.valid_from == valid_from
+        )
+    )
+    
+    if exclude_plan_type:
+        query = query.where(RoutePlan.plan_type != exclude_plan_type)
     
     result = await db.execute(query)
-    plans = result.scalars().all()
+    existing_plans = result.scalars().all()
     
-    for i, plan in enumerate(plans):
-        if i + 1 < len(plans):
-            # Set valid_to to day before next plan starts
-            next_plan = plans[i + 1]
-            plan.valid_to = next_plan.valid_from - timedelta(days=1)
-        else:
-            # Last plan - no end date
-            plan.valid_to = None
+    for plan in existing_plans:
+        await db.delete(plan)
+    
+    await db.flush()
+    return len(existing_plans)
 
 
 async def check_plan_type_conflicts(
@@ -345,8 +407,13 @@ async def check_plan_type_conflicts(
     db: AsyncSession
 ) -> Optional[str]:
     """
-    Check for conflicting plan types.
-    Returns error message if conflict exists, None otherwise.
+    Handle plan type conflicts by deleting conflicting plans.
+    
+    Rules:
+    - BOTH = complete plan, replaces everything for that date
+    - DPO/SD = partial plans, can coexist with each other but replace BOTH
+    
+    Returns error message only for unexpected issues, None otherwise.
     """
     # Find existing plans for same carrier and date
     result = await db.execute(
@@ -360,17 +427,23 @@ async def check_plan_type_conflicts(
     existing_plans = result.scalars().all()
     
     for existing in existing_plans:
-        # BOTH cannot coexist with DPO or SD
-        if plan_type == "BOTH" and existing.plan_type in ("DPO", "SD"):
-            return f"Pro datum {valid_from.strftime('%d.%m.%Y')} již existuje {existing.plan_type} plán. Nejprve ho smažte nebo nahrajte oddělené _DPO a _SD plány."
+        # BOTH replaces everything
+        if plan_type == "BOTH":
+            await db.delete(existing)
+            continue
         
-        if plan_type in ("DPO", "SD") and existing.plan_type == "BOTH":
-            return f"Pro datum {valid_from.strftime('%d.%m.%Y')} již existuje společný plán (BOTH). Nejprve ho smažte nebo nahrajte soubor bez přípony _DPO/_SD."
+        # Partial plan (DPO/SD/etc.) replaces BOTH
+        if existing.plan_type == "BOTH":
+            await db.delete(existing)
+            continue
         
-        # Same type - will be replaced (no conflict)
+        # Same type - will be replaced later in upload logic
         if plan_type == existing.plan_type:
-            return None  # OK, will replace
+            continue
+        
+        # Different partial types can coexist (DPO + SD, etc.)
     
+    await db.flush()
     return None
 
 
