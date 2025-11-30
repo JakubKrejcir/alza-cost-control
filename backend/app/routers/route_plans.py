@@ -275,7 +275,6 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             
             # Count linehauls per batch (LH-LH = 2 kamiony)
             if delivery_type_str and 'LH' in delivery_type_str:
-            if delivery_type_str and 'LH' in delivery_type_str:
                 lh_count = parse_linehaul_count(delivery_type_str)
                 if route_type == 'DPO':
                     dpo_lh_set.add(delivery_type_str)
