@@ -103,6 +103,14 @@ export const routePlans = {
       headers: { 'Content-Type': 'multipart/form-data' }
     }).then(r => r.data)
   },
+  uploadBatch: (files, carrierId) => {
+    const formData = new FormData()
+    files.forEach(file => formData.append('files', file))
+    formData.append('carrier_id', carrierId)
+    return api.post('/route-plans/upload-batch', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(r => r.data)
+  },
   compare: (planId, proofId) => api.get(`/route-plans/${planId}/compare/${proofId}`).then(r => r.data),
   comparePeriod: (proofId) => api.get(`/route-plans/compare-period/${proofId}`).then(r => r.data),
   delete: (id) => api.delete(`/route-plans/${id}`)

@@ -95,6 +95,26 @@ export default function RoutePlans() {
     }
   })
 
+  const uploadBatchMutation = useMutation({
+    mutationFn: ({ files, carrierId }) => routePlans.uploadBatch(files, carrierId),
+    onSuccess: (data) => {
+      setUploadResult({ 
+        success: data.success, 
+        message: data.message,
+        uploaded: data.uploaded,
+        errors: data.errors
+      })
+      queryClient.invalidateQueries(['route-plans'])
+      setPeriodComparison(null)
+    },
+    onError: (error) => {
+      setUploadResult({ 
+        success: false, 
+        message: error.response?.data?.detail || 'Chyba při nahrávání' 
+      })
+    }
+  })
+
   const deleteMutation = useMutation({
     mutationFn: (id) => routePlans.delete(id),
     onSuccess: () => {
@@ -117,18 +137,30 @@ export default function RoutePlans() {
       return
     }
 
-    const file = files[0]
-    if (!file) return
+    const fileList = Array.from(files)
+    if (fileList.length === 0) return
 
-    const ext = file.name.split('.').pop().toLowerCase()
-    if (ext !== 'xlsx' && ext !== 'xls') {
+    // Filter only xlsx/xls files
+    const validFiles = fileList.filter(file => {
+      const ext = file.name.split('.').pop().toLowerCase()
+      return ext === 'xlsx' || ext === 'xls'
+    })
+
+    if (validFiles.length === 0) {
       setUploadResult({ success: false, message: 'Pouze XLSX soubory jsou podporovány' })
       return
     }
 
     setUploadResult(null)
-    uploadMutation.mutate({ file, carrierId: selectedCarrier })
-  }, [selectedCarrier, uploadMutation])
+    
+    if (validFiles.length === 1) {
+      // Single file upload
+      uploadMutation.mutate({ file: validFiles[0], carrierId: selectedCarrier })
+    } else {
+      // Batch upload
+      uploadBatchMutation.mutate({ files: validFiles, carrierId: selectedCarrier })
+    }
+  }, [selectedCarrier, uploadMutation, uploadBatchMutation])
 
   const handleDrop = useCallback((e) => {
     e.preventDefault()
@@ -248,46 +280,82 @@ export default function RoutePlans() {
       >
         <div className="text-center">
           <Map className={`w-12 h-12 mx-auto mb-3 ${dragOver ? 'text-alza-orange' : 'text-gray-400'}`} />
-          <p className="text-lg mb-2">Přetáhněte plánovací XLSX soubor</p>
+          <p className="text-lg mb-2">Přetáhněte plánovací XLSX soubory</p>
           <p className="text-sm text-gray-400 mb-4">nebo</p>
           <label className="btn btn-primary cursor-pointer">
             <UploadIcon className="w-4 h-4 mr-2" />
-            Vybrat soubor
+            Vybrat soubory
             <input
               type="file"
               accept=".xlsx,.xls"
+              multiple
               onChange={(e) => handleFiles(e.target.files)}
               className="hidden"
             />
           </label>
           <p className="text-xs text-gray-500 mt-4">
-            Formát názvu: <code className="bg-white/10 px-1 rounded">plan_DD.MM.YYYY.xlsx</code>
+            Formát názvu: <code className="bg-white/10 px-1 rounded">Drivecool 25-08-22.xlsx</code> (YY-MM-DD)
             {' '}nebo{' '}
-            <code className="bg-white/10 px-1 rounded">plan_DD.MM.YYYY_DPO.xlsx</code>
-            {' '}pro oddělené plány
+            <code className="bg-white/10 px-1 rounded">plan_01.12.2025.xlsx</code>
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            Můžete nahrát více souborů najednou
           </p>
         </div>
       </div>
 
       {/* Upload Result */}
       {uploadResult && (
-        <div className={`card p-4 ${uploadResult.success ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
+        <div className={`card p-4 ${uploadResult.success ? 'bg-green-500/10 border-green-500/30' : uploadResult.errors?.length ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
           <div className="flex items-start gap-3">
             {uploadResult.success ? (
               <CheckCircle className="w-5 h-5 text-green-400 mt-0.5" />
+            ) : uploadResult.errors?.length ? (
+              <AlertTriangle className="w-5 h-5 text-yellow-400 mt-0.5" />
             ) : (
               <AlertCircle className="w-5 h-5 text-red-400 mt-0.5" />
             )}
-            <div>
-              <p className={uploadResult.success ? 'text-green-400' : 'text-red-400'}>
+            <div className="flex-1">
+              <p className={uploadResult.success ? 'text-green-400' : uploadResult.errors?.length ? 'text-yellow-400' : 'text-red-400'}>
                 {uploadResult.message}
               </p>
+              
+              {/* Single file result */}
               {uploadResult.data && (
                 <div className="mt-2 text-sm text-gray-400">
                   <span className="mr-4">Typ: <PlanTypeBadge type={uploadResult.data.planType} /></span>
                   <span className="mr-4">DPO tras: {uploadResult.data.dpoRoutesCount}</span>
                   <span className="mr-4">SD tras: {uploadResult.data.sdRoutesCount}</span>
                   <span>Platí od: {formatDate(uploadResult.data.validFrom)}</span>
+                </div>
+              )}
+              
+              {/* Batch upload results */}
+              {uploadResult.uploaded?.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  <p className="text-sm text-gray-400 font-medium">Úspěšně nahráno:</p>
+                  {uploadResult.uploaded.map((item, idx) => (
+                    <div key={idx} className="text-sm text-gray-400 flex items-center gap-2">
+                      <CheckCircle size={14} className="text-green-400" />
+                      <span>{item.fileName}</span>
+                      <span className="text-gray-500">→ {formatDate(item.validFrom)}</span>
+                      <PlanTypeBadge type={item.planType} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Batch upload errors */}
+              {uploadResult.errors?.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  <p className="text-sm text-red-400 font-medium">Chyby:</p>
+                  {uploadResult.errors.map((item, idx) => (
+                    <div key={idx} className="text-sm text-red-400 flex items-center gap-2">
+                      <AlertCircle size={14} />
+                      <span>{item.fileName}:</span>
+                      <span className="text-gray-400">{item.error}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

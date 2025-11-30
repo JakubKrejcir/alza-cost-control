@@ -93,48 +93,86 @@ def detect_plan_type_from_filename(filename: str) -> str:
 
 
 def parse_date_from_filename(filename: str) -> Optional[datetime]:
-    """Extract date from filename like 'plan_01.12.2025.xlsx' -> 2025-12-01"""
-    # Patterns for DD.MM.YYYY or DD-MM-YYYY first (more specific)
-    patterns = [
-        r'(\d{2})\.(\d{2})\.(\d{4})',  # DD.MM.YYYY
-        r'(\d{2})-(\d{2})-(\d{4})',    # DD-MM-YYYY
-        r'(\d{2})_(\d{2})_(\d{4})',    # DD_MM_YYYY
-        r'(\d{2})\.(\d{2})\.(\d{2})',  # DD.MM.YY
-        r'(\d{2})-(\d{2})-(\d{2})',    # DD-MM-YY or YY-MM-DD
-        r'(\d{2})_(\d{2})_(\d{2})',    # DD_MM_YY or YY_MM_YY
+    """
+    Extract date from filename.
+    
+    Supported formats:
+    - Drivecool 25-08-22.xlsx -> 2025-08-22 (YY-MM-DD)
+    - plan_01.12.2025.xlsx -> 2025-12-01 (DD.MM.YYYY)
+    - plan_01-12-2025.xlsx -> 2025-12-01 (DD-MM-YYYY)
+    - plan_01.12.25.xlsx -> 2025-12-01 (DD.MM.YY)
+    """
+    
+    # First try to match 4-digit year patterns (more specific)
+    patterns_4digit = [
+        (r'(\d{2})\.(\d{2})\.(\d{4})', 'DD.MM.YYYY'),
+        (r'(\d{2})-(\d{2})-(\d{4})', 'DD-MM-YYYY'),
+        (r'(\d{2})_(\d{2})_(\d{4})', 'DD_MM_YYYY'),
+        (r'(\d{4})\.(\d{2})\.(\d{2})', 'YYYY.MM.DD'),
+        (r'(\d{4})-(\d{2})-(\d{2})', 'YYYY-MM-DD'),
+        (r'(\d{4})_(\d{2})_(\d{2})', 'YYYY_MM_DD'),
     ]
     
-    for pattern in patterns:
+    for pattern, fmt in patterns_4digit:
         match = re.search(pattern, filename)
         if match:
-            groups = match.groups()
-            g0, g1, g2 = int(groups[0]), int(groups[1]), int(groups[2])
+            g0, g1, g2 = int(match.group(1)), int(match.group(2)), int(match.group(3))
             
-            # Try to figure out the format
-            # If g2 > 31, it's likely a year
-            if g2 > 31:
-                # DD.MM.YYYY format
-                day, month, year = g0, g1, g2
-            elif g0 > 31:
-                # YYYY.MM.DD format (unlikely but possible)
+            if fmt.startswith('YYYY'):
                 year, month, day = g0, g1, g2
-            elif g0 > 12 and g1 <= 12:
-                # DD.MM.YY (day > 12, so first is day)
-                day, month = g0, g1
-                year = 2000 + g2 if g2 < 100 else g2
-            elif g1 > 12 and g0 <= 12:
-                # MM.DD.YY (second > 12, so second is day)
-                month, day = g0, g1
-                year = 2000 + g2 if g2 < 100 else g2
             else:
-                # Assume DD.MM.YY (Czech format)
-                day, month = g0, g1
-                year = 2000 + g2 if g2 < 100 else g2
+                day, month, year = g0, g1, g2
             
             try:
                 return datetime(year, month, day)
             except ValueError:
                 continue
+    
+    # Now try 2-digit year patterns
+    patterns_2digit = [
+        r'(\d{2})\.(\d{2})\.(\d{2})',
+        r'(\d{2})-(\d{2})-(\d{2})',
+        r'(\d{2})_(\d{2})_(\d{2})',
+    ]
+    
+    for pattern in patterns_2digit:
+        match = re.search(pattern, filename)
+        if match:
+            g0, g1, g2 = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            
+            # Heuristics to determine format:
+            # If first number is 20-99, it's likely YY (year 2020-2099)
+            # If first number is > 12 and <= 31, it's likely DD
+            
+            # Check if it looks like YY-MM-DD (year first)
+            # Years 20-30 are common for current decade
+            if g0 >= 20 and g0 <= 35 and g1 >= 1 and g1 <= 12 and g2 >= 1 and g2 <= 31:
+                # YY-MM-DD format (e.g., 25-08-22 = 2025-08-22)
+                year = 2000 + g0
+                month = g1
+                day = g2
+            elif g0 > 12 and g0 <= 31:
+                # DD-MM-YY (day > 12, so first is day)
+                day, month = g0, g1
+                year = 2000 + g2
+            elif g2 > 12 and g2 <= 31:
+                # YY-MM-DD (last > 12, so last is day)
+                year = 2000 + g0
+                month = g1
+                day = g2
+            else:
+                # Default: assume DD-MM-YY (Czech format)
+                day, month = g0, g1
+                year = 2000 + g2
+            
+            try:
+                return datetime(year, month, day)
+            except ValueError:
+                # If failed, try YY-MM-DD interpretation
+                try:
+                    return datetime(2000 + g0, g1, g2)
+                except ValueError:
+                    continue
     
     return None
 
@@ -648,6 +686,132 @@ async def upload_route_plan(
             'totalDistanceKm': float(route_plan.total_distance_km) if route_plan.total_distance_km else 0,
             'totalStops': route_plan.total_stops,
         }
+    }
+
+
+@router.post("/upload-batch")
+async def upload_route_plans_batch(
+    files: List[UploadFile] = File(...),
+    carrier_id: int = Form(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """Upload multiple route plan XLSX files at once"""
+    from typing import List as TypingList
+    
+    # Validate carrier
+    carrier_result = await db.execute(
+        select(Carrier).where(Carrier.id == carrier_id)
+    )
+    if not carrier_result.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Carrier not found")
+    
+    results = []
+    errors = []
+    plan_types_updated = set()
+    
+    for file in files:
+        try:
+            content = await file.read()
+            plan_data = parse_route_plan_xlsx(content, file.filename)
+            
+            if not plan_data['valid_from']:
+                errors.append({
+                    'fileName': file.filename,
+                    'error': 'Nepodařilo se detekovat datum z názvu souboru'
+                })
+                continue
+            
+            parsed_date = plan_data['valid_from']
+            plan_type = plan_data['plan_type']
+            
+            # Check for conflicts
+            conflict_error = await check_plan_type_conflicts(carrier_id, parsed_date, plan_type, db)
+            if conflict_error:
+                errors.append({
+                    'fileName': file.filename,
+                    'error': conflict_error
+                })
+                continue
+            
+            # Check for existing plan with same type and date - replace it
+            existing_result = await db.execute(
+                select(RoutePlan).where(
+                    and_(
+                        RoutePlan.carrier_id == carrier_id,
+                        RoutePlan.valid_from == parsed_date,
+                        RoutePlan.plan_type == plan_type
+                    )
+                )
+            )
+            existing = existing_result.scalar_one_or_none()
+            
+            if existing:
+                await db.delete(existing)
+                await db.flush()
+            
+            # Create new plan
+            route_plan = RoutePlan(
+                carrier_id=carrier_id,
+                valid_from=parsed_date,
+                file_name=file.filename,
+                plan_type=plan_type,
+                total_routes=plan_data['summary']['total_routes'],
+                dpo_routes_count=plan_data['summary']['dpo_routes_count'],
+                sd_routes_count=plan_data['summary']['sd_routes_count'],
+                dpo_linehaul_count=plan_data['summary']['dpo_linehaul_count'],
+                sd_linehaul_count=plan_data['summary']['sd_linehaul_count'],
+                total_distance_km=plan_data['summary']['total_distance_km'],
+                total_stops=plan_data['summary']['total_stops'],
+            )
+            db.add(route_plan)
+            await db.flush()
+            
+            # Create routes
+            for route_data in plan_data['routes']:
+                route = RoutePlanRoute(
+                    route_plan_id=route_plan.id,
+                    route_name=route_data['route_name'],
+                    route_letter=route_data['route_letter'],
+                    carrier_name=route_data['carrier_name'],
+                    route_type=route_data['route_type'],
+                    delivery_type=route_data['delivery_type'],
+                    start_location=route_data['start_location'],
+                    stops_count=route_data['stops_count'],
+                    max_capacity=route_data['max_capacity'],
+                    start_time=route_data['start_time'],
+                    end_time=route_data['end_time'],
+                    work_time=route_data['work_time'],
+                    distance_km=route_data['distance_km'],
+                )
+                db.add(route)
+            
+            plan_types_updated.add(plan_type)
+            
+            results.append({
+                'fileName': file.filename,
+                'id': route_plan.id,
+                'planType': plan_type,
+                'validFrom': parsed_date.isoformat(),
+                'totalRoutes': route_plan.total_routes,
+            })
+            
+        except Exception as e:
+            errors.append({
+                'fileName': file.filename,
+                'error': str(e)
+            })
+    
+    # Update validity for all affected plan types
+    for plan_type in plan_types_updated:
+        await update_route_plan_validity(carrier_id, db, plan_type)
+    
+    await db.commit()
+    
+    return {
+        'success': len(errors) == 0,
+        'message': f'Nahráno {len(results)} souborů' + (f', {len(errors)} selhalo' if errors else ''),
+        'uploaded': results,
+        'errors': errors
     }
 
 
