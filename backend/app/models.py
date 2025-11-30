@@ -247,24 +247,44 @@ class ProofDailyDetail(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
     date: Mapped[datetime] = mapped_column(DateTime)
+    
+    # Počty tras (CNT)
     dr_dpo_count: Mapped[int] = mapped_column("drDpoCount", Integer, default=0)  # Direct Route DPO
     lh_dpo_count: Mapped[int] = mapped_column("lhDpoCount", Integer, default=0)  # Linehaul DPO
     dr_sd_count: Mapped[int] = mapped_column("drSdCount", Integer, default=0)    # Direct Route SD
     lh_sd_count: Mapped[int] = mapped_column("lhSdCount", Integer, default=0)    # Linehaul SD
+    
+    # Kilometry (KM)
+    dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("drDpoKm", Numeric(10, 2), default=0)
+    lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("lhDpoKm", Numeric(10, 2), default=0)
+    dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("drSdKm", Numeric(10, 2), default=0)
+    lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("lhSdKm", Numeric(10, 2), default=0)
 
     proof: Mapped["Proof"] = relationship(back_populates="daily_details")
 
     @property
-    def total_dpo(self) -> int:
+    def total_dpo_count(self) -> int:
         return self.dr_dpo_count + self.lh_dpo_count
 
     @property
-    def total_sd(self) -> int:
+    def total_sd_count(self) -> int:
         return self.dr_sd_count + self.lh_sd_count
 
     @property
     def total_routes(self) -> int:
-        return self.total_dpo + self.total_sd
+        return self.total_dpo_count + self.total_sd_count
+    
+    @property
+    def total_dpo_km(self) -> Decimal:
+        return (self.dr_dpo_km or 0) + (self.lh_dpo_km or 0)
+    
+    @property
+    def total_sd_km(self) -> Decimal:
+        return (self.dr_sd_km or 0) + (self.lh_sd_km or 0)
+    
+    @property
+    def total_km(self) -> Decimal:
+        return self.total_dpo_km + self.total_sd_km
 
 
 class Invoice(Base):

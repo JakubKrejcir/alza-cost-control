@@ -1247,7 +1247,7 @@ async def get_daily_breakdown(
     
     Returns each day with:
     - Planned routes from active plan(s)
-    - Actual routes from proof daily data
+    - Actual routes and km from proof daily data
     - Difference
     """
     # Get proof with daily details
@@ -1283,12 +1283,22 @@ async def get_daily_breakdown(
         for detail in proof.daily_details:
             date_key = detail.date.strftime('%Y-%m-%d')
             proof_daily_map[date_key] = {
+                # Počty
                 'drDpo': detail.dr_dpo_count,
                 'lhDpo': detail.lh_dpo_count,
                 'drSd': detail.dr_sd_count,
                 'lhSd': detail.lh_sd_count,
                 'totalDpo': detail.dr_dpo_count + detail.lh_dpo_count,
                 'totalSd': detail.dr_sd_count + detail.lh_sd_count,
+                # Kilometry
+                'drDpoKm': float(detail.dr_dpo_km or 0),
+                'lhDpoKm': float(detail.lh_dpo_km or 0),
+                'drSdKm': float(detail.dr_sd_km or 0),
+                'lhSdKm': float(detail.lh_sd_km or 0),
+                'totalDpoKm': float((detail.dr_dpo_km or 0) + (detail.lh_dpo_km or 0)),
+                'totalSdKm': float((detail.dr_sd_km or 0) + (detail.lh_sd_km or 0)),
+                'totalKm': float((detail.dr_dpo_km or 0) + (detail.lh_dpo_km or 0) + 
+                                (detail.dr_sd_km or 0) + (detail.lh_sd_km or 0)),
             }
     
     # Build daily breakdown
@@ -1304,6 +1314,7 @@ async def get_daily_breakdown(
     totals_actual = {
         'dpoRoutes': 0,
         'sdRoutes': 0,
+        'totalKm': 0,
     }
     
     while current <= last_day:
@@ -1335,6 +1346,7 @@ async def get_daily_breakdown(
         proof_day = proof_daily_map.get(date_key, {})
         actual_dpo = proof_day.get('totalDpo', 0)
         actual_sd = proof_day.get('totalSd', 0)
+        actual_km = proof_day.get('totalKm', 0)
         
         # Calculate differences
         diff_dpo = actual_dpo - planned_dpo
@@ -1349,15 +1361,19 @@ async def get_daily_breakdown(
             'plannedDpo': planned_dpo,
             'plannedSd': planned_sd,
             'plannedTotal': planned_dpo + planned_sd,
-            # Actual from proof
+            # Actual from proof - počty
             'actualDpo': actual_dpo,
             'actualSd': actual_sd,
             'actualTotal': actual_dpo + actual_sd,
-            # Detailed actual breakdown
+            # Actual from proof - detail počtů
             'actualDrDpo': proof_day.get('drDpo', 0),
             'actualLhDpo': proof_day.get('lhDpo', 0),
             'actualDrSd': proof_day.get('drSd', 0),
             'actualLhSd': proof_day.get('lhSd', 0),
+            # Actual from proof - kilometry
+            'actualDpoKm': proof_day.get('totalDpoKm', 0),
+            'actualSdKm': proof_day.get('totalSdKm', 0),
+            'actualTotalKm': actual_km,
             # Differences
             'diffDpo': diff_dpo,
             'diffSd': diff_sd,
@@ -1376,6 +1392,7 @@ async def get_daily_breakdown(
         totals_planned['sdRoutes'] += planned_sd
         totals_actual['dpoRoutes'] += actual_dpo
         totals_actual['sdRoutes'] += actual_sd
+        totals_actual['totalKm'] += actual_km
         
         current += timedelta(days=1)
     
@@ -1409,6 +1426,7 @@ async def get_daily_breakdown(
                 'dpoRoutes': totals_actual['dpoRoutes'],
                 'sdRoutes': totals_actual['sdRoutes'],
                 'totalRoutes': totals_actual['dpoRoutes'] + totals_actual['sdRoutes'],
+                'totalKm': totals_actual['totalKm'],
             },
             'diff': {
                 'dpoRoutes': totals_actual['dpoRoutes'] - totals_planned['dpoRoutes'],

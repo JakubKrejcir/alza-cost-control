@@ -13,7 +13,7 @@ import openpyxl
 
 from app.database import get_db
 from app.models import (
-    Proof, Carrier, ProofRouteDetail, ProofLinehaulDetail, ProofDepoDetail, ProofDailyDetail
+    Proof, Carrier, ProofRouteDetail, ProofLinehaulDetail, ProofDepoDetail, ProofDailyDetail, ProofAnalysis
 )
 from app.schemas import ProofResponse, ProofDetailResponse, ProofUpdate
 
@@ -25,9 +25,15 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
     Parse daily breakdown from 'Podkladove tab' sheet.
     
     Structure:
-    - Row 3: Dates (every 4th column starting from C)
-    - Row 4: Headers (DR DPO cnt, LH DPO cnt, DR SD cnt, LH SD cnt)
-    - Row 61 (or last row with 'Celkový súčet'): Daily totals
+    - TABLE 1 (CNT - počty tras): Rows 2-61
+      - Row 3: Dates (every 4th column starting from C)
+      - Row 4: Headers (DR DPO cnt, LH DPO cnt, DR SD cnt, LH SD cnt)
+      - Row 61: 'Celkový súčet' - daily totals
+      
+    - TABLE 2 (KM - kilometry): Rows 64-123
+      - Row 65: Dates (every 4th column starting from C)
+      - Row 66: Headers (DR DPO km, LH DPO km, DR SD km, LH SD km)
+      - Row 123: 'Celkový súčet' - daily totals
     """
     # Try different sheet names
     sheet_names = ['Podkladove tab', 'Podkladová tab', 'Podkladove', 'Daily']
@@ -41,30 +47,29 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
     if sheet is None:
         return []  # No daily data sheet found
     
-    # Find the summary row (contains 'Celkový súčet' or similar)
-    summary_row = None
-    for row in range(1, min(sheet.max_row + 1, 150)):
+    # Find CNT summary row (contains 'Celkový súčet' in first section)
+    cnt_summary_row = None
+    km_summary_row = None
+    
+    for row in range(1, min(sheet.max_row + 1, 70)):
         cell_b = sheet.cell(row=row, column=2).value
-        if cell_b and 'celkov' in str(cell_b).lower() and 'súčet' in str(cell_b).lower():
-            summary_row = row
-            break
-        if cell_b and 'celkov' in str(cell_b).lower() and 'součet' in str(cell_b).lower():
-            summary_row = row
+        if cell_b and 'celkov' in str(cell_b).lower() and ('súčet' in str(cell_b).lower() or 'součet' in str(cell_b).lower()):
+            cnt_summary_row = row
             break
     
-    if summary_row is None:
-        # Try to find it by looking for row 61 (common position)
-        if sheet.max_row >= 61:
-            cell_b = sheet.cell(row=61, column=2).value
-            if cell_b and 'celkov' in str(cell_b).lower():
-                summary_row = 61
+    # Find KM summary row (second 'Celkový súčet' after row 64)
+    for row in range(65, min(sheet.max_row + 1, 150)):
+        cell_b = sheet.cell(row=row, column=2).value
+        if cell_b and 'celkov' in str(cell_b).lower() and ('súčet' in str(cell_b).lower() or 'součet' in str(cell_b).lower()):
+            km_summary_row = row
+            break
     
-    if summary_row is None:
+    if cnt_summary_row is None:
         return []
     
-    daily_data = []
+    # Parse dates and CNT data
+    daily_data = {}
     
-    # Iterate through columns to find dates (every 4th column starting from 3)
     col = 3
     while col <= sheet.max_column:
         date_val = sheet.cell(row=3, column=col).value
@@ -86,32 +91,89 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
             col += 4
             continue
         
-        # Get values for this day
-        dr_dpo = sheet.cell(row=summary_row, column=col).value or 0
-        lh_dpo = sheet.cell(row=summary_row, column=col + 1).value or 0
-        dr_sd = sheet.cell(row=summary_row, column=col + 2).value or 0
-        lh_sd = sheet.cell(row=summary_row, column=col + 3).value or 0
+        date_key = date.strftime('%Y-%m-%d')
+        
+        # Get CNT values for this day
+        dr_dpo_cnt = sheet.cell(row=cnt_summary_row, column=col).value or 0
+        lh_dpo_cnt = sheet.cell(row=cnt_summary_row, column=col + 1).value or 0
+        dr_sd_cnt = sheet.cell(row=cnt_summary_row, column=col + 2).value or 0
+        lh_sd_cnt = sheet.cell(row=cnt_summary_row, column=col + 3).value or 0
         
         # Convert to int
         try:
-            dr_dpo = int(dr_dpo) if dr_dpo else 0
-            lh_dpo = int(lh_dpo) if lh_dpo else 0
-            dr_sd = int(dr_sd) if dr_sd else 0
-            lh_sd = int(lh_sd) if lh_sd else 0
+            dr_dpo_cnt = int(dr_dpo_cnt) if dr_dpo_cnt else 0
+            lh_dpo_cnt = int(lh_dpo_cnt) if lh_dpo_cnt else 0
+            dr_sd_cnt = int(dr_sd_cnt) if dr_sd_cnt else 0
+            lh_sd_cnt = int(lh_sd_cnt) if lh_sd_cnt else 0
         except (ValueError, TypeError):
-            dr_dpo = lh_dpo = dr_sd = lh_sd = 0
+            dr_dpo_cnt = lh_dpo_cnt = dr_sd_cnt = lh_sd_cnt = 0
         
-        daily_data.append({
+        daily_data[date_key] = {
             'date': date,
-            'dr_dpo_count': dr_dpo,
-            'lh_dpo_count': lh_dpo,
-            'dr_sd_count': dr_sd,
-            'lh_sd_count': lh_sd,
-        })
+            'dr_dpo_count': dr_dpo_cnt,
+            'lh_dpo_count': lh_dpo_cnt,
+            'dr_sd_count': dr_sd_cnt,
+            'lh_sd_count': lh_sd_cnt,
+            'dr_dpo_km': 0,
+            'lh_dpo_km': 0,
+            'dr_sd_km': 0,
+            'lh_sd_km': 0,
+        }
         
         col += 4
     
-    return daily_data
+    # Parse KM data if summary row found
+    if km_summary_row:
+        col = 3
+        while col <= sheet.max_column:
+            # KM table has dates in row 65
+            date_val = sheet.cell(row=65, column=col).value
+            
+            if date_val is None:
+                col += 4
+                continue
+            
+            # Parse date
+            if isinstance(date_val, datetime):
+                date = date_val
+            elif isinstance(date_val, str):
+                try:
+                    date = datetime.strptime(date_val[:10], '%Y-%m-%d')
+                except:
+                    col += 4
+                    continue
+            else:
+                col += 4
+                continue
+            
+            date_key = date.strftime('%Y-%m-%d')
+            
+            # Get KM values for this day
+            dr_dpo_km = sheet.cell(row=km_summary_row, column=col).value or 0
+            lh_dpo_km = sheet.cell(row=km_summary_row, column=col + 1).value or 0
+            dr_sd_km = sheet.cell(row=km_summary_row, column=col + 2).value or 0
+            lh_sd_km = sheet.cell(row=km_summary_row, column=col + 3).value or 0
+            
+            # Convert to float
+            try:
+                dr_dpo_km = float(dr_dpo_km) if dr_dpo_km else 0
+                lh_dpo_km = float(lh_dpo_km) if lh_dpo_km else 0
+                dr_sd_km = float(dr_sd_km) if dr_sd_km else 0
+                lh_sd_km = float(lh_sd_km) if lh_sd_km else 0
+            except (ValueError, TypeError):
+                dr_dpo_km = lh_dpo_km = dr_sd_km = lh_sd_km = 0
+            
+            # Update existing day data
+            if date_key in daily_data:
+                daily_data[date_key]['dr_dpo_km'] = dr_dpo_km
+                daily_data[date_key]['lh_dpo_km'] = lh_dpo_km
+                daily_data[date_key]['dr_sd_km'] = dr_sd_km
+                daily_data[date_key]['lh_sd_km'] = lh_sd_km
+            
+            col += 4
+    
+    # Return as sorted list
+    return [daily_data[key] for key in sorted(daily_data.keys())]
 
 
 def parse_proof_from_xlsx(file_content: bytes) -> dict:
@@ -365,6 +427,10 @@ async def upload_proof(
             lh_dpo_count=daily['lh_dpo_count'],
             dr_sd_count=daily['dr_sd_count'],
             lh_sd_count=daily['lh_sd_count'],
+            dr_dpo_km=Decimal(str(daily['dr_dpo_km'])) if daily['dr_dpo_km'] else Decimal('0'),
+            lh_dpo_km=Decimal(str(daily['lh_dpo_km'])) if daily['lh_dpo_km'] else Decimal('0'),
+            dr_sd_km=Decimal(str(daily['dr_sd_km'])) if daily['dr_sd_km'] else Decimal('0'),
+            lh_sd_km=Decimal(str(daily['lh_sd_km'])) if daily['lh_sd_km'] else Decimal('0'),
         )
         db.add(detail)
     
@@ -379,6 +445,8 @@ async def upload_proof(
             selectinload(Proof.linehaul_details),
             selectinload(Proof.depo_details),
             selectinload(Proof.daily_details),
+            selectinload(Proof.invoices),
+            selectinload(Proof.analyses),
         )
         .where(Proof.id == proof.id)
     )
@@ -409,7 +477,7 @@ async def get_proof(proof_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/{proof_id}/daily")
 async def get_proof_daily_details(proof_id: int, db: AsyncSession = Depends(get_db)):
-    """Get daily breakdown for a proof"""
+    """Get daily breakdown for a proof (counts and km)"""
     result = await db.execute(
         select(Proof)
         .options(selectinload(Proof.daily_details))
@@ -423,6 +491,7 @@ async def get_proof_daily_details(proof_id: int, db: AsyncSession = Depends(get_
     for detail in sorted(proof.daily_details, key=lambda x: x.date):
         daily_data.append({
             'date': detail.date.strftime('%Y-%m-%d'),
+            # Počty
             'drDpoCount': detail.dr_dpo_count,
             'lhDpoCount': detail.lh_dpo_count,
             'drSdCount': detail.dr_sd_count,
@@ -430,6 +499,14 @@ async def get_proof_daily_details(proof_id: int, db: AsyncSession = Depends(get_
             'totalDpo': detail.dr_dpo_count + detail.lh_dpo_count,
             'totalSd': detail.dr_sd_count + detail.lh_sd_count,
             'totalRoutes': detail.dr_dpo_count + detail.lh_dpo_count + detail.dr_sd_count + detail.lh_sd_count,
+            # Kilometry
+            'drDpoKm': float(detail.dr_dpo_km or 0),
+            'lhDpoKm': float(detail.lh_dpo_km or 0),
+            'drSdKm': float(detail.dr_sd_km or 0),
+            'lhSdKm': float(detail.lh_sd_km or 0),
+            'totalDpoKm': float((detail.dr_dpo_km or 0) + (detail.lh_dpo_km or 0)),
+            'totalSdKm': float((detail.dr_sd_km or 0) + (detail.lh_sd_km or 0)),
+            'totalKm': float((detail.dr_dpo_km or 0) + (detail.lh_dpo_km or 0) + (detail.dr_sd_km or 0) + (detail.lh_sd_km or 0)),
         })
     
     return {
@@ -437,6 +514,7 @@ async def get_proof_daily_details(proof_id: int, db: AsyncSession = Depends(get_
         'period': proof.period,
         'days': daily_data,
         'totals': {
+            # Počty
             'drDpo': sum(d['drDpoCount'] for d in daily_data),
             'lhDpo': sum(d['lhDpoCount'] for d in daily_data),
             'drSd': sum(d['drSdCount'] for d in daily_data),
@@ -444,6 +522,14 @@ async def get_proof_daily_details(proof_id: int, db: AsyncSession = Depends(get_
             'totalDpo': sum(d['totalDpo'] for d in daily_data),
             'totalSd': sum(d['totalSd'] for d in daily_data),
             'totalRoutes': sum(d['totalRoutes'] for d in daily_data),
+            # Kilometry
+            'drDpoKm': sum(d['drDpoKm'] for d in daily_data),
+            'lhDpoKm': sum(d['lhDpoKm'] for d in daily_data),
+            'drSdKm': sum(d['drSdKm'] for d in daily_data),
+            'lhSdKm': sum(d['lhSdKm'] for d in daily_data),
+            'totalDpoKm': sum(d['totalDpoKm'] for d in daily_data),
+            'totalSdKm': sum(d['totalSdKm'] for d in daily_data),
+            'totalKm': sum(d['totalKm'] for d in daily_data),
         }
     }
 
