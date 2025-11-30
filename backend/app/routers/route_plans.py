@@ -875,6 +875,11 @@ async def upload_route_plans_batch(
                 sd_linehaul_count=plan_data['summary']['sd_linehaul_count'],
                 total_distance_km=plan_data['summary']['total_distance_km'],
                 total_stops=plan_data['summary']['total_stops'],
+                # Per depot counts
+                vratimov_dpo_count=plan_data['summary']['vratimov_dpo_count'],
+                vratimov_sd_count=plan_data['summary']['vratimov_sd_count'],
+                bydzov_dpo_count=plan_data['summary']['bydzov_dpo_count'],
+                bydzov_sd_count=plan_data['summary']['bydzov_sd_count'],
             )
             db.add(route_plan)
             await db.flush()
@@ -888,6 +893,7 @@ async def upload_route_plans_batch(
                     carrier_name=route_data['carrier_name'],
                     route_type=route_data['route_type'],
                     delivery_type=route_data['delivery_type'],
+                    depot=route_data.get('depot'),
                     start_location=route_data['start_location'],
                     stops_count=route_data['stops_count'],
                     max_capacity=route_data['max_capacity'],
