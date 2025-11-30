@@ -399,6 +399,7 @@ function DailyTable({ days, viewMode = 'total' }) {
   const isVratimov = viewMode === 'vratimov'
   const depotName = isVratimov ? 'Vratimov' : 'Nový Bydžov'
   const colorClass = isVratimov ? 'text-purple-400' : 'text-cyan-400'
+  const colorClassLight = isVratimov ? 'text-purple-300' : 'text-cyan-300'
   
   return (
     <div className="overflow-x-auto">
@@ -406,20 +407,46 @@ function DailyTable({ days, viewMode = 'total' }) {
         <thead>
           <tr className="border-b border-white/10">
             <th className="text-left p-3 font-medium text-gray-400">Den</th>
-            <th className="text-center p-3 font-medium text-gray-400" colSpan={2}>DPO</th>
-            <th className="text-center p-3 font-medium text-gray-400" colSpan={2}>SD</th>
-            <th className="text-center p-3 font-medium text-gray-400">Celkem</th>
+            <th className="text-center p-3 font-medium text-gray-400" colSpan={3}>DPO</th>
+            <th className="text-center p-3 font-medium text-gray-400" colSpan={3}>SD</th>
+            <th className="text-center p-3 font-medium text-gray-400" colSpan={3}>Celkem</th>
             <th className="text-right p-3 font-medium text-gray-400">KM</th>
+          </tr>
+          <tr className="border-b border-white/10 text-xs">
+            <th className="text-left p-2 font-normal text-gray-500">Datum</th>
+            <th className="text-center p-2 font-normal text-gray-500">Plán</th>
+            <th className="text-center p-2 font-normal text-gray-500">Skut.</th>
+            <th className="text-center p-2 font-normal text-gray-500">Rozdíl</th>
+            <th className="text-center p-2 font-normal text-gray-500">Plán</th>
+            <th className="text-center p-2 font-normal text-gray-500">Skut.</th>
+            <th className="text-center p-2 font-normal text-gray-500">Rozdíl</th>
+            <th className="text-center p-2 font-normal text-gray-500">Plán</th>
+            <th className="text-center p-2 font-normal text-gray-500">Skut.</th>
+            <th className="text-center p-2 font-normal text-gray-500">Rozdíl</th>
+            <th className="text-right p-2 font-normal text-gray-500">Celkem</th>
           </tr>
         </thead>
         <tbody>
           {days.map((day) => {
-            const depot = isVratimov 
-              ? { dpo: day.vratimovDpo, sd: day.vratimovSd, total: day.vratimovTotal, km: day.vratimovKm }
-              : { dpo: day.bydzovDpo, sd: day.bydzovSd, total: day.bydzovTotal, km: day.bydzovKm }
+            const planned = isVratimov 
+              ? { dpo: day.plannedVratimovDpo || 0, sd: day.plannedVratimovSd || 0, total: day.plannedVratimovTotal || 0 }
+              : { dpo: day.plannedBydzovDpo || 0, sd: day.plannedBydzovSd || 0, total: day.plannedBydzovTotal || 0 }
+            const actual = isVratimov 
+              ? { dpo: day.vratimovDpo || 0, sd: day.vratimovSd || 0, total: day.vratimovTotal || 0, km: day.vratimovKm || 0 }
+              : { dpo: day.bydzovDpo || 0, sd: day.bydzovSd || 0, total: day.bydzovTotal || 0, km: day.bydzovKm || 0 }
+            const diff = isVratimov
+              ? { dpo: day.diffVratimovDpo || 0, sd: day.diffVratimovSd || 0, total: day.diffVratimovTotal || 0 }
+              : { dpo: day.diffBydzovDpo || 0, sd: day.diffBydzovSd || 0, total: day.diffBydzovTotal || 0 }
+            
+            const hasIssue = diff.total !== 0 && day.hasData
             
             return (
-              <tr key={day.date} className="border-b border-white/5 hover:bg-white/5">
+              <tr 
+                key={day.date} 
+                className={`border-b border-white/5 ${
+                  hasIssue ? 'bg-orange-500/5' : 'hover:bg-white/5'
+                }`}
+              >
                 <td className="p-3">
                   <div className="flex items-center gap-2">
                     <span className={`w-6 text-center font-medium ${
@@ -430,18 +457,28 @@ function DailyTable({ days, viewMode = 'total' }) {
                     <span className="font-bold">{day.dayNumber}.</span>
                   </div>
                 </td>
-                <td className={`text-center p-3 ${colorClass}`}>{day.hasData ? depot.dpo : '—'}</td>
-                <td className="text-center p-3 text-xs text-gray-500">
-                  {day.hasData && depot.dpo > 0 ? `(${((depot.dpo / day.actualDpo) * 100).toFixed(0)}%)` : ''}
+                {/* DPO */}
+                <td className="text-center p-3 text-gray-400">{planned.dpo}</td>
+                <td className={`text-center p-3 font-medium ${colorClassLight}`}>{day.hasData ? actual.dpo : '—'}</td>
+                <td className="text-center p-3">
+                  {day.hasData ? <DiffBadge diff={diff.dpo} size="small" /> : '—'}
                 </td>
-                <td className={`text-center p-3 ${colorClass}`}>{day.hasData ? depot.sd : '—'}</td>
-                <td className="text-center p-3 text-xs text-gray-500">
-                  {day.hasData && depot.sd > 0 && day.actualSd > 0 ? `(${((depot.sd / day.actualSd) * 100).toFixed(0)}%)` : ''}
+                {/* SD */}
+                <td className="text-center p-3 text-gray-400">{planned.sd}</td>
+                <td className={`text-center p-3 font-medium ${colorClassLight}`}>{day.hasData ? actual.sd : '—'}</td>
+                <td className="text-center p-3">
+                  {day.hasData ? <DiffBadge diff={diff.sd} size="small" /> : '—'}
                 </td>
-                <td className={`text-center p-3 font-medium ${colorClass}`}>{day.hasData ? depot.total : '—'}</td>
+                {/* Celkem */}
+                <td className="text-center p-3 text-gray-400">{planned.total}</td>
+                <td className={`text-center p-3 font-medium ${colorClass}`}>{day.hasData ? actual.total : '—'}</td>
+                <td className="text-center p-3">
+                  {day.hasData ? <DiffBadge diff={diff.total} size="small" /> : '—'}
+                </td>
+                {/* KM */}
                 <td className="text-right p-3 text-blue-400 font-mono text-xs">
-                  {day.hasData && depot.km > 0 
-                    ? depot.km.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }) 
+                  {day.hasData && actual.km > 0 
+                    ? actual.km.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }) 
                     : '—'}
                 </td>
               </tr>
@@ -451,19 +488,39 @@ function DailyTable({ days, viewMode = 'total' }) {
         <tfoot>
           <tr className="border-t-2 border-white/20 font-bold">
             <td className="p-3">CELKEM</td>
-            <td className={`text-center p-3 ${colorClass}`}>
-              {days.reduce((sum, d) => sum + (isVratimov ? d.vratimovDpo : d.bydzovDpo) || 0, 0)}
+            {/* DPO */}
+            <td className="text-center p-3 text-gray-400">
+              {days.reduce((sum, d) => sum + (isVratimov ? (d.plannedVratimovDpo || 0) : (d.plannedBydzovDpo || 0)), 0)}
             </td>
-            <td></td>
-            <td className={`text-center p-3 ${colorClass}`}>
-              {days.reduce((sum, d) => sum + (isVratimov ? d.vratimovSd : d.bydzovSd) || 0, 0)}
+            <td className={`text-center p-3 ${colorClassLight}`}>
+              {days.reduce((sum, d) => sum + (isVratimov ? (d.vratimovDpo || 0) : (d.bydzovDpo || 0)), 0)}
             </td>
-            <td></td>
-            <td className={`text-center p-3 ${colorClass}`}>
-              {days.reduce((sum, d) => sum + (isVratimov ? d.vratimovTotal : d.bydzovTotal) || 0, 0)}
+            <td className="text-center p-3">
+              <DiffBadge diff={days.reduce((sum, d) => sum + (isVratimov ? (d.diffVratimovDpo || 0) : (d.diffBydzovDpo || 0)), 0)} />
             </td>
+            {/* SD */}
+            <td className="text-center p-3 text-gray-400">
+              {days.reduce((sum, d) => sum + (isVratimov ? (d.plannedVratimovSd || 0) : (d.plannedBydzovSd || 0)), 0)}
+            </td>
+            <td className={`text-center p-3 ${colorClassLight}`}>
+              {days.reduce((sum, d) => sum + (isVratimov ? (d.vratimovSd || 0) : (d.bydzovSd || 0)), 0)}
+            </td>
+            <td className="text-center p-3">
+              <DiffBadge diff={days.reduce((sum, d) => sum + (isVratimov ? (d.diffVratimovSd || 0) : (d.diffBydzovSd || 0)), 0)} />
+            </td>
+            {/* Celkem */}
+            <td className="text-center p-3 text-gray-400">
+              {days.reduce((sum, d) => sum + (isVratimov ? (d.plannedVratimovTotal || 0) : (d.plannedBydzovTotal || 0)), 0)}
+            </td>
+            <td className={`text-center p-3 ${colorClass}`}>
+              {days.reduce((sum, d) => sum + (isVratimov ? (d.vratimovTotal || 0) : (d.bydzovTotal || 0)), 0)}
+            </td>
+            <td className="text-center p-3">
+              <DiffBadge diff={days.reduce((sum, d) => sum + (isVratimov ? (d.diffVratimovTotal || 0) : (d.diffBydzovTotal || 0)), 0)} />
+            </td>
+            {/* KM */}
             <td className="text-right p-3 text-blue-400 font-mono">
-              {days.reduce((sum, d) => sum + (isVratimov ? d.vratimovKm : d.bydzovKm) || 0, 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
+              {days.reduce((sum, d) => sum + (isVratimov ? (d.vratimovKm || 0) : (d.bydzovKm || 0)), 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
             </td>
           </tr>
         </tfoot>
