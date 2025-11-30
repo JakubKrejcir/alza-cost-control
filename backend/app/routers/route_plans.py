@@ -1247,7 +1247,7 @@ async def get_daily_breakdown(
     
     Returns each day with:
     - Planned routes from active plan(s)
-    - Actual routes and km from proof daily data
+    - Actual routes and km from proof daily data (total + per depot)
     - Difference
     """
     # Get proof with daily details
@@ -1283,14 +1283,26 @@ async def get_daily_breakdown(
         for detail in proof.daily_details:
             date_key = detail.date.strftime('%Y-%m-%d')
             proof_daily_map[date_key] = {
-                # Počty
+                # Počty - celkem
                 'drDpo': detail.dr_dpo_count,
                 'lhDpo': detail.lh_dpo_count,
                 'drSd': detail.dr_sd_count,
                 'lhSd': detail.lh_sd_count,
                 'totalDpo': detail.dr_dpo_count + detail.lh_dpo_count,
                 'totalSd': detail.dr_sd_count + detail.lh_sd_count,
-                # Kilometry
+                # Počty - Vratimov
+                'vratimovDrDpo': detail.vratimov_dr_dpo,
+                'vratimovLhDpo': detail.vratimov_lh_dpo,
+                'vratimovDrSd': detail.vratimov_dr_sd,
+                'vratimovLhSd': detail.vratimov_lh_sd,
+                'vratimovTotal': detail.vratimov_dr_dpo + detail.vratimov_lh_dpo + detail.vratimov_dr_sd + detail.vratimov_lh_sd,
+                # Počty - Nový Bydžov
+                'bydzovDrDpo': detail.bydzov_dr_dpo,
+                'bydzovLhDpo': detail.bydzov_lh_dpo,
+                'bydzovDrSd': detail.bydzov_dr_sd,
+                'bydzovLhSd': detail.bydzov_lh_sd,
+                'bydzovTotal': detail.bydzov_dr_dpo + detail.bydzov_lh_dpo + detail.bydzov_dr_sd + detail.bydzov_lh_sd,
+                # Kilometry - celkem
                 'drDpoKm': float(detail.dr_dpo_km or 0),
                 'lhDpoKm': float(detail.lh_dpo_km or 0),
                 'drSdKm': float(detail.dr_sd_km or 0),
@@ -1299,6 +1311,12 @@ async def get_daily_breakdown(
                 'totalSdKm': float((detail.dr_sd_km or 0) + (detail.lh_sd_km or 0)),
                 'totalKm': float((detail.dr_dpo_km or 0) + (detail.lh_dpo_km or 0) + 
                                 (detail.dr_sd_km or 0) + (detail.lh_sd_km or 0)),
+                # Kilometry - Vratimov
+                'vratimovKm': float((detail.vratimov_dr_dpo_km or 0) + (detail.vratimov_lh_dpo_km or 0) +
+                                   (detail.vratimov_dr_sd_km or 0) + (detail.vratimov_lh_sd_km or 0)),
+                # Kilometry - Nový Bydžov
+                'bydzovKm': float((detail.bydzov_dr_dpo_km or 0) + (detail.bydzov_lh_dpo_km or 0) +
+                                 (detail.bydzov_dr_sd_km or 0) + (detail.bydzov_lh_sd_km or 0)),
             }
     
     # Build daily breakdown
@@ -1315,6 +1333,10 @@ async def get_daily_breakdown(
         'dpoRoutes': 0,
         'sdRoutes': 0,
         'totalKm': 0,
+        'vratimovRoutes': 0,
+        'bydzovRoutes': 0,
+        'vratimovKm': 0,
+        'bydzovKm': 0,
     }
     
     while current <= last_day:
@@ -1361,7 +1383,7 @@ async def get_daily_breakdown(
             'plannedDpo': planned_dpo,
             'plannedSd': planned_sd,
             'plannedTotal': planned_dpo + planned_sd,
-            # Actual from proof - počty
+            # Actual from proof - počty celkem
             'actualDpo': actual_dpo,
             'actualSd': actual_sd,
             'actualTotal': actual_dpo + actual_sd,
@@ -1370,6 +1392,16 @@ async def get_daily_breakdown(
             'actualLhDpo': proof_day.get('lhDpo', 0),
             'actualDrSd': proof_day.get('drSd', 0),
             'actualLhSd': proof_day.get('lhSd', 0),
+            # Actual - Vratimov
+            'vratimovDpo': proof_day.get('vratimovDrDpo', 0) + proof_day.get('vratimovLhDpo', 0),
+            'vratimovSd': proof_day.get('vratimovDrSd', 0) + proof_day.get('vratimovLhSd', 0),
+            'vratimovTotal': proof_day.get('vratimovTotal', 0),
+            'vratimovKm': proof_day.get('vratimovKm', 0),
+            # Actual - Nový Bydžov
+            'bydzovDpo': proof_day.get('bydzovDrDpo', 0) + proof_day.get('bydzovLhDpo', 0),
+            'bydzovSd': proof_day.get('bydzovDrSd', 0) + proof_day.get('bydzovLhSd', 0),
+            'bydzovTotal': proof_day.get('bydzovTotal', 0),
+            'bydzovKm': proof_day.get('bydzovKm', 0),
             # Actual from proof - kilometry
             'actualDpoKm': proof_day.get('totalDpoKm', 0),
             'actualSdKm': proof_day.get('totalSdKm', 0),
@@ -1393,6 +1425,10 @@ async def get_daily_breakdown(
         totals_actual['dpoRoutes'] += actual_dpo
         totals_actual['sdRoutes'] += actual_sd
         totals_actual['totalKm'] += actual_km
+        totals_actual['vratimovRoutes'] += proof_day.get('vratimovTotal', 0)
+        totals_actual['bydzovRoutes'] += proof_day.get('bydzovTotal', 0)
+        totals_actual['vratimovKm'] += proof_day.get('vratimovKm', 0)
+        totals_actual['bydzovKm'] += proof_day.get('bydzovKm', 0)
         
         current += timedelta(days=1)
     
@@ -1427,6 +1463,10 @@ async def get_daily_breakdown(
                 'sdRoutes': totals_actual['sdRoutes'],
                 'totalRoutes': totals_actual['dpoRoutes'] + totals_actual['sdRoutes'],
                 'totalKm': totals_actual['totalKm'],
+                'vratimovRoutes': totals_actual['vratimovRoutes'],
+                'bydzovRoutes': totals_actual['bydzovRoutes'],
+                'vratimovKm': totals_actual['vratimovKm'],
+                'bydzovKm': totals_actual['bydzovKm'],
             },
             'diff': {
                 'dpoRoutes': totals_actual['dpoRoutes'] - totals_planned['dpoRoutes'],
