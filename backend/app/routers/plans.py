@@ -58,8 +58,8 @@ class Plan(Base):
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    carrier: Mapped["Carrier"] = relationship()
-    routes: Mapped[List["PlanRoute"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    carrier: Mapped["Carrier"] = relationship("Carrier")
+    routes: Mapped[List["PlanRoute"]] = relationship("PlanRoute", back_populates="plan", cascade="all, delete-orphan")
 
 
 class PlanRoute(Base):
@@ -77,7 +77,7 @@ class PlanRoute(Base):
     work_time_minutes: Mapped[Optional[int]] = mapped_column("workTimeMinutes", Integer)
     stops_count: Mapped[Optional[int]] = mapped_column("stopsCount", Integer)
 
-    plan: Mapped["Plan"] = relationship(back_populates="routes")
+    plan: Mapped["Plan"] = relationship("Plan", back_populates="routes")
 
 
 class PlanComparison(Base):
