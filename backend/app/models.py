@@ -424,8 +424,8 @@ class RoutePlanRoute(Base):
     route_letter: Mapped[Optional[str]] = mapped_column("routeLetter", String(10))
     carrier_name: Mapped[Optional[str]] = mapped_column("carrierName", String(100))
     
-    route_type: Mapped[str] = mapped_column("routeType", String(20))  # DPO nebo SD
-    delivery_type: Mapped[Optional[str]] = mapped_column("deliveryType", String(20))  # LH-LH, DR, etc.
+    route_type: Mapped[str] = mapped_column("routeType", String(20))  # DPO, SD, nebo BOTH (DR-DR jede 2x denně)
+    delivery_type: Mapped[Optional[str]] = mapped_column("deliveryType", String(20))  # LH-LH, DR, DR-DR, etc.
     start_location: Mapped[Optional[str]] = mapped_column("startLocation", String(255))
     stops_count: Mapped[int] = mapped_column("stopsCount", Integer, default=0)
     max_capacity: Mapped[int] = mapped_column("maxCapacity", Integer, default=0)

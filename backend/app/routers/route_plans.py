@@ -260,6 +260,10 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             delivery_type = sheet.cell(row=row, column=col_map['delivery_type']).value if col_map['delivery_type'] else None
             delivery_type_str = str(delivery_type).strip().upper() if delivery_type else None
             
+            # DR-DR means route runs twice daily (once DPO, once SD)
+            # So it counts as both DPO and SD
+            is_dr_dr = delivery_type_str == 'DR-DR'
+            
             # Count linehauls per batch (LH-LH = 2 kamiony)
             if delivery_type_str and 'LH' in delivery_type_str:
                 lh_count = parse_linehaul_count(delivery_type_str)
@@ -275,7 +279,7 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
                 'route_name': str(route_name),
                 'route_letter': extract_route_letter(str(route_name)),
                 'carrier_name': sheet.cell(row=row, column=col_map['carrier']).value if col_map['carrier'] else None,
-                'route_type': route_type,
+                'route_type': 'BOTH' if is_dr_dr else route_type,  # Mark as BOTH if DR-DR
                 'delivery_type': delivery_type_str,
                 'start_location': sheet.cell(row=row, column=col_map['start_location']).value if col_map['start_location'] else None,
                 'stops_count': stops_count,
@@ -284,6 +288,7 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
                 'end_time': time_to_str(sheet.cell(row=row, column=col_map['end_time']).value if col_map['end_time'] else None),
                 'work_time': time_to_str(sheet.cell(row=row, column=col_map['work_time']).value if col_map['work_time'] else None),
                 'distance_km': distance,
+                'is_dr_dr': is_dr_dr,  # Flag for DR-DR routes
             }
             
             result['routes'].append(route_data)
@@ -291,7 +296,11 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             result['summary']['total_stops'] += stops_count
             result['summary']['total_distance_km'] += distance
             
-            if route_type == 'DPO':
+            # DR-DR counts as both DPO and SD (runs twice daily)
+            if is_dr_dr:
+                result['summary']['dpo_routes_count'] += 1
+                result['summary']['sd_routes_count'] += 1
+            elif route_type == 'DPO':
                 result['summary']['dpo_routes_count'] += 1
             else:
                 result['summary']['sd_routes_count'] += 1
