@@ -796,16 +796,19 @@ async def upload_route_plans_batch(
             })
             
         except Exception as e:
+            # Rollback the failed transaction to continue with next file
+            await db.rollback()
             errors.append({
                 'fileName': file.filename,
                 'error': str(e)
             })
     
     # Update validity for all affected plan types
-    for plan_type in plan_types_updated:
-        await update_route_plan_validity(carrier_id, db, plan_type)
-    
-    await db.commit()
+    if results:  # Only if we have successful uploads
+        for plan_type in plan_types_updated:
+            await update_route_plan_validity(carrier_id, db, plan_type)
+        
+        await db.commit()
     
     return {
         'success': len(errors) == 0,
