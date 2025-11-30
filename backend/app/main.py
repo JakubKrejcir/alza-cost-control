@@ -5,10 +5,72 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.database import engine, Base
+from app.middleware import APIKeyMiddleware
 from app.routers import carriers, depots, contracts, prices, proofs, invoices, analysis
 from app.routers import route_plans
+
+
+async def run_migrations():
+    """Run database migrations on startup"""
+    async with engine.begin() as conn:
+        # Check if planType column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'planType'
+        """))
+        column_exists = result.fetchone() is not None
+        
+        if not column_exists:
+            print("Migration: Adding planType column to RoutePlan...")
+            
+            # Add column
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN "planType" VARCHAR(10) DEFAULT 'BOTH'
+            """))
+            
+            # Set default for existing records
+            await conn.execute(text("""
+                UPDATE "RoutePlan" 
+                SET "planType" = 'BOTH' 
+                WHERE "planType" IS NULL
+            """))
+            
+            print("Migration: planType column added successfully")
+        
+        # Check if unique constraint exists
+        result = await conn.execute(text("""
+            SELECT constraint_name 
+            FROM information_schema.table_constraints 
+            WHERE table_name = 'RoutePlan' 
+            AND constraint_name = 'uq_carrier_date_plantype'
+        """))
+        constraint_exists = result.fetchone() is not None
+        
+        if not constraint_exists:
+            print("Migration: Adding unique constraint for carrier+date+planType...")
+            
+            # Drop old constraint if exists (ignore error if not exists)
+            try:
+                await conn.execute(text("""
+                    ALTER TABLE "RoutePlan" 
+                    DROP CONSTRAINT IF EXISTS uq_carrier_date
+                """))
+            except:
+                pass
+            
+            # Add new constraint
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD CONSTRAINT uq_carrier_date_plantype 
+                UNIQUE ("carrierId", "validFrom", "planType")
+            """))
+            
+            print("Migration: Unique constraint added successfully")
 
 
 @asynccontextmanager
@@ -16,17 +78,26 @@ async def lifespan(app: FastAPI):
     # Startup: Create tables if they don't exist
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    
+    # Run migrations
+    await run_migrations()
+    
     yield
     # Shutdown: dispose engine
     await engine.dispose()
 
 
+# Skrýt docs v produkci pokud je nastaven API_KEY
+IS_PRODUCTION = bool(os.getenv("API_KEY"))
+
 app = FastAPI(
     title="Alza Cost Control API",
     description="Backend API pro kontrolu nákladů na dopravu",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
-    redirect_slashes=True
+    redirect_slashes=True,
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
 )
 
 # CORS - configured for Railway deployment
@@ -48,11 +119,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# API Key authentication middleware
+app.add_middleware(APIKeyMiddleware)
+
 
 # Health check
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "2.1.0"}
+    return {"status": "ok", "version": "2.2.0"}
 
 
 # Routers

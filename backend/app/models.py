@@ -4,7 +4,7 @@ SQLAlchemy Models - matching the Prisma schema exactly
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Index, Text, Numeric
+from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Index, Text, Numeric, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -111,7 +111,7 @@ class KmRate(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     price_config_id: Mapped[int] = mapped_column("priceConfigId", ForeignKey("PriceConfig.id", ondelete="CASCADE"))
     route_type: Mapped[Optional[str]] = mapped_column("routeType", String(50))
-    rate: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     price_config: Mapped["PriceConfig"] = relationship(back_populates="km_rates")
@@ -200,6 +200,7 @@ class ProofRouteDetail(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
     route_type: Mapped[str] = mapped_column("routeType", String(50))
+    routes_count: Mapped[Optional[int]] = mapped_column("routesCount", Integer)
     count: Mapped[int] = mapped_column(Integer)
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
@@ -319,6 +320,9 @@ class RoutePlan(Base):
     valid_to: Mapped[Optional[datetime]] = mapped_column("validTo", DateTime, nullable=True)
     file_name: Mapped[Optional[str]] = mapped_column("fileName", String(255))
     
+    # Typ plánu - BOTH (bez přípony), DPO (_DPO), SD (_SD)
+    plan_type: Mapped[str] = mapped_column("planType", String(10), default="BOTH")
+    
     # Souhrn z plánu
     total_routes: Mapped[int] = mapped_column("totalRoutes", Integer, default=0)
     dpo_routes_count: Mapped[int] = mapped_column("dpoRoutesCount", Integer, default=0)
@@ -335,6 +339,11 @@ class RoutePlan(Base):
     carrier: Mapped["Carrier"] = relationship(back_populates="route_plans")
     routes: Mapped[List["RoutePlanRoute"]] = relationship(back_populates="route_plan", cascade="all, delete-orphan")
 
+    # Unique constraint: carrier + valid_from + plan_type
+    __table_args__ = (
+        UniqueConstraint('carrierId', 'validFrom', 'planType', name='uq_carrier_date_plantype'),
+    )
+
 
 class RoutePlanRoute(Base):
     """Jednotlivé trasy v plánu (sheet Routes)"""
@@ -349,16 +358,15 @@ class RoutePlanRoute(Base):
     
     route_type: Mapped[str] = mapped_column("routeType", String(20))  # DPO nebo SD
     delivery_type: Mapped[Optional[str]] = mapped_column("deliveryType", String(20))  # LH-LH, DR, etc.
-    
     start_location: Mapped[Optional[str]] = mapped_column("startLocation", String(255))
     stops_count: Mapped[int] = mapped_column("stopsCount", Integer, default=0)
-    max_capacity: Mapped[Optional[int]] = mapped_column("maxCapacity", Integer)
-    
-    start_time: Mapped[Optional[str]] = mapped_column("startTime", String(20))
-    end_time: Mapped[Optional[str]] = mapped_column("endTime", String(20))
-    work_time: Mapped[Optional[str]] = mapped_column("workTime", String(20))
-    
+    max_capacity: Mapped[int] = mapped_column("maxCapacity", Integer, default=0)
+    start_time: Mapped[Optional[str]] = mapped_column("startTime", String(10))
+    end_time: Mapped[Optional[str]] = mapped_column("endTime", String(10))
+    work_time: Mapped[Optional[str]] = mapped_column("workTime", String(10))
     distance_km: Mapped[Optional[Decimal]] = mapped_column("distanceKm", Numeric(10, 2))
+    
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
     route_plan: Mapped["RoutePlan"] = relationship(back_populates="routes")
@@ -366,19 +374,21 @@ class RoutePlanRoute(Base):
 
 
 class RoutePlanDetail(Base):
-    """Detaily zastávek na trase (sheet RouteDetails) - pro budoucí použití"""
+    """Detaily jednotlivých zastávek na trase"""
     __tablename__ = "RoutePlanDetail"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     route_id: Mapped[int] = mapped_column("routeId", ForeignKey("RoutePlanRoute.id", ondelete="CASCADE"))
     
     sequence: Mapped[int] = mapped_column(Integer)
-    eta: Mapped[Optional[str]] = mapped_column(String(20))
+    eta: Mapped[Optional[str]] = mapped_column(String(10))
     order_id: Mapped[Optional[str]] = mapped_column("orderId", String(50))
     stop_name: Mapped[Optional[str]] = mapped_column("stopName", String(255))
     address: Mapped[Optional[str]] = mapped_column(Text)
     distance_from_previous: Mapped[Optional[Decimal]] = mapped_column("distanceFromPrevious", Numeric(10, 2))
     unload_sequence: Mapped[Optional[int]] = mapped_column("unloadSequence", Integer)
+    
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
     route: Mapped["RoutePlanRoute"] = relationship(back_populates="details")
