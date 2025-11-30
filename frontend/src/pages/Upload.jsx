@@ -2,20 +2,7 @@ import { useState, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, subMonths } from 'date-fns'
 import { cs } from 'date-fns/locale'
-import { 
-  Upload as UploadIcon, 
-  FileSpreadsheet, 
-  FileText, 
-  CheckCircle, 
-  AlertCircle, 
-  X, 
-  Trash2,
-  Calendar,
-  Truck,
-  ArrowRight,
-  MoreVertical,
-  Sparkles
-} from 'lucide-react'
+import { Upload as UploadIcon, FileSpreadsheet, FileText, CheckCircle, AlertCircle, X, Trash2 } from 'lucide-react'
 import { proofs, invoices, carriers } from '../lib/api'
 
 function formatCZK(amount) {
@@ -50,11 +37,7 @@ export default function Upload() {
     queryFn: carriers.getAll
   })
 
-  // Auto-select first carrier
-  if (carrierList?.length > 0 && !selectedCarrier) {
-    setSelectedCarrier(carrierList[0].id.toString())
-  }
-
+  // Fetch invoices for selected carrier and period
   const { data: invoiceList, isLoading: loadingInvoices } = useQuery({
     queryKey: ['invoices', selectedCarrier, selectedPeriod],
     queryFn: () => invoices.getAll({ 
@@ -64,6 +47,7 @@ export default function Upload() {
     enabled: !!selectedCarrier
   })
 
+  // Fetch proofs for selected carrier and period
   const { data: proofList } = useQuery({
     queryKey: ['proofs', selectedCarrier, selectedPeriod],
     queryFn: () => proofs.getAll({ 
@@ -136,7 +120,7 @@ export default function Upload() {
   }
 
   const handleDeleteProof = (proof) => {
-    if (confirm(`Opravdu smazat proof pro období "${proof.period}"?`)) {
+    if (confirm(`Opravdu smazat proof pro období "${proof.period}"? Toto může ovlivnit spárované faktury.`)) {
       deleteProofMutation.mutate(proof.id)
     }
   }
@@ -183,56 +167,45 @@ export default function Upload() {
   const isUploading = uploadProofMutation.isPending || uploadInvoiceMutation.isPending
   const currentProof = proofList?.[0]
 
-  const selectedCarrierName = carrierList?.find(c => c.id.toString() === selectedCarrier)?.name
-
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Nahrát dokumenty</h1>
-        <p className="text-gray-500 text-sm mt-1">Proof (XLSX) nebo faktury (PDF)</p>
+        <h1 className="text-2xl font-bold">Nahrát dokumenty</h1>
+        <p className="text-gray-400 text-sm mt-1">Proof (XLSX) nebo faktury (PDF)</p>
       </div>
 
-      {/* Settings Card */}
-      <div className="card">
-        <div className="card-body">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="label">Dopravce</label>
-              <div className="relative">
-                <Truck size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <select
-                  value={selectedCarrier}
-                  onChange={(e) => setSelectedCarrier(e.target.value)}
-                  className="select pl-10"
-                >
-                  <option value="">Vyberte dopravce...</option>
-                  {carrierList?.map(carrier => (
-                    <option key={carrier.id} value={carrier.id}>
-                      {carrier.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            
-            <div>
-              <label className="label">Období</label>
-              <div className="relative">
-                <Calendar size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <select
-                  value={selectedPeriod}
-                  onChange={(e) => setSelectedPeriod(e.target.value)}
-                  className="select pl-10"
-                >
-                  {getPeriodOptions().map(period => (
-                    <option key={period} value={period}>
-                      {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+      {/* Settings */}
+      <div className="card p-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="label">Dopravce</label>
+            <select
+              value={selectedCarrier}
+              onChange={(e) => setSelectedCarrier(e.target.value)}
+              className="input"
+            >
+              <option value="">Vyberte dopravce...</option>
+              {carrierList?.map(carrier => (
+                <option key={carrier.id} value={carrier.id}>
+                  {carrier.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <label className="label">Období</label>
+            <select
+              value={selectedPeriod}
+              onChange={(e) => setSelectedPeriod(e.target.value)}
+              className="input"
+            >
+              {getPeriodOptions().map(period => (
+                <option key={period} value={period}>
+                  {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
@@ -242,23 +215,19 @@ export default function Upload() {
         onDrop={handleDrop}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
-        className={`card border-2 border-dashed transition-all ${
+        className={`card p-12 border-2 border-dashed transition-all ${
           dragOver 
-            ? 'border-blue-500 bg-blue-50' 
-            : 'border-gray-200 hover:border-gray-300'
+            ? 'border-alza-orange bg-alza-orange/5' 
+            : 'border-white/20 hover:border-white/40'
         } ${!selectedCarrier ? 'opacity-50 pointer-events-none' : ''}`}
       >
-        <div className="card-body py-12 text-center">
-          <div className={`w-16 h-16 mx-auto mb-4 rounded-2xl flex items-center justify-center ${
-            dragOver ? 'bg-blue-100' : 'bg-gray-100'
-          }`}>
-            <UploadIcon size={28} className={dragOver ? 'text-blue-600' : 'text-gray-400'} />
-          </div>
+        <div className="text-center">
+          <UploadIcon className={`w-16 h-16 mx-auto mb-4 ${dragOver ? 'text-alza-orange' : 'text-gray-500'}`} />
           
-          <p className="text-lg font-semibold text-gray-900 mb-2">
+          <p className="text-lg font-medium mb-2">
             {isUploading ? 'Nahrávám...' : 'Přetáhněte soubory sem'}
           </p>
-          <p className="text-gray-500 text-sm mb-6">
+          <p className="text-gray-400 text-sm mb-4">
             nebo klikněte pro výběr
           </p>
           
@@ -273,7 +242,7 @@ export default function Upload() {
           />
           <label
             htmlFor="file-input"
-            className={`btn btn-primary cursor-pointer ${
+            className={`btn btn-primary inline-flex items-center gap-2 cursor-pointer ${
               (!selectedCarrier || isUploading) ? 'opacity-50 cursor-not-allowed' : ''
             }`}
           >
@@ -281,18 +250,14 @@ export default function Upload() {
             Vybrat soubory
           </label>
 
-          <div className="flex justify-center gap-8 mt-8">
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
-                <FileSpreadsheet size={16} className="text-emerald-600" />
-              </div>
-              <span>XLSX = Proof</span>
+          <div className="flex justify-center gap-8 mt-6 text-sm text-gray-500">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet size={18} className="text-green-400" />
+              XLSX = Proof
             </div>
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <div className="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center">
-                <FileText size={16} className="text-rose-600" />
-              </div>
-              <span>PDF = Faktura</span>
+            <div className="flex items-center gap-2">
+              <FileText size={18} className="text-red-400" />
+              PDF = Faktura
             </div>
           </div>
         </div>
@@ -300,31 +265,27 @@ export default function Upload() {
 
       {/* Upload Results */}
       {uploadResults.length > 0 && (
-        <div className="widget">
-          <div className="widget-header">
-            <h3 className="widget-title">Výsledky nahrávání</h3>
+        <div className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="font-semibold">Výsledky nahrávání</h2>
             <button
               onClick={() => setUploadResults([])}
-              className="p-2 rounded-lg hover:bg-gray-100 text-gray-400"
+              className="text-gray-400 hover:text-white"
             >
               <X size={18} />
             </button>
           </div>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-white/5">
             {uploadResults.map((result, idx) => (
-              <div key={idx} className="px-5 py-4 flex items-center gap-4">
+              <div key={idx} className="px-6 py-4 flex items-center gap-4">
                 {result.success ? (
-                  <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                    <CheckCircle size={16} className="text-emerald-600" />
-                  </div>
+                  <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0" />
                 ) : (
-                  <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
-                    <AlertCircle size={16} className="text-red-600" />
-                  </div>
+                  <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-gray-900 truncate">{result.fileName}</div>
-                  <div className={`text-sm ${result.success ? 'text-gray-500' : 'text-red-600'}`}>
+                  <div className="font-medium truncate">{result.fileName}</div>
+                  <div className={`text-sm ${result.success ? 'text-gray-400' : 'text-red-400'}`}>
                     {result.message}
                   </div>
                 </div>
@@ -345,48 +306,40 @@ export default function Upload() {
 
       {/* Current Proof */}
       {selectedCarrier && currentProof && (
-        <div className="widget">
-          <div className="widget-header">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Sparkles size={16} className="text-blue-600" />
-              </div>
-              <div>
-                <h3 className="widget-title">Proof — {selectedPeriod}</h3>
-                <p className="widget-subtitle">{selectedCarrierName}</p>
-              </div>
-            </div>
+        <div className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="font-semibold">Proof — {selectedPeriod}</h2>
             <button
               onClick={() => handleDeleteProof(currentProof)}
-              className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600"
+              className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400"
               title="Smazat proof"
             >
               <Trash2 size={18} />
             </button>
           </div>
-          <div className="widget-body">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div className="p-4 bg-blue-50 rounded-xl">
-                <p className="text-xs text-blue-600 font-medium mb-1">FIX</p>
-                <p className="text-lg font-bold text-gray-900">{formatCZK(currentProof.totalFix)}</p>
+          <div className="p-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+              <div>
+                <span className="text-gray-400">FIX:</span>
+                <span className="ml-2 font-medium">{formatCZK(currentProof.totalFix)}</span>
               </div>
-              <div className="p-4 bg-emerald-50 rounded-xl">
-                <p className="text-xs text-emerald-600 font-medium mb-1">KM</p>
-                <p className="text-lg font-bold text-gray-900">{formatCZK(currentProof.totalKm)}</p>
+              <div>
+                <span className="text-gray-400">KM:</span>
+                <span className="ml-2 font-medium">{formatCZK(currentProof.totalKm)}</span>
               </div>
-              <div className="p-4 bg-amber-50 rounded-xl">
-                <p className="text-xs text-amber-600 font-medium mb-1">Linehaul</p>
-                <p className="text-lg font-bold text-gray-900">{formatCZK(currentProof.totalLinehaul)}</p>
+              <div>
+                <span className="text-gray-400">Linehaul:</span>
+                <span className="ml-2 font-medium">{formatCZK(currentProof.totalLinehaul)}</span>
               </div>
-              <div className="p-4 bg-violet-50 rounded-xl">
-                <p className="text-xs text-violet-600 font-medium mb-1">Celkem</p>
-                <p className="text-lg font-bold text-gray-900">{formatCZK(currentProof.grandTotal)}</p>
+              <div>
+                <span className="text-gray-400">Celkem:</span>
+                <span className="ml-2 font-medium text-alza-orange">{formatCZK(currentProof.grandTotal)}</span>
               </div>
             </div>
             {currentProof.fileName && (
-              <p className="text-sm text-gray-500 mt-4">
+              <div className="mt-3 text-xs text-gray-500">
                 Soubor: {currentProof.fileName}
-              </p>
+              </div>
             )}
           </div>
         </div>
@@ -394,17 +347,9 @@ export default function Upload() {
 
       {/* Invoices List */}
       {selectedCarrier && (
-        <div className="widget">
-          <div className="widget-header">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-violet-50 flex items-center justify-center">
-                <FileText size={16} className="text-violet-600" />
-              </div>
-              <div>
-                <h3 className="widget-title">Nahrané faktury — {selectedPeriod}</h3>
-                <p className="widget-subtitle">{selectedCarrierName}</p>
-              </div>
-            </div>
+        <div className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="font-semibold">Nahrané faktury — {selectedPeriod}</h2>
             <span className="badge badge-info">{invoiceList?.length || 0} faktur</span>
           </div>
           
@@ -413,9 +358,9 @@ export default function Upload() {
               Načítám...
             </div>
           ) : !invoiceList?.length ? (
-            <div className="p-8 text-center">
-              <FileText size={48} className="mx-auto mb-3 text-gray-300" />
-              <p className="text-gray-500">Žádné faktury pro toto období</p>
+            <div className="p-8 text-center text-gray-500">
+              <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>Žádné faktury pro toto období</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -428,13 +373,13 @@ export default function Upload() {
                     <th className="text-right">DPH</th>
                     <th className="text-right">Celkem</th>
                     <th>Status</th>
-                    <th className="w-12"></th>
+                    <th className="w-16"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {invoiceList.map(invoice => (
                     <tr key={invoice.id}>
-                      <td className="font-medium text-gray-900">{invoice.invoiceNumber}</td>
+                      <td className="font-medium">{invoice.invoiceNumber}</td>
                       <td>
                         <div className="flex flex-wrap gap-1">
                           {invoice.items?.map((item, idx) => (
@@ -445,8 +390,8 @@ export default function Upload() {
                         </div>
                       </td>
                       <td className="text-right">{formatCZK(invoice.totalWithoutVat)}</td>
-                      <td className="text-right text-gray-500">{formatCZK(invoice.vatAmount)}</td>
-                      <td className="text-right font-medium text-gray-900">{formatCZK(invoice.totalWithVat)}</td>
+                      <td className="text-right text-gray-400">{formatCZK(invoice.vatAmount)}</td>
+                      <td className="text-right font-medium">{formatCZK(invoice.totalWithVat)}</td>
                       <td>
                         <span className={`badge ${
                           invoice.status === 'matched' ? 'badge-success' :
@@ -462,7 +407,7 @@ export default function Upload() {
                         <button
                           onClick={() => handleDeleteInvoice(invoice)}
                           disabled={deleteInvoiceMutation.isPending}
-                          className="p-2 rounded-lg hover:bg-red-50 text-gray-400 hover:text-red-600 disabled:opacity-50"
+                          className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400 disabled:opacity-50"
                           title="Smazat fakturu"
                         >
                           <Trash2 size={16} />
