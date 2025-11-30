@@ -208,6 +208,11 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             'sd_linehaul_count': 0,
             'total_distance_km': Decimal('0'),
             'total_stops': 0,
+            # Per depot counts
+            'vratimov_dpo_count': 0,
+            'vratimov_sd_count': 0,
+            'bydzov_dpo_count': 0,
+            'bydzov_sd_count': 0,
         }
     }
     
@@ -264,7 +269,12 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             # So it counts as both DPO and SD
             is_dr_dr = delivery_type_str == 'DR-DR'
             
+            # Determine depot based on route name
+            # "Moravskoslezsko" = Vratimov, everything else = Nový Bydžov
+            is_vratimov = 'MORAVSKOSLEZSKO' in str(route_name).upper()
+            
             # Count linehauls per batch (LH-LH = 2 kamiony)
+            if delivery_type_str and 'LH' in delivery_type_str:
             if delivery_type_str and 'LH' in delivery_type_str:
                 lh_count = parse_linehaul_count(delivery_type_str)
                 if route_type == 'DPO':
@@ -289,6 +299,7 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
                 'work_time': time_to_str(sheet.cell(row=row, column=col_map['work_time']).value if col_map['work_time'] else None),
                 'distance_km': distance,
                 'is_dr_dr': is_dr_dr,  # Flag for DR-DR routes
+                'depot': 'VRATIMOV' if is_vratimov else 'BYDZOV',  # Depot assignment
             }
             
             result['routes'].append(route_data)
@@ -300,10 +311,25 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             if is_dr_dr:
                 result['summary']['dpo_routes_count'] += 1
                 result['summary']['sd_routes_count'] += 1
+                # Per depot
+                if is_vratimov:
+                    result['summary']['vratimov_dpo_count'] += 1
+                    result['summary']['vratimov_sd_count'] += 1
+                else:
+                    result['summary']['bydzov_dpo_count'] += 1
+                    result['summary']['bydzov_sd_count'] += 1
             elif route_type == 'DPO':
                 result['summary']['dpo_routes_count'] += 1
+                if is_vratimov:
+                    result['summary']['vratimov_dpo_count'] += 1
+                else:
+                    result['summary']['bydzov_dpo_count'] += 1
             else:
                 result['summary']['sd_routes_count'] += 1
+                if is_vratimov:
+                    result['summary']['vratimov_sd_count'] += 1
+                else:
+                    result['summary']['bydzov_sd_count'] += 1
         
         # Linehaul count = 2 per batch (LH-LH = 2 kamiony pro celý batch)
         result['summary']['dpo_linehaul_count'] = 2 if dpo_lh_set else 0
@@ -721,6 +747,11 @@ async def upload_route_plan(
         sd_linehaul_count=plan_data['summary']['sd_linehaul_count'],
         total_distance_km=plan_data['summary']['total_distance_km'],
         total_stops=plan_data['summary']['total_stops'],
+        # Per depot counts
+        vratimov_dpo_count=plan_data['summary']['vratimov_dpo_count'],
+        vratimov_sd_count=plan_data['summary']['vratimov_sd_count'],
+        bydzov_dpo_count=plan_data['summary']['bydzov_dpo_count'],
+        bydzov_sd_count=plan_data['summary']['bydzov_sd_count'],
     )
     db.add(route_plan)
     await db.flush()
@@ -735,6 +766,7 @@ async def upload_route_plan(
             carrier_name=route_data['carrier_name'],
             route_type=route_data['route_type'],
             delivery_type=route_data['delivery_type'],
+            depot=route_data.get('depot'),
             start_location=route_data['start_location'],
             stops_count=route_data['stops_count'],
             max_capacity=route_data['max_capacity'],
@@ -1355,6 +1387,10 @@ async def get_daily_breakdown(
         active_plans = []
         planned_dpo = 0
         planned_sd = 0
+        planned_vratimov_dpo = 0
+        planned_vratimov_sd = 0
+        planned_bydzov_dpo = 0
+        planned_bydzov_sd = 0
         
         for plan in plans:
             plan_start = plan.valid_from
@@ -1370,14 +1406,24 @@ async def get_daily_breakdown(
                 # Add routes based on plan type
                 if plan.plan_type in ('BOTH', 'DPO'):
                     planned_dpo += plan.dpo_routes_count or 0
+                    planned_vratimov_dpo += plan.vratimov_dpo_count or 0
+                    planned_bydzov_dpo += plan.bydzov_dpo_count or 0
                 if plan.plan_type in ('BOTH', 'SD'):
                     planned_sd += plan.sd_routes_count or 0
+                    planned_vratimov_sd += plan.vratimov_sd_count or 0
+                    planned_bydzov_sd += plan.bydzov_sd_count or 0
         
         # Get actual from proof
         proof_day = proof_daily_map.get(date_key, {})
         actual_dpo = proof_day.get('totalDpo', 0)
         actual_sd = proof_day.get('totalSd', 0)
         actual_km = proof_day.get('totalKm', 0)
+        
+        # Actual per depot
+        actual_vratimov_dpo = proof_day.get('vratimovDrDpo', 0) + proof_day.get('vratimovLhDpo', 0)
+        actual_vratimov_sd = proof_day.get('vratimovDrSd', 0) + proof_day.get('vratimovLhSd', 0)
+        actual_bydzov_dpo = proof_day.get('bydzovDrDpo', 0) + proof_day.get('bydzovLhDpo', 0)
+        actual_bydzov_sd = proof_day.get('bydzovDrSd', 0) + proof_day.get('bydzovLhSd', 0)
         
         # Calculate differences
         diff_dpo = actual_dpo - planned_dpo
@@ -1388,10 +1434,18 @@ async def get_daily_breakdown(
             'dayOfWeek': ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'][current.weekday()],
             'dayNumber': current.day,
             'plans': active_plans,
-            # Planned
+            # Planned - celkem
             'plannedDpo': planned_dpo,
             'plannedSd': planned_sd,
             'plannedTotal': planned_dpo + planned_sd,
+            # Planned - Vratimov
+            'plannedVratimovDpo': planned_vratimov_dpo,
+            'plannedVratimovSd': planned_vratimov_sd,
+            'plannedVratimovTotal': planned_vratimov_dpo + planned_vratimov_sd,
+            # Planned - Bydžov
+            'plannedBydzovDpo': planned_bydzov_dpo,
+            'plannedBydzovSd': planned_bydzov_sd,
+            'plannedBydzovTotal': planned_bydzov_dpo + planned_bydzov_sd,
             # Actual from proof - počty celkem
             'actualDpo': actual_dpo,
             'actualSd': actual_sd,
@@ -1402,20 +1456,30 @@ async def get_daily_breakdown(
             'actualDrSd': proof_day.get('drSd', 0),
             'actualLhSd': proof_day.get('lhSd', 0),
             # Actual - Vratimov
-            'vratimovDpo': proof_day.get('vratimovDrDpo', 0) + proof_day.get('vratimovLhDpo', 0),
-            'vratimovSd': proof_day.get('vratimovDrSd', 0) + proof_day.get('vratimovLhSd', 0),
+            'vratimovDpo': actual_vratimov_dpo,
+            'vratimovSd': actual_vratimov_sd,
             'vratimovTotal': proof_day.get('vratimovTotal', 0),
             'vratimovKm': proof_day.get('vratimovKm', 0),
+            # Diff - Vratimov
+            'diffVratimovDpo': actual_vratimov_dpo - planned_vratimov_dpo,
+            'diffVratimovSd': actual_vratimov_sd - planned_vratimov_sd,
+            'diffVratimovTotal': (actual_vratimov_dpo + actual_vratimov_sd) - (planned_vratimov_dpo + planned_vratimov_sd),
             # Actual - Nový Bydžov
             'bydzovDpo': proof_day.get('bydzovDrDpo', 0) + proof_day.get('bydzovLhDpo', 0),
             'bydzovSd': proof_day.get('bydzovDrSd', 0) + proof_day.get('bydzovLhSd', 0),
+            'bydzovDpo': actual_bydzov_dpo,
+            'bydzovSd': actual_bydzov_sd,
             'bydzovTotal': proof_day.get('bydzovTotal', 0),
             'bydzovKm': proof_day.get('bydzovKm', 0),
+            # Diff - Bydžov
+            'diffBydzovDpo': actual_bydzov_dpo - planned_bydzov_dpo,
+            'diffBydzovSd': actual_bydzov_sd - planned_bydzov_sd,
+            'diffBydzovTotal': (actual_bydzov_dpo + actual_bydzov_sd) - (planned_bydzov_dpo + planned_bydzov_sd),
             # Actual from proof - kilometry
             'actualDpoKm': proof_day.get('totalDpoKm', 0),
             'actualSdKm': proof_day.get('totalSdKm', 0),
             'actualTotalKm': actual_km,
-            # Differences
+            # Differences - celkem
             'diffDpo': diff_dpo,
             'diffSd': diff_sd,
             'diffTotal': (actual_dpo + actual_sd) - (planned_dpo + planned_sd),
@@ -1431,10 +1495,19 @@ async def get_daily_breakdown(
         totals_planned['totalDays'] += 1
         totals_planned['dpoRoutes'] += planned_dpo
         totals_planned['sdRoutes'] += planned_sd
+        totals_planned['vratimovDpo'] = totals_planned.get('vratimovDpo', 0) + planned_vratimov_dpo
+        totals_planned['vratimovSd'] = totals_planned.get('vratimovSd', 0) + planned_vratimov_sd
+        totals_planned['bydzovDpo'] = totals_planned.get('bydzovDpo', 0) + planned_bydzov_dpo
+        totals_planned['bydzovSd'] = totals_planned.get('bydzovSd', 0) + planned_bydzov_sd
+        
         totals_actual['dpoRoutes'] += actual_dpo
         totals_actual['sdRoutes'] += actual_sd
         totals_actual['totalKm'] += actual_km
+        totals_actual['vratimovDpo'] = totals_actual.get('vratimovDpo', 0) + actual_vratimov_dpo
+        totals_actual['vratimovSd'] = totals_actual.get('vratimovSd', 0) + actual_vratimov_sd
         totals_actual['vratimovRoutes'] += proof_day.get('vratimovTotal', 0)
+        totals_actual['bydzovDpo'] = totals_actual.get('bydzovDpo', 0) + actual_bydzov_dpo
+        totals_actual['bydzovSd'] = totals_actual.get('bydzovSd', 0) + actual_bydzov_sd
         totals_actual['bydzovRoutes'] += proof_day.get('bydzovTotal', 0)
         totals_actual['vratimovKm'] += proof_day.get('vratimovKm', 0)
         totals_actual['bydzovKm'] += proof_day.get('bydzovKm', 0)
@@ -1466,15 +1539,27 @@ async def get_daily_breakdown(
                 'dpoRoutes': totals_planned['dpoRoutes'],
                 'sdRoutes': totals_planned['sdRoutes'],
                 'totalRoutes': totals_planned['dpoRoutes'] + totals_planned['sdRoutes'],
+                # Per depot
+                'vratimovDpo': totals_planned.get('vratimovDpo', 0),
+                'vratimovSd': totals_planned.get('vratimovSd', 0),
+                'vratimovTotal': totals_planned.get('vratimovDpo', 0) + totals_planned.get('vratimovSd', 0),
+                'bydzovDpo': totals_planned.get('bydzovDpo', 0),
+                'bydzovSd': totals_planned.get('bydzovSd', 0),
+                'bydzovTotal': totals_planned.get('bydzovDpo', 0) + totals_planned.get('bydzovSd', 0),
             },
             'actual': {
                 'dpoRoutes': totals_actual['dpoRoutes'],
                 'sdRoutes': totals_actual['sdRoutes'],
                 'totalRoutes': totals_actual['dpoRoutes'] + totals_actual['sdRoutes'],
                 'totalKm': totals_actual['totalKm'],
+                # Per depot
+                'vratimovDpo': totals_actual.get('vratimovDpo', 0),
+                'vratimovSd': totals_actual.get('vratimovSd', 0),
                 'vratimovRoutes': totals_actual['vratimovRoutes'],
-                'bydzovRoutes': totals_actual['bydzovRoutes'],
                 'vratimovKm': totals_actual['vratimovKm'],
+                'bydzovDpo': totals_actual.get('bydzovDpo', 0),
+                'bydzovSd': totals_actual.get('bydzovSd', 0),
+                'bydzovRoutes': totals_actual['bydzovRoutes'],
                 'bydzovKm': totals_actual['bydzovKm'],
             },
             'diff': {
@@ -1482,6 +1567,13 @@ async def get_daily_breakdown(
                 'sdRoutes': totals_actual['sdRoutes'] - totals_planned['sdRoutes'],
                 'totalRoutes': (totals_actual['dpoRoutes'] + totals_actual['sdRoutes']) - 
                               (totals_planned['dpoRoutes'] + totals_planned['sdRoutes']),
+                # Per depot
+                'vratimovDpo': totals_actual.get('vratimovDpo', 0) - totals_planned.get('vratimovDpo', 0),
+                'vratimovSd': totals_actual.get('vratimovSd', 0) - totals_planned.get('vratimovSd', 0),
+                'vratimovTotal': totals_actual['vratimovRoutes'] - (totals_planned.get('vratimovDpo', 0) + totals_planned.get('vratimovSd', 0)),
+                'bydzovDpo': totals_actual.get('bydzovDpo', 0) - totals_planned.get('bydzovDpo', 0),
+                'bydzovSd': totals_actual.get('bydzovSd', 0) - totals_planned.get('bydzovSd', 0),
+                'bydzovTotal': totals_actual['bydzovRoutes'] - (totals_planned.get('bydzovDpo', 0) + totals_planned.get('bydzovSd', 0)),
             }
         },
         'summary': {

@@ -391,7 +391,7 @@ class RoutePlan(Base):
     # Typ plánu - BOTH (bez přípony), DPO (_DPO), SD (_SD)
     plan_type: Mapped[str] = mapped_column("planType", String(10), default="BOTH")
     
-    # Souhrn z plánu
+    # Souhrn z plánu - celkem
     total_routes: Mapped[int] = mapped_column("totalRoutes", Integer, default=0)
     dpo_routes_count: Mapped[int] = mapped_column("dpoRoutesCount", Integer, default=0)
     sd_routes_count: Mapped[int] = mapped_column("sdRoutesCount", Integer, default=0)
@@ -399,6 +399,14 @@ class RoutePlan(Base):
     sd_linehaul_count: Mapped[int] = mapped_column("sdLinehaulCount", Integer, default=0)
     total_distance_km: Mapped[Optional[Decimal]] = mapped_column("totalDistanceKm", Numeric(10, 2))
     total_stops: Mapped[int] = mapped_column("totalStops", Integer, default=0)
+    
+    # Souhrn per depo - Vratimov (Moravskoslezsko)
+    vratimov_dpo_count: Mapped[int] = mapped_column("vratimovDpoCount", Integer, default=0)
+    vratimov_sd_count: Mapped[int] = mapped_column("vratimovSdCount", Integer, default=0)
+    
+    # Souhrn per depo - Nový Bydžov (ostatní regiony)
+    bydzov_dpo_count: Mapped[int] = mapped_column("bydzovDpoCount", Integer, default=0)
+    bydzov_sd_count: Mapped[int] = mapped_column("bydzovSdCount", Integer, default=0)
     
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -426,6 +434,7 @@ class RoutePlanRoute(Base):
     
     route_type: Mapped[str] = mapped_column("routeType", String(20))  # DPO, SD, nebo BOTH (DR-DR jede 2x denně)
     delivery_type: Mapped[Optional[str]] = mapped_column("deliveryType", String(20))  # LH-LH, DR, DR-DR, etc.
+    depot: Mapped[Optional[str]] = mapped_column("depot", String(20))  # VRATIMOV nebo BYDZOV
     start_location: Mapped[Optional[str]] = mapped_column("startLocation", String(255))
     stops_count: Mapped[int] = mapped_column("stopsCount", Integer, default=0)
     max_capacity: Mapped[int] = mapped_column("maxCapacity", Integer, default=0)

@@ -77,28 +77,6 @@ function ComparisonSummary({ data }) {
   
   const { planned, actual, diff } = data.totals
   
-  // Spočítej DPO/SD pro každé depo z denních dat
-  const depotStats = {
-    vratimov: { dpo: 0, sd: 0, total: 0, km: 0 },
-    bydzov: { dpo: 0, sd: 0, total: 0, km: 0 },
-  }
-  
-  if (data.days) {
-    data.days.forEach(day => {
-      if (day.hasData) {
-        depotStats.vratimov.dpo += (day.vratimovDpo || 0)
-        depotStats.vratimov.sd += (day.vratimovSd || 0)
-        depotStats.vratimov.total += (day.vratimovTotal || 0)
-        depotStats.vratimov.km += (day.vratimovKm || 0)
-        
-        depotStats.bydzov.dpo += (day.bydzovDpo || 0)
-        depotStats.bydzov.sd += (day.bydzovSd || 0)
-        depotStats.bydzov.total += (day.bydzovTotal || 0)
-        depotStats.bydzov.km += (day.bydzovKm || 0)
-      }
-    })
-  }
-  
   return (
     <div className="space-y-6">
       {/* Celkový přehled */}
@@ -158,73 +136,109 @@ function ComparisonSummary({ data }) {
         </div>
       </div>
       
-      {/* Rozdělení podle dep */}
+      {/* Rozdělení podle dep - s porovnáním plán vs proof */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* VRATIMOV */}
-        <div className="p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
+        <div className={`p-4 rounded-lg border ${
+          diff.vratimovTotal === 0 
+            ? 'bg-green-500/10 border-green-500/20' 
+            : 'bg-purple-500/10 border-purple-500/20'
+        }`}>
           <div className="flex items-center justify-between mb-4">
             <span className="text-base font-semibold text-purple-400">🏭 Depo Vratimov</span>
-            <span className="text-sm text-purple-400 font-medium">
-              {depotStats.vratimov.total} tras
-            </span>
+            <DiffBadge diff={diff.vratimovTotal || 0} />
           </div>
           
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            {/* DPO */}
             <div className="bg-black/20 rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">DPO</div>
-              <div className="text-xl font-bold text-purple-300">{depotStats.vratimov.dpo}</div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">DPO</span>
+                <DiffBadge diff={diff.vratimovDpo || 0} size="small" />
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-bold text-purple-300">{actual.vratimovDpo || 0}</span>
+                <span className="text-gray-500">/</span>
+                <span className="text-sm text-gray-400">{planned.vratimovDpo || 0}</span>
+              </div>
             </div>
+            {/* SD */}
             <div className="bg-black/20 rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">SD</div>
-              <div className="text-xl font-bold text-purple-300">{depotStats.vratimov.sd}</div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">SD</span>
+                <DiffBadge diff={diff.vratimovSd || 0} size="small" />
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-bold text-purple-300">{actual.vratimovSd || 0}</span>
+                <span className="text-gray-500">/</span>
+                <span className="text-sm text-gray-400">{planned.vratimovSd || 0}</span>
+              </div>
             </div>
+            {/* Celkem */}
             <div className="bg-black/20 rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">KM</div>
-              <div className="text-lg font-bold text-purple-300">
-                {depotStats.vratimov.km.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
+              <div className="text-xs text-gray-400 mb-1">Celkem</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-bold text-purple-300">{actual.vratimovRoutes || 0}</span>
+                <span className="text-gray-500">/</span>
+                <span className="text-sm text-gray-400">{planned.vratimovTotal || 0}</span>
               </div>
             </div>
           </div>
           
-          <div className="mt-3 text-xs text-gray-500">
-            {actual.totalRoutes > 0 
-              ? `${((depotStats.vratimov.total / actual.totalRoutes) * 100).toFixed(0)}% všech tras`
-              : 'Žádná data'
-            }
+          <div className="text-xs text-gray-500">
+            {(actual.vratimovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} km
           </div>
         </div>
         
         {/* NOVÝ BYDŽOV */}
-        <div className="p-4 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+        <div className={`p-4 rounded-lg border ${
+          diff.bydzovTotal === 0 
+            ? 'bg-green-500/10 border-green-500/20' 
+            : 'bg-cyan-500/10 border-cyan-500/20'
+        }`}>
           <div className="flex items-center justify-between mb-4">
             <span className="text-base font-semibold text-cyan-400">🏭 Depo Nový Bydžov</span>
-            <span className="text-sm text-cyan-400 font-medium">
-              {depotStats.bydzov.total} tras
-            </span>
+            <DiffBadge diff={diff.bydzovTotal || 0} />
           </div>
           
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            {/* DPO */}
             <div className="bg-black/20 rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">DPO</div>
-              <div className="text-xl font-bold text-cyan-300">{depotStats.bydzov.dpo}</div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">DPO</span>
+                <DiffBadge diff={diff.bydzovDpo || 0} size="small" />
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-bold text-cyan-300">{actual.bydzovDpo || 0}</span>
+                <span className="text-gray-500">/</span>
+                <span className="text-sm text-gray-400">{planned.bydzovDpo || 0}</span>
+              </div>
             </div>
+            {/* SD */}
             <div className="bg-black/20 rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">SD</div>
-              <div className="text-xl font-bold text-cyan-300">{depotStats.bydzov.sd}</div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-gray-400">SD</span>
+                <DiffBadge diff={diff.bydzovSd || 0} size="small" />
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-bold text-cyan-300">{actual.bydzovSd || 0}</span>
+                <span className="text-gray-500">/</span>
+                <span className="text-sm text-gray-400">{planned.bydzovSd || 0}</span>
+              </div>
             </div>
+            {/* Celkem */}
             <div className="bg-black/20 rounded-lg p-3">
-              <div className="text-xs text-gray-400 mb-1">KM</div>
-              <div className="text-lg font-bold text-cyan-300">
-                {depotStats.bydzov.km.toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
+              <div className="text-xs text-gray-400 mb-1">Celkem</div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-xl font-bold text-cyan-300">{actual.bydzovRoutes || 0}</span>
+                <span className="text-gray-500">/</span>
+                <span className="text-sm text-gray-400">{planned.bydzovTotal || 0}</span>
               </div>
             </div>
           </div>
           
-          <div className="mt-3 text-xs text-gray-500">
-            {actual.totalRoutes > 0 
-              ? `${((depotStats.bydzov.total / actual.totalRoutes) * 100).toFixed(0)}% všech tras`
-              : 'Žádná data'
-            }
+          <div className="text-xs text-gray-500">
+            {(actual.bydzovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} km
           </div>
         </div>
       </div>
