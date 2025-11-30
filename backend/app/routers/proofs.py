@@ -1,5 +1,5 @@
 """
-Proofs API Router - with XLSX upload and parsing
+Proofs API Router - with XLSX upload and parsing including daily breakdown
 """
 from typing import List, Optional
 from datetime import datetime
@@ -13,15 +13,109 @@ import openpyxl
 
 from app.database import get_db
 from app.models import (
-    Proof, Carrier, ProofRouteDetail, ProofLinehaulDetail, ProofDepoDetail
+    Proof, Carrier, ProofRouteDetail, ProofLinehaulDetail, ProofDepoDetail, ProofDailyDetail
 )
 from app.schemas import ProofResponse, ProofDetailResponse, ProofUpdate
 
 router = APIRouter()
 
 
+def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
+    """
+    Parse daily breakdown from 'Podkladove tab' sheet.
+    
+    Structure:
+    - Row 3: Dates (every 4th column starting from C)
+    - Row 4: Headers (DR DPO cnt, LH DPO cnt, DR SD cnt, LH SD cnt)
+    - Row 61 (or last row with 'Celkový súčet'): Daily totals
+    """
+    # Try different sheet names
+    sheet_names = ['Podkladove tab', 'Podkladová tab', 'Podkladove', 'Daily']
+    sheet = None
+    
+    for name in sheet_names:
+        if name in wb.sheetnames:
+            sheet = wb[name]
+            break
+    
+    if sheet is None:
+        return []  # No daily data sheet found
+    
+    # Find the summary row (contains 'Celkový súčet' or similar)
+    summary_row = None
+    for row in range(1, min(sheet.max_row + 1, 150)):
+        cell_b = sheet.cell(row=row, column=2).value
+        if cell_b and 'celkov' in str(cell_b).lower() and 'súčet' in str(cell_b).lower():
+            summary_row = row
+            break
+        if cell_b and 'celkov' in str(cell_b).lower() and 'součet' in str(cell_b).lower():
+            summary_row = row
+            break
+    
+    if summary_row is None:
+        # Try to find it by looking for row 61 (common position)
+        if sheet.max_row >= 61:
+            cell_b = sheet.cell(row=61, column=2).value
+            if cell_b and 'celkov' in str(cell_b).lower():
+                summary_row = 61
+    
+    if summary_row is None:
+        return []
+    
+    daily_data = []
+    
+    # Iterate through columns to find dates (every 4th column starting from 3)
+    col = 3
+    while col <= sheet.max_column:
+        date_val = sheet.cell(row=3, column=col).value
+        
+        if date_val is None:
+            col += 4
+            continue
+        
+        # Parse date
+        if isinstance(date_val, datetime):
+            date = date_val
+        elif isinstance(date_val, str):
+            try:
+                date = datetime.strptime(date_val[:10], '%Y-%m-%d')
+            except:
+                col += 4
+                continue
+        else:
+            col += 4
+            continue
+        
+        # Get values for this day
+        dr_dpo = sheet.cell(row=summary_row, column=col).value or 0
+        lh_dpo = sheet.cell(row=summary_row, column=col + 1).value or 0
+        dr_sd = sheet.cell(row=summary_row, column=col + 2).value or 0
+        lh_sd = sheet.cell(row=summary_row, column=col + 3).value or 0
+        
+        # Convert to int
+        try:
+            dr_dpo = int(dr_dpo) if dr_dpo else 0
+            lh_dpo = int(lh_dpo) if lh_dpo else 0
+            dr_sd = int(dr_sd) if dr_sd else 0
+            lh_sd = int(lh_sd) if lh_sd else 0
+        except (ValueError, TypeError):
+            dr_dpo = lh_dpo = dr_sd = lh_sd = 0
+        
+        daily_data.append({
+            'date': date,
+            'dr_dpo_count': dr_dpo,
+            'lh_dpo_count': lh_dpo,
+            'dr_sd_count': dr_sd,
+            'lh_sd_count': lh_sd,
+        })
+        
+        col += 4
+    
+    return daily_data
+
+
 def parse_proof_from_xlsx(file_content: bytes) -> dict:
-    """Parse proof data from XLSX Sumar sheet"""
+    """Parse proof data from XLSX Sumar sheet and daily data from Podkladove tab"""
     wb = openpyxl.load_workbook(BytesIO(file_content), data_only=True)
     
     if 'Sumar' not in wb.sheetnames:
@@ -41,6 +135,7 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
         'route_details': [],
         'linehaul_details': [],
         'depo_details': [],
+        'daily_details': [],
     }
     
     def find_row_by_label(label: str) -> Optional[int]:
@@ -54,14 +149,15 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
         row = find_row_by_label(label)
         if row is None:
             return None
-        value = sheet.cell(row=row, column=4).value
-        if value is not None:
-            try:
-                return float(value)
-            except (ValueError, TypeError):
-                return None
-        return None
+        val = sheet.cell(row=row, column=4).value
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None
     
+    # Extract totals
     result['totals']['total_fix'] = get_value_by_label('Cena FIX')
     result['totals']['total_km'] = get_value_by_label('Cena KM')
     result['totals']['total_linehaul'] = get_value_by_label('Linehaul')
@@ -69,76 +165,68 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
     result['totals']['total_penalty'] = get_value_by_label('Pokuty')
     result['totals']['grand_total'] = get_value_by_label('Celková částka')
     
-    route_types = [
-        {'label': 'Počet tras LastMile při DR', 'type': 'DR', 'rate_label': 'Cena DR'},
-        {'label': 'Počet tras LastMile při DPO LH', 'type': 'LH_DPO', 'rate_label': 'Cena LastMile při LH DPO'},
-        {'label': 'Počet tras SD LH', 'type': 'LH_SD', 'rate_label': 'Cena LastMile při LH SD'},
-        {'label': 'Počet tras SD LH spojene', 'type': 'LH_SD_SPOJENE', 'rate_label': 'Cena LastMile při LH SD spojené'},
-    ]
+    if result['totals']['grand_total'] is None:
+        result['totals']['grand_total'] = get_value_by_label('Celkem')
     
+    # Extract route details
+    route_types = ['DR', 'LH_DPO', 'LH_SD', 'LH_SD_SPOJENE', 'LH SD spojené']
     for rt in route_types:
-        count = get_value_by_label(rt['label'])
-        rate = get_value_by_label(rt['rate_label'])
-        if count and count > 0:
-            rate_val = rate or 0
-            result['route_details'].append({
-                'route_type': rt['type'],
-                'count': int(count),
-                'rate': Decimal(str(rate_val)),
-                'amount': Decimal(str(int(count) * float(rate_val)))
-            })
+        row = find_row_by_label(rt)
+        if row:
+            count = sheet.cell(row=row, column=3).value
+            rate = sheet.cell(row=row, column=4).value
+            amount = sheet.cell(row=row, column=5).value
+            
+            if count or amount:
+                result['route_details'].append({
+                    'route_type': rt.replace(' ', '_').upper(),
+                    'count': int(count) if count else 0,
+                    'rate': float(rate) if rate else 0,
+                    'amount': float(amount) if amount else 0,
+                })
     
-    depo_vratimov = get_value_by_label('DEPO Vratimov / Den')
-    depo_nb_mesiac = get_value_by_label('DEPO Nový Bydžov / Mesiac')
-    skladnici_nb = get_value_by_label('3 Skladníci Nový Bydžov / Mesiac')
-    days_worked = get_value_by_label('Odježděných dní')
+    # Extract linehaul details
+    linehaul_labels = ['CZLC4', 'CZTC1', 'LH-LH', 'Kamion', 'Sólo']
+    for label in linehaul_labels:
+        row = find_row_by_label(label)
+        if row:
+            desc = sheet.cell(row=row, column=2).value or label
+            days = sheet.cell(row=row, column=3).value
+            rate = sheet.cell(row=row, column=4).value
+            total = sheet.cell(row=row, column=5).value
+            
+            if total:
+                result['linehaul_details'].append({
+                    'description': str(desc),
+                    'days': int(days) if days else 0,
+                    'rate': float(rate) if rate else 0,
+                    'total': float(total) if total else 0,
+                })
     
-    if depo_vratimov and days_worked:
-        result['depo_details'].append({
-            'depo_name': 'Vratimov',
-            'rate_type': 'daily',
-            'days': int(days_worked),
-            'rate': Decimal(str(depo_vratimov)),
-            'amount': Decimal(str(int(days_worked) * float(depo_vratimov)))
-        })
+    # Extract depo details
+    depo_labels = ['Vratimov', 'Nový Bydžov', 'NB']
+    for label in depo_labels:
+        row = find_row_by_label(label)
+        if row:
+            name = sheet.cell(row=row, column=2).value or label
+            days = sheet.cell(row=row, column=3).value
+            rate = sheet.cell(row=row, column=4).value
+            amount = sheet.cell(row=row, column=5).value
+            
+            if amount:
+                rate_type = 'monthly' if 'Bydžov' in str(name) or 'NB' in str(name) else 'daily'
+                result['depo_details'].append({
+                    'depo_name': str(name),
+                    'rate_type': rate_type,
+                    'days': int(days) if days else 0,
+                    'rate': float(rate) if rate else 0,
+                    'amount': float(amount) if amount else 0,
+                })
     
-    if depo_nb_mesiac:
-        result['depo_details'].append({
-            'depo_name': 'Nový Bydžov',
-            'rate_type': 'monthly',
-            'days': 1,
-            'rate': Decimal(str(depo_nb_mesiac)),
-            'amount': Decimal(str(depo_nb_mesiac))
-        })
-    
-    if skladnici_nb:
-        result['depo_details'].append({
-            'depo_name': 'Nový Bydžov - Skladníci',
-            'rate_type': 'monthly',
-            'days': 1,
-            'rate': Decimal(str(skladnici_nb)),
-            'amount': Decimal(str(skladnici_nb))
-        })
+    # Parse daily data from Podkladove tab
+    result['daily_details'] = parse_daily_data_from_xlsx(wb)
     
     return result
-
-
-async def get_proof_by_id(proof_id: int, db: AsyncSession):
-    """Helper to get proof with all details"""
-    result = await db.execute(
-        select(Proof)
-        .options(
-            selectinload(Proof.carrier),
-            selectinload(Proof.depot),
-            selectinload(Proof.route_details),
-            selectinload(Proof.linehaul_details),
-            selectinload(Proof.depo_details),
-            selectinload(Proof.invoices),
-            selectinload(Proof.analyses),
-        )
-        .where(Proof.id == proof_id)
-    )
-    return result.scalar_one_or_none()
 
 
 @router.get("", response_model=List[ProofResponse])
@@ -179,6 +267,7 @@ async def upload_proof(
     db: AsyncSession = Depends(get_db)
 ):
     """Upload and parse proof XLSX"""
+    # Validate carrier
     carrier_result = await db.execute(
         select(Carrier).where(Carrier.id == carrier_id)
     )
@@ -194,110 +283,203 @@ async def upload_proof(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse XLSX: {str(e)}")
     
+    # Parse period
     try:
         month, year = period.split('/')
         period_date = datetime(int(year), int(month), 1)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid period format. Use MM/YYYY")
     
+    # Check for existing proof and delete it
     existing_result = await db.execute(
         select(Proof).where(
-            and_(Proof.carrier_id == carrier_id, Proof.period == period)
+            and_(
+                Proof.carrier_id == carrier_id,
+                Proof.period == period
+            )
         )
     )
     existing = existing_result.scalar_one_or_none()
-    
     if existing:
-        await db.execute(
-            ProofRouteDetail.__table__.delete().where(ProofRouteDetail.proof_id == existing.id)
-        )
-        await db.execute(
-            ProofLinehaulDetail.__table__.delete().where(ProofLinehaulDetail.proof_id == existing.id)
-        )
-        await db.execute(
-            ProofDepoDetail.__table__.delete().where(ProofDepoDetail.proof_id == existing.id)
-        )
-        
-        for field, value in proof_data['totals'].items():
-            if value is not None:
-                setattr(existing, field, Decimal(str(value)))
-        
-        existing.file_name = file.filename
-        
-        for detail in proof_data['route_details']:
-            db.add(ProofRouteDetail(proof_id=existing.id, **detail))
-        for detail in proof_data['linehaul_details']:
-            db.add(ProofLinehaulDetail(proof_id=existing.id, **detail))
-        for detail in proof_data['depo_details']:
-            db.add(ProofDepoDetail(proof_id=existing.id, **detail))
-        
-        await db.commit()
-        return await get_proof_by_id(existing.id, db)
+        await db.delete(existing)
+        await db.flush()
     
+    # Create new proof
     proof = Proof(
         carrier_id=carrier_id,
         period=period,
         period_date=period_date,
         file_name=file.filename,
-        total_fix=Decimal(str(proof_data['totals']['total_fix'])) if proof_data['totals']['total_fix'] else None,
-        total_km=Decimal(str(proof_data['totals']['total_km'])) if proof_data['totals']['total_km'] else None,
-        total_linehaul=Decimal(str(proof_data['totals']['total_linehaul'])) if proof_data['totals']['total_linehaul'] else None,
-        total_depo=Decimal(str(proof_data['totals']['total_depo'])) if proof_data['totals']['total_depo'] else None,
-        total_penalty=Decimal(str(proof_data['totals']['total_penalty'])) if proof_data['totals']['total_penalty'] else None,
-        grand_total=Decimal(str(proof_data['totals']['grand_total'])) if proof_data['totals']['grand_total'] else None,
+        status='uploaded',
+        total_fix=proof_data['totals'].get('total_fix'),
+        total_km=proof_data['totals'].get('total_km'),
+        total_linehaul=proof_data['totals'].get('total_linehaul'),
+        total_depo=proof_data['totals'].get('total_depo'),
+        total_penalty=proof_data['totals'].get('total_penalty'),
+        grand_total=proof_data['totals'].get('grand_total'),
     )
     db.add(proof)
     await db.flush()
     
-    for detail in proof_data['route_details']:
-        db.add(ProofRouteDetail(proof_id=proof.id, **detail))
-    for detail in proof_data['linehaul_details']:
-        db.add(ProofLinehaulDetail(proof_id=proof.id, **detail))
-    for detail in proof_data['depo_details']:
-        db.add(ProofDepoDetail(proof_id=proof.id, **detail))
+    # Add route details
+    for rd in proof_data['route_details']:
+        detail = ProofRouteDetail(
+            proof_id=proof.id,
+            route_type=rd['route_type'],
+            routes_count=rd['count'],
+            count=rd['count'],
+            rate=Decimal(str(rd['rate'])),
+            amount=Decimal(str(rd['amount'])),
+        )
+        db.add(detail)
+    
+    # Add linehaul details
+    for ld in proof_data['linehaul_details']:
+        detail = ProofLinehaulDetail(
+            proof_id=proof.id,
+            description=ld['description'],
+            days=ld['days'],
+            rate=Decimal(str(ld['rate'])),
+            total=Decimal(str(ld['total'])),
+        )
+        db.add(detail)
+    
+    # Add depo details
+    for dd in proof_data['depo_details']:
+        detail = ProofDepoDetail(
+            proof_id=proof.id,
+            depo_name=dd['depo_name'],
+            rate_type=dd['rate_type'],
+            days=dd['days'],
+            rate=Decimal(str(dd['rate'])),
+            amount=Decimal(str(dd['amount'])),
+        )
+        db.add(detail)
+    
+    # Add daily details
+    for daily in proof_data['daily_details']:
+        detail = ProofDailyDetail(
+            proof_id=proof.id,
+            date=daily['date'],
+            dr_dpo_count=daily['dr_dpo_count'],
+            lh_dpo_count=daily['lh_dpo_count'],
+            dr_sd_count=daily['dr_sd_count'],
+            lh_sd_count=daily['lh_sd_count'],
+        )
+        db.add(detail)
     
     await db.commit()
-    return await get_proof_by_id(proof.id, db)
+    
+    # Reload with relationships
+    result = await db.execute(
+        select(Proof)
+        .options(
+            selectinload(Proof.carrier),
+            selectinload(Proof.route_details),
+            selectinload(Proof.linehaul_details),
+            selectinload(Proof.depo_details),
+            selectinload(Proof.daily_details),
+        )
+        .where(Proof.id == proof.id)
+    )
+    return result.scalar_one()
 
 
 @router.get("/{proof_id}", response_model=ProofDetailResponse)
 async def get_proof(proof_id: int, db: AsyncSession = Depends(get_db)):
-    """Get single proof by ID with all details"""
-    proof = await get_proof_by_id(proof_id, db)
-    if not proof:
-        raise HTTPException(status_code=404, detail="Proof not found")
-    return proof
-
-
-@router.put("/{proof_id}", response_model=ProofResponse)
-async def update_proof(
-    proof_id: int,
-    proof_data: ProofUpdate,
-    db: AsyncSession = Depends(get_db)
-):
-    """Update proof status"""
-    result = await db.execute(select(Proof).where(Proof.id == proof_id))
+    """Get proof with all details"""
+    result = await db.execute(
+        select(Proof)
+        .options(
+            selectinload(Proof.carrier),
+            selectinload(Proof.depot),
+            selectinload(Proof.route_details),
+            selectinload(Proof.linehaul_details),
+            selectinload(Proof.depo_details),
+            selectinload(Proof.daily_details),
+            selectinload(Proof.invoices),
+        )
+        .where(Proof.id == proof_id)
+    )
     proof = result.scalar_one_or_none()
-    
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    return proof
+
+
+@router.get("/{proof_id}/daily")
+async def get_proof_daily_details(proof_id: int, db: AsyncSession = Depends(get_db)):
+    """Get daily breakdown for a proof"""
+    result = await db.execute(
+        select(Proof)
+        .options(selectinload(Proof.daily_details))
+        .where(Proof.id == proof_id)
+    )
+    proof = result.scalar_one_or_none()
     if not proof:
         raise HTTPException(status_code=404, detail="Proof not found")
     
-    if proof_data.status:
-        proof.status = proof_data.status
+    daily_data = []
+    for detail in sorted(proof.daily_details, key=lambda x: x.date):
+        daily_data.append({
+            'date': detail.date.strftime('%Y-%m-%d'),
+            'drDpoCount': detail.dr_dpo_count,
+            'lhDpoCount': detail.lh_dpo_count,
+            'drSdCount': detail.dr_sd_count,
+            'lhSdCount': detail.lh_sd_count,
+            'totalDpo': detail.dr_dpo_count + detail.lh_dpo_count,
+            'totalSd': detail.dr_sd_count + detail.lh_sd_count,
+            'totalRoutes': detail.dr_dpo_count + detail.lh_dpo_count + detail.dr_sd_count + detail.lh_sd_count,
+        })
     
-    await db.commit()
-    await db.refresh(proof)
-    return proof
+    return {
+        'proofId': proof.id,
+        'period': proof.period,
+        'days': daily_data,
+        'totals': {
+            'drDpo': sum(d['drDpoCount'] for d in daily_data),
+            'lhDpo': sum(d['lhDpoCount'] for d in daily_data),
+            'drSd': sum(d['drSdCount'] for d in daily_data),
+            'lhSd': sum(d['lhSdCount'] for d in daily_data),
+            'totalDpo': sum(d['totalDpo'] for d in daily_data),
+            'totalSd': sum(d['totalSd'] for d in daily_data),
+            'totalRoutes': sum(d['totalRoutes'] for d in daily_data),
+        }
+    }
 
 
 @router.delete("/{proof_id}", status_code=204)
 async def delete_proof(proof_id: int, db: AsyncSession = Depends(get_db)):
-    """Delete proof"""
-    result = await db.execute(select(Proof).where(Proof.id == proof_id))
+    """Delete a proof"""
+    result = await db.execute(
+        select(Proof).where(Proof.id == proof_id)
+    )
     proof = result.scalar_one_or_none()
-    
     if not proof:
         raise HTTPException(status_code=404, detail="Proof not found")
     
     await db.delete(proof)
     await db.commit()
+    return None
+
+
+@router.patch("/{proof_id}", response_model=ProofResponse)
+async def update_proof(
+    proof_id: int,
+    update: ProofUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update proof status"""
+    result = await db.execute(
+        select(Proof).where(Proof.id == proof_id)
+    )
+    proof = result.scalar_one_or_none()
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    
+    if update.status:
+        proof.status = update.status
+    
+    await db.commit()
+    await db.refresh(proof)
+    return proof

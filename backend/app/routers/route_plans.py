@@ -1243,18 +1243,20 @@ async def get_daily_breakdown(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Get day-by-day breakdown of planned routes for a proof's period.
+    Get day-by-day comparison of planned vs actual routes.
     
     Returns each day with:
-    - What plan was active
-    - Expected routes (DPO, SD)
-    - Expected linehauls
-    - Whether it's a working day
+    - Planned routes from active plan(s)
+    - Actual routes from proof daily data
+    - Difference
     """
-    # Get proof
+    # Get proof with daily details
     proof_result = await db.execute(
         select(Proof)
-        .options(selectinload(Proof.carrier))
+        .options(
+            selectinload(Proof.carrier),
+            selectinload(Proof.daily_details),
+        )
         .where(Proof.id == proof_id)
     )
     proof = proof_result.scalar_one_or_none()
@@ -1275,112 +1277,112 @@ async def get_daily_breakdown(
     # Get all plans that might overlap with this period
     plans = await get_plans_for_period(proof.carrier_id, proof.period, db)
     
+    # Build a map of proof daily data by date
+    proof_daily_map = {}
+    if proof.daily_details:
+        for detail in proof.daily_details:
+            date_key = detail.date.strftime('%Y-%m-%d')
+            proof_daily_map[date_key] = {
+                'drDpo': detail.dr_dpo_count,
+                'lhDpo': detail.lh_dpo_count,
+                'drSd': detail.dr_sd_count,
+                'lhSd': detail.lh_sd_count,
+                'totalDpo': detail.dr_dpo_count + detail.lh_dpo_count,
+                'totalSd': detail.dr_sd_count + detail.lh_sd_count,
+            }
+    
     # Build daily breakdown
     days = []
     current = first_day
     
-    totals = {
-        'workingDays': 0,
-        'weekendDays': 0,
+    totals_planned = {
+        'totalDays': 0,
         'dpoRoutes': 0,
         'sdRoutes': 0,
-        'dpoLinehauls': 0,
-        'sdLinehauls': 0,
+    }
+    
+    totals_actual = {
+        'dpoRoutes': 0,
+        'sdRoutes': 0,
     }
     
     while current <= last_day:
-        is_working_day = current.weekday() < 5  # Mon-Fri
+        date_key = current.strftime('%Y-%m-%d')
         
         # Find active plan(s) for this day
         active_plans = []
+        planned_dpo = 0
+        planned_sd = 0
+        
         for plan in plans:
             plan_start = plan.valid_from
             plan_end = plan.valid_to or last_day
             
             if plan_start <= current <= plan_end:
-                active_plans.append(plan)
-        
-        # Aggregate plan data for this day
-        day_data = {
-            'date': current.strftime('%Y-%m-%d'),
-            'dayOfWeek': current.strftime('%A'),
-            'dayOfWeekShort': ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'][current.weekday()],
-            'dayNumber': current.day,
-            'isWorkingDay': is_working_day,
-            'isWeekend': not is_working_day,
-            'plans': [],
-            'dpoRoutes': 0,
-            'sdRoutes': 0,
-            'dpoLinehauls': 0,
-            'sdLinehauls': 0,
-            'totalRoutes': 0,
-            'totalLinehauls': 0,
-        }
-        
-        if active_plans and is_working_day:
-            for plan in active_plans:
-                plan_info = {
+                active_plans.append({
                     'id': plan.id,
                     'planType': plan.plan_type,
                     'fileName': plan.file_name,
-                }
-                day_data['plans'].append(plan_info)
+                })
                 
                 # Add routes based on plan type
                 if plan.plan_type in ('BOTH', 'DPO'):
-                    day_data['dpoRoutes'] += plan.dpo_routes_count or 0
-                    day_data['dpoLinehauls'] += plan.dpo_linehaul_count or 0
+                    planned_dpo += plan.dpo_routes_count or 0
                 if plan.plan_type in ('BOTH', 'SD'):
-                    day_data['sdRoutes'] += plan.sd_routes_count or 0
-                    day_data['sdLinehauls'] += plan.sd_linehaul_count or 0
-            
-            day_data['totalRoutes'] = day_data['dpoRoutes'] + day_data['sdRoutes']
-            day_data['totalLinehauls'] = day_data['dpoLinehauls'] + day_data['sdLinehauls']
-            
-            # Update totals
-            totals['workingDays'] += 1
-            totals['dpoRoutes'] += day_data['dpoRoutes']
-            totals['sdRoutes'] += day_data['sdRoutes']
-            totals['dpoLinehauls'] += day_data['dpoLinehauls']
-            totals['sdLinehauls'] += day_data['sdLinehauls']
-        elif not is_working_day:
-            totals['weekendDays'] += 1
+                    planned_sd += plan.sd_routes_count or 0
+        
+        # Get actual from proof
+        proof_day = proof_daily_map.get(date_key, {})
+        actual_dpo = proof_day.get('totalDpo', 0)
+        actual_sd = proof_day.get('totalSd', 0)
+        
+        # Calculate differences
+        diff_dpo = actual_dpo - planned_dpo
+        diff_sd = actual_sd - planned_sd
+        
+        day_data = {
+            'date': date_key,
+            'dayOfWeek': ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'][current.weekday()],
+            'dayNumber': current.day,
+            'plans': active_plans,
+            # Planned
+            'plannedDpo': planned_dpo,
+            'plannedSd': planned_sd,
+            'plannedTotal': planned_dpo + planned_sd,
+            # Actual from proof
+            'actualDpo': actual_dpo,
+            'actualSd': actual_sd,
+            'actualTotal': actual_dpo + actual_sd,
+            # Detailed actual breakdown
+            'actualDrDpo': proof_day.get('drDpo', 0),
+            'actualLhDpo': proof_day.get('lhDpo', 0),
+            'actualDrSd': proof_day.get('drSd', 0),
+            'actualLhSd': proof_day.get('lhSd', 0),
+            # Differences
+            'diffDpo': diff_dpo,
+            'diffSd': diff_sd,
+            'diffTotal': (actual_dpo + actual_sd) - (planned_dpo + planned_sd),
+            # Status
+            'hasData': bool(proof_day),
+            'hasPlan': len(active_plans) > 0,
+            'isOk': diff_dpo == 0 and diff_sd == 0,
+        }
         
         days.append(day_data)
+        
+        # Update totals
+        totals_planned['totalDays'] += 1
+        totals_planned['dpoRoutes'] += planned_dpo
+        totals_planned['sdRoutes'] += planned_sd
+        totals_actual['dpoRoutes'] += actual_dpo
+        totals_actual['sdRoutes'] += actual_sd
+        
         current += timedelta(days=1)
     
-    # Get proof actual data for comparison
-    proof_result2 = await db.execute(
-        select(Proof)
-        .options(
-            selectinload(Proof.route_details),
-            selectinload(Proof.linehaul_details),
-        )
-        .where(Proof.id == proof_id)
-    )
-    proof_full = proof_result2.scalar_one()
-    
-    proof_actuals = {
-        'dpoRoutes': 0,
-        'sdRoutes': 0,
-        'sdSpojenRoutes': 0,
-        'drRoutes': 0,
-        'linehauls': len(proof_full.linehaul_details) if proof_full.linehaul_details else 0,
-    }
-    
-    if proof_full.route_details:
-        for detail in proof_full.route_details:
-            rt = (detail.route_type or '').upper()
-            count = detail.routes_count or getattr(detail, 'count', 0) or 0
-            
-            if 'DR' in rt:
-                proof_actuals['drRoutes'] += count
-            elif 'LH_DPO' in rt or rt == 'DPO':
-                proof_actuals['dpoRoutes'] += count
-            elif 'SPOJENE' in rt or 'SPOJENÉ' in rt:
-                proof_actuals['sdSpojenRoutes'] += count
-            elif 'LH_SD' in rt or rt == 'SD':
-                proof_actuals['sdRoutes'] += count
+    # Count days with issues
+    days_with_diff = sum(1 for d in days if not d['isOk'] and d['hasData'])
+    days_without_plan = sum(1 for d in days if not d['hasPlan'])
+    days_without_data = sum(1 for d in days if not d['hasData'])
     
     return {
         'proof': {
@@ -1397,24 +1399,29 @@ async def get_daily_breakdown(
             'totalDays': len(days),
         },
         'days': days,
-        'plannedTotals': totals,
-        'proofActuals': proof_actuals,
-        'comparison': {
-            'dpoRoutes': {
-                'planned': totals['dpoRoutes'],
-                'actual': proof_actuals['dpoRoutes'],
-                'diff': proof_actuals['dpoRoutes'] - totals['dpoRoutes'],
+        'totals': {
+            'planned': {
+                'dpoRoutes': totals_planned['dpoRoutes'],
+                'sdRoutes': totals_planned['sdRoutes'],
+                'totalRoutes': totals_planned['dpoRoutes'] + totals_planned['sdRoutes'],
             },
-            'sdRoutes': {
-                'planned': totals['sdRoutes'],
-                'actual': proof_actuals['sdRoutes'] + proof_actuals['sdSpojenRoutes'],
-                'diff': (proof_actuals['sdRoutes'] + proof_actuals['sdSpojenRoutes']) - totals['sdRoutes'],
+            'actual': {
+                'dpoRoutes': totals_actual['dpoRoutes'],
+                'sdRoutes': totals_actual['sdRoutes'],
+                'totalRoutes': totals_actual['dpoRoutes'] + totals_actual['sdRoutes'],
             },
-            'linehauls': {
-                'planned': totals['dpoLinehauls'] + totals['sdLinehauls'],
-                'actual': proof_actuals['linehauls'],
-                'diff': proof_actuals['linehauls'] - (totals['dpoLinehauls'] + totals['sdLinehauls']),
-            },
+            'diff': {
+                'dpoRoutes': totals_actual['dpoRoutes'] - totals_planned['dpoRoutes'],
+                'sdRoutes': totals_actual['sdRoutes'] - totals_planned['sdRoutes'],
+                'totalRoutes': (totals_actual['dpoRoutes'] + totals_actual['sdRoutes']) - 
+                              (totals_planned['dpoRoutes'] + totals_planned['sdRoutes']),
+            }
+        },
+        'summary': {
+            'daysWithDiff': days_with_diff,
+            'daysWithoutPlan': days_without_plan,
+            'daysWithoutData': days_without_data,
+            'status': 'ok' if days_with_diff == 0 else 'warning',
         }
     }
 

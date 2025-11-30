@@ -190,6 +190,7 @@ class Proof(Base):
     route_details: Mapped[List["ProofRouteDetail"]] = relationship(back_populates="proof", cascade="all, delete-orphan")
     linehaul_details: Mapped[List["ProofLinehaulDetail"]] = relationship(back_populates="proof", cascade="all, delete-orphan")
     depo_details: Mapped[List["ProofDepoDetail"]] = relationship(back_populates="proof", cascade="all, delete-orphan")
+    daily_details: Mapped[List["ProofDailyDetail"]] = relationship(back_populates="proof", cascade="all, delete-orphan")
     invoices: Mapped[List["Invoice"]] = relationship(back_populates="proof")
     analyses: Mapped[List["ProofAnalysis"]] = relationship(back_populates="proof", cascade="all, delete-orphan")
 
@@ -237,6 +238,33 @@ class ProofDepoDetail(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
 
     proof: Mapped["Proof"] = relationship(back_populates="depo_details")
+
+
+class ProofDailyDetail(Base):
+    """Daily breakdown of routes from proof 'Podkladove tab' sheet"""
+    __tablename__ = "ProofDailyDetail"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
+    date: Mapped[datetime] = mapped_column(DateTime)
+    dr_dpo_count: Mapped[int] = mapped_column("drDpoCount", Integer, default=0)  # Direct Route DPO
+    lh_dpo_count: Mapped[int] = mapped_column("lhDpoCount", Integer, default=0)  # Linehaul DPO
+    dr_sd_count: Mapped[int] = mapped_column("drSdCount", Integer, default=0)    # Direct Route SD
+    lh_sd_count: Mapped[int] = mapped_column("lhSdCount", Integer, default=0)    # Linehaul SD
+
+    proof: Mapped["Proof"] = relationship(back_populates="daily_details")
+
+    @property
+    def total_dpo(self) -> int:
+        return self.dr_dpo_count + self.lh_dpo_count
+
+    @property
+    def total_sd(self) -> int:
+        return self.dr_sd_count + self.lh_sd_count
+
+    @property
+    def total_routes(self) -> int:
+        return self.total_dpo + self.total_sd
 
 
 class Invoice(Base):
