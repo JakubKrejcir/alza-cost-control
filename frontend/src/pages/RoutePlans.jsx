@@ -121,6 +121,9 @@ export default function RoutePlans() {
       queryClient.invalidateQueries(['route-plans'])
       setExpandedPlan(null)
       setPeriodComparison(null)
+    },
+    onError: (error) => {
+      alert('Chyba při mazání: ' + (error.response?.data?.detail || error.message))
     }
   })
 
@@ -427,12 +430,14 @@ export default function RoutePlans() {
                                   {expandedPlan === plan.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                                 </button>
                                 <button
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation()
                                     if (confirm('Opravdu smazat tento plán?')) {
                                       deleteMutation.mutate(plan.id)
                                     }
                                   }}
-                                  className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400"
+                                  disabled={deleteMutation.isLoading}
+                                  className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400 disabled:opacity-50"
                                 >
                                   <Trash2 size={18} />
                                 </button>

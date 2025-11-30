@@ -1178,3 +1178,5 @@ async def delete_route_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
     await update_route_plan_validity(carrier_id, db, plan_type)
     
     await db.commit()
+    
+    return None  # Explicit return for 204 No Content
