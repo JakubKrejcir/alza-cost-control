@@ -1,75 +1,64 @@
-# Alza Cost Control - Python Backend
+# Alza Cost Control - Backend API
 
 FastAPI backend pro kontrolu nákladů na dopravu.
 
 ## Tech Stack
 
-- **FastAPI** - moderní async Python web framework
+- **FastAPI** - async Python web framework
 - **SQLAlchemy 2.0** - async ORM
-- **PostgreSQL** - databáze
+- **PostgreSQL** - databáze (Railway)
 - **pdfplumber** - parsování PDF faktur
 - **openpyxl** - parsování XLSX proofů
 
-## Lokální vývoj
+## Deployment
 
-```bash
-# Vytvoř virtuální prostředí
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# nebo: venv\Scripts\activate  # Windows
+Aplikace běží na **Railway**. Pro deploy stačí pushnout do `main` branch.
 
-# Instalace závislostí
-pip install -r requirements.txt
+### Environment Variables (Railway)
 
-# Zkopíruj .env
-cp .env.example .env
-# Uprav DATABASE_URL v .env
-
-# Spusť server
-uvicorn app.main:app --reload --port 3001
+```
+DATABASE_URL=postgresql://...  # Automaticky z Railway PostgreSQL
 ```
 
 ## API Dokumentace
 
-Po spuštění serveru je dostupná na:
-- Swagger UI: http://localhost:3001/docs
-- ReDoc: http://localhost:3001/redoc
+Po deployi dostupná na:
+- Swagger UI: `https://<your-app>.railway.app/docs`
+- ReDoc: `https://<your-app>.railway.app/redoc`
 
 ## Struktura
 
 ```
 app/
-├── main.py          # FastAPI aplikace
-├── database.py      # SQLAlchemy konfigurace
+├── main.py          # FastAPI aplikace + CORS
+├── database.py      # SQLAlchemy async konfigurace
 ├── models.py        # Databázové modely
-├── schemas.py       # Pydantic schémata
+├── schemas.py       # Pydantic schémata (camelCase pro frontend)
 └── routers/
-    ├── carriers.py  # API dopravců
-    ├── depots.py    # API dep
-    ├── contracts.py # API smluv
-    ├── prices.py    # API ceníků
-    ├── proofs.py    # API proofů (XLSX upload)
-    ├── invoices.py  # API faktur (PDF upload)
-    └── analysis.py  # API analýz
+    ├── carriers.py  # CRUD dopravců
+    ├── depots.py    # CRUD dep
+    ├── contracts.py # Smlouvy + PDF parsing
+    ├── prices.py    # Ceníky
+    ├── proofs.py    # Proofy + XLSX parsing
+    ├── invoices.py  # Faktury + PDF parsing
+    └── analysis.py  # Analýza proof vs faktury
 ```
 
-## Deploy na Railway
+## API Endpoints
 
-1. Pushni tento kód do GitHub repo
-2. Na Railway vytvoř nový service z tohoto repo
-3. Nastav environment variables:
-   - `DATABASE_URL` - connection string k PostgreSQL
-   - `FRONTEND_URL` - URL frontendu pro CORS
+| Metoda | Endpoint | Popis |
+|--------|----------|-------|
+| GET | `/health` | Health check |
+| GET/POST | `/api/carriers` | Seznam/vytvoření dopravců |
+| GET/PUT/DELETE | `/api/carriers/{id}` | Detail dopravce |
+| POST | `/api/proofs/upload` | Nahrání XLSX proofu |
+| POST | `/api/invoices/upload` | Nahrání PDF faktury |
+| POST | `/api/contracts/upload-pdf` | Nahrání PDF smlouvy |
+| GET | `/api/analysis/dashboard` | Dashboard data |
+| POST | `/api/analysis/proof/{id}` | Spustit analýzu proofu |
 
-Railway automaticky detekuje Python a použije `requirements.txt`.
+## Databázové migrace
 
-## Migrace z Node.js
+Tabulky se vytvoří automaticky při prvním startu aplikace pomocí SQLAlchemy `create_all()`.
 
-Tento backend je přepsaný z Node.js/Express/Prisma. Hlavní změny:
-
-- Prisma → SQLAlchemy 2.0 (async)
-- Express → FastAPI
-- pdf-parse → pdfplumber (lepší pro české faktury)
-- xlsx → openpyxl
-
-API endpointy zůstávají stejné, frontend nevyžaduje změny.
+Pro produkční migrace doporučujeme Alembic (zatím neimplementováno).

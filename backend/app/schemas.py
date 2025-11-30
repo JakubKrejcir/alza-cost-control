@@ -251,86 +251,7 @@ class PriceConfigResponse(CamelModel):
 
 
 # =============================================================================
-# PROOF SCHEMAS
-# =============================================================================
-class ProofRouteDetailResponse(CamelModel):
-    id: int
-    route_type: str
-    count: int
-    rate: Decimal
-    amount: Decimal
-
-
-class ProofLinehaulDetailResponse(CamelModel):
-    id: int
-    description: str
-    from_code: Optional[str] = None
-    to_code: Optional[str] = None
-    vehicle_type: Optional[str] = None
-    days: Optional[int] = None
-    per_day: Optional[int] = None
-    rate: Decimal
-    total: Decimal
-
-
-class ProofDepoDetailResponse(CamelModel):
-    id: int
-    depo_name: str
-    rate_type: str
-    days: Optional[int] = None
-    rate: Decimal
-    amount: Decimal
-
-
-class ProofBase(BaseModel):
-    period: str
-    status: str = "pending"
-    total_fix: Optional[Decimal] = None
-    total_km: Optional[Decimal] = None
-    total_linehaul: Optional[Decimal] = None
-    total_depo: Optional[Decimal] = None
-    total_bonus: Optional[Decimal] = None
-    total_penalty: Optional[Decimal] = None
-    grand_total: Optional[Decimal] = None
-
-
-class ProofCreate(ProofBase):
-    carrier_id: int
-    depot_id: Optional[int] = None
-
-
-class ProofUpdate(BaseModel):
-    status: Optional[str] = None
-
-
-class ProofResponse(CamelModel):
-    id: int
-    carrier_id: int
-    depot_id: Optional[int] = None
-    period: str
-    period_date: datetime
-    status: str = "pending"
-    total_fix: Optional[Decimal] = None
-    total_km: Optional[Decimal] = None
-    total_linehaul: Optional[Decimal] = None
-    total_depo: Optional[Decimal] = None
-    total_bonus: Optional[Decimal] = None
-    total_penalty: Optional[Decimal] = None
-    grand_total: Optional[Decimal] = None
-    file_name: Optional[str] = None
-    file_url: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-
-
-class ProofDetailResponse(ProofResponse):
-    route_details: List[ProofRouteDetailResponse] = []
-    linehaul_details: List[ProofLinehaulDetailResponse] = []
-    depo_details: List[ProofDepoDetailResponse] = []
-
-
-# =============================================================================
-# INVOICE SCHEMAS
+# INVOICE SCHEMAS (needed for ProofDetailResponse)
 # =============================================================================
 class InvoiceItemBase(BaseModel):
     item_type: str
@@ -408,8 +329,78 @@ class InvoiceParsedData(BaseModel):
 
 
 # =============================================================================
-# ANALYSIS SCHEMAS
+# PROOF SCHEMAS
 # =============================================================================
+class ProofRouteDetailResponse(CamelModel):
+    id: int
+    route_type: str
+    count: int
+    rate: Decimal
+    amount: Decimal
+
+
+class ProofLinehaulDetailResponse(CamelModel):
+    id: int
+    description: str
+    from_code: Optional[str] = None
+    to_code: Optional[str] = None
+    vehicle_type: Optional[str] = None
+    days: Optional[int] = None
+    per_day: Optional[int] = None
+    rate: Decimal
+    total: Decimal
+
+
+class ProofDepoDetailResponse(CamelModel):
+    id: int
+    depo_name: str
+    rate_type: str
+    days: Optional[int] = None
+    rate: Decimal
+    amount: Decimal
+
+
+class ProofBase(BaseModel):
+    period: str
+    status: str = "pending"
+    total_fix: Optional[Decimal] = None
+    total_km: Optional[Decimal] = None
+    total_linehaul: Optional[Decimal] = None
+    total_depo: Optional[Decimal] = None
+    total_bonus: Optional[Decimal] = None
+    total_penalty: Optional[Decimal] = None
+    grand_total: Optional[Decimal] = None
+
+
+class ProofCreate(ProofBase):
+    carrier_id: int
+    depot_id: Optional[int] = None
+
+
+class ProofUpdate(BaseModel):
+    status: Optional[str] = None
+
+
+class ProofResponse(CamelModel):
+    id: int
+    carrier_id: int
+    depot_id: Optional[int] = None
+    period: str
+    period_date: datetime
+    status: str = "pending"
+    total_fix: Optional[Decimal] = None
+    total_km: Optional[Decimal] = None
+    total_linehaul: Optional[Decimal] = None
+    total_depo: Optional[Decimal] = None
+    total_bonus: Optional[Decimal] = None
+    total_penalty: Optional[Decimal] = None
+    grand_total: Optional[Decimal] = None
+    file_name: Optional[str] = None
+    file_url: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class ProofAnalysisResponse(CamelModel):
     id: int
     proof_id: int
@@ -425,6 +416,18 @@ class ProofAnalysisResponse(CamelModel):
     created_at: datetime
 
 
+class ProofDetailResponse(ProofResponse):
+    """Full proof detail including all related data"""
+    route_details: List[ProofRouteDetailResponse] = []
+    linehaul_details: List[ProofLinehaulDetailResponse] = []
+    depo_details: List[ProofDepoDetailResponse] = []
+    invoices: List[InvoiceResponse] = []
+    analyses: List[ProofAnalysisResponse] = []
+
+
+# =============================================================================
+# DASHBOARD SCHEMAS
+# =============================================================================
 class DashboardSummary(CamelModel):
     id: int
     carrier: str
