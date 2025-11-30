@@ -365,8 +365,6 @@ class RoutePlanRoute(Base):
     end_time: Mapped[Optional[str]] = mapped_column("endTime", String(10))
     work_time: Mapped[Optional[str]] = mapped_column("workTime", String(10))
     distance_km: Mapped[Optional[Decimal]] = mapped_column("distanceKm", Numeric(10, 2))
-    
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
     route_plan: Mapped["RoutePlan"] = relationship(back_populates="routes")
