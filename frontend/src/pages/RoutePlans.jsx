@@ -49,7 +49,7 @@ function PlanTypeBadge({ type }) {
 
 export default function RoutePlans() {
   const [selectedCarrier, setSelectedCarrier] = useState('')
-  const [selectedPeriod, setSelectedPeriod] = useState(getPeriodOptions()[0])
+  const [selectedProofPeriod, setSelectedProofPeriod] = useState('')
   const [dragOver, setDragOver] = useState(false)
   const [uploadResult, setUploadResult] = useState(null)
   const [expandedPlan, setExpandedPlan] = useState(null)
@@ -62,20 +62,20 @@ export default function RoutePlans() {
     queryFn: carriers.getAll
   })
 
+  // Plány - všechny pro dopravce, bez filtru období
   const { data: planList, isLoading: loadingPlans } = useQuery({
-    queryKey: ['route-plans', selectedCarrier, selectedPeriod],
+    queryKey: ['route-plans', selectedCarrier],
     queryFn: () => routePlans.getAll({ 
-      carrier_id: selectedCarrier,
-      period: selectedPeriod
+      carrier_id: selectedCarrier
     }),
     enabled: !!selectedCarrier
   })
 
+  // Proofy - všechny pro dopravce (pro výběr k porovnání)
   const { data: proofList } = useQuery({
-    queryKey: ['proofs', selectedCarrier, selectedPeriod],
+    queryKey: ['proofs', selectedCarrier],
     queryFn: () => proofs.getAll({ 
-      carrier_id: selectedCarrier,
-      period: selectedPeriod
+      carrier_id: selectedCarrier
     }),
     enabled: !!selectedCarrier
   })
@@ -137,15 +137,25 @@ export default function RoutePlans() {
   }, [handleFiles])
 
   const handleComparePeriod = () => {
-    const proof = proofList?.[0]
+    if (!selectedProofPeriod) {
+      alert('Vyberte proof pro porovnání')
+      return
+    }
+    const proof = proofList?.find(p => p.period === selectedProofPeriod)
     if (!proof) {
-      alert('Není k dispozici proof pro porovnání')
+      alert('Proof nenalezen')
       return
     }
     comparePeriodMutation.mutate(proof.id)
   }
 
-  const currentProof = proofList?.[0]
+  // Seskupit plány podle roku pro přehlednost
+  const groupedPlans = planList?.reduce((acc, plan) => {
+    const year = plan.validFrom ? new Date(plan.validFrom).getFullYear() : 'Neznámý'
+    if (!acc[year]) acc[year] = []
+    acc[year].push(plan)
+    return acc
+  }, {}) || {}
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -156,7 +166,7 @@ export default function RoutePlans() {
 
       {/* Filters */}
       <div className="card p-6">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="label">Dopravce</label>
             <select
@@ -164,6 +174,7 @@ export default function RoutePlans() {
               onChange={(e) => {
                 setSelectedCarrier(e.target.value)
                 setPeriodComparison(null)
+                setSelectedProofPeriod('')
               }}
               className="input"
             >
@@ -177,47 +188,47 @@ export default function RoutePlans() {
           </div>
           
           <div>
-            <label className="label">Období</label>
-            <select
-              value={selectedPeriod}
-              onChange={(e) => {
-                setSelectedPeriod(e.target.value)
-                setPeriodComparison(null)
-              }}
-              className="input"
-            >
-              {getPeriodOptions().map(period => (
-                <option key={period} value={period}>
-                  {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-end">
-            <button
-              onClick={handleComparePeriod}
-              disabled={!currentProof || comparePeriodMutation.isPending}
-              className="btn btn-primary w-full flex items-center justify-center gap-2"
-            >
-              <BarChart3 size={18} />
-              {comparePeriodMutation.isPending ? 'Porovnávám...' : 'Porovnat období'}
-            </button>
+            <label className="label">Porovnat s proofem</label>
+            <div className="flex gap-2">
+              <select
+                value={selectedProofPeriod}
+                onChange={(e) => {
+                  setSelectedProofPeriod(e.target.value)
+                  setPeriodComparison(null)
+                }}
+                className="input flex-1"
+                disabled={!selectedCarrier || !proofList?.length}
+              >
+                <option value="">Vyberte proof...</option>
+                {proofList?.map(proof => (
+                  <option key={proof.id} value={proof.period}>
+                    {proof.period} - {proof.fileName || 'proof'}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleComparePeriod}
+                disabled={!selectedProofPeriod || comparePeriodMutation.isPending}
+                className="btn btn-primary flex items-center gap-2"
+              >
+                <BarChart3 size={18} />
+                {comparePeriodMutation.isPending ? '...' : 'Porovnat'}
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Current proof info */}
+        {/* Info o proofech */}
         {selectedCarrier && (
-          <div className="mt-4 pt-4 border-t border-white/10">
-            {currentProof ? (
-              <div className="flex items-center gap-2 text-sm text-green-400">
-                <CheckCircle size={16} />
-                Proof pro {selectedPeriod}: {currentProof.fileName || 'nahrán'}
-              </div>
+          <div className="mt-4 pt-4 border-t border-white/10 text-sm">
+            {proofList?.length ? (
+              <span className="text-gray-400">
+                {proofList.length} proof{proofList.length > 1 ? 'ů' : ''} k dispozici pro porovnání
+              </span>
             ) : (
-              <div className="flex items-center gap-2 text-sm text-yellow-400">
+              <div className="flex items-center gap-2 text-yellow-400">
                 <AlertTriangle size={16} />
-                Žádný proof pro období {selectedPeriod}
+                Žádné proofy pro tohoto dopravce - nahrajte proof na stránce Upload
               </div>
             )}
           </div>
@@ -288,7 +299,7 @@ export default function RoutePlans() {
       {selectedCarrier && (
         <div className="card overflow-hidden">
           <div className="card-header">
-            <h2 className="font-semibold">Nahrané plány pro {selectedPeriod}</h2>
+            <h2 className="font-semibold">Nahrané plány</h2>
           </div>
           
           {loadingPlans ? (
@@ -296,96 +307,107 @@ export default function RoutePlans() {
           ) : !planList?.length ? (
             <div className="p-8 text-center text-gray-500">
               <Map className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p>Žádné plány pro toto období</p>
+              <p>Žádné plány pro tohoto dopravce</p>
             </div>
           ) : (
-            <div className="divide-y divide-white/5">
-              {planList.map(plan => (
-                <div key={plan.id} className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                        <Calendar className="w-5 h-5 text-blue-400" />
-                      </div>
-                      <div>
-                        <div className="font-medium flex items-center gap-2">
-                          {formatDate(plan.validFrom)}
-                          {plan.validTo && (
-                            <span className="text-gray-400"> → {formatDate(plan.validTo)}</span>
-                          )}
-                          {!plan.validTo && (
-                            <span className="text-green-400 text-sm">aktivní</span>
-                          )}
-                          <PlanTypeBadge type={plan.planType} />
-                        </div>
-                        <div className="text-sm text-gray-400">
-                          {plan.fileName}
-                        </div>
-                      </div>
+            <div>
+              {Object.entries(groupedPlans)
+                .sort(([a], [b]) => Number(b) - Number(a))
+                .map(([year, yearPlans]) => (
+                  <div key={year}>
+                    <div className="px-4 py-2 bg-white/5 text-sm font-medium text-gray-400">
+                      {year}
                     </div>
-                    
-                    <div className="flex items-center gap-4">
-                      <div className="text-right text-sm">
-                        <div className="text-gray-300">{plan.totalRoutes} tras</div>
-                        <div className="text-gray-500">
-                          {plan.dpoRoutesCount} DPO / {plan.sdRoutesCount} SD
+                    <div className="divide-y divide-white/5">
+                      {yearPlans.map(plan => (
+                        <div key={plan.id} className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                                <Calendar className="w-5 h-5 text-blue-400" />
+                              </div>
+                              <div>
+                                <div className="font-medium flex items-center gap-2">
+                                  {formatDate(plan.validFrom)}
+                                  {plan.validTo && (
+                                    <span className="text-gray-400"> → {formatDate(plan.validTo)}</span>
+                                  )}
+                                  {!plan.validTo && (
+                                    <span className="text-green-400 text-sm">aktivní</span>
+                                  )}
+                                  <PlanTypeBadge type={plan.planType} />
+                                </div>
+                                <div className="text-sm text-gray-400">
+                                  {plan.fileName}
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="flex items-center gap-4">
+                              <div className="text-right text-sm">
+                                <div className="text-gray-300">{plan.totalRoutes} tras</div>
+                                <div className="text-gray-500">
+                                  {plan.dpoRoutesCount} DPO / {plan.sdRoutesCount} SD
+                                </div>
+                              </div>
+                              
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => setExpandedPlan(expandedPlan === plan.id ? null : plan.id)}
+                                  className="p-2 rounded-lg hover:bg-white/5"
+                                >
+                                  {expandedPlan === plan.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (confirm('Opravdu smazat tento plán?')) {
+                                      deleteMutation.mutate(plan.id)
+                                    }
+                                  }}
+                                  className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Expanded detail */}
+                          {expandedPlan === plan.id && (
+                            <div className="mt-4 pt-4 border-t border-white/5">
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+                                <div>
+                                  <span className="text-gray-400">DPO trasy:</span>
+                                  <span className="ml-2 font-medium">{plan.dpoRoutesCount}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">SD trasy:</span>
+                                  <span className="ml-2 font-medium">{plan.sdRoutesCount}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">DPO Linehauly:</span>
+                                  <span className="ml-2 font-medium">{plan.dpoLinehaulCount}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">SD Linehauly:</span>
+                                  <span className="ml-2 font-medium">{plan.sdLinehaulCount}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Celkem km:</span>
+                                  <span className="ml-2 font-medium">{plan.totalDistanceKm?.toLocaleString('cs-CZ')} km</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Celkem zastávek:</span>
+                                  <span className="ml-2 font-medium">{plan.totalStops}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => setExpandedPlan(expandedPlan === plan.id ? null : plan.id)}
-                          className="p-2 rounded-lg hover:bg-white/5"
-                        >
-                          {expandedPlan === plan.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (confirm('Opravdu smazat tento plán?')) {
-                              deleteMutation.mutate(plan.id)
-                            }
-                          }}
-                          className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400"
-                        >
-                          <Trash2 size={18} />
-                        </button>
-                      </div>
+                      ))}
                     </div>
                   </div>
-
-                  {/* Expanded detail */}
-                  {expandedPlan === plan.id && (
-                    <div className="mt-4 pt-4 border-t border-white/5">
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <span className="text-gray-400">DPO trasy:</span>
-                          <span className="ml-2 font-medium">{plan.dpoRoutesCount}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">SD trasy:</span>
-                          <span className="ml-2 font-medium">{plan.sdRoutesCount}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">DPO Linehauly:</span>
-                          <span className="ml-2 font-medium">{plan.dpoLinehaulCount}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">SD Linehauly:</span>
-                          <span className="ml-2 font-medium">{plan.sdLinehaulCount}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">Celkem km:</span>
-                          <span className="ml-2 font-medium">{plan.totalDistanceKm?.toLocaleString('cs-CZ')} km</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-400">Celkem zastávek:</span>
-                          <span className="ml-2 font-medium">{plan.totalStops}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </div>
