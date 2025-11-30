@@ -1237,6 +1237,188 @@ async def compare_plan_vs_proof(
     return comparison
 
 
+@router.get("/daily-breakdown/{proof_id}")
+async def get_daily_breakdown(
+    proof_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get day-by-day breakdown of planned routes for a proof's period.
+    
+    Returns each day with:
+    - What plan was active
+    - Expected routes (DPO, SD)
+    - Expected linehauls
+    - Whether it's a working day
+    """
+    # Get proof
+    proof_result = await db.execute(
+        select(Proof)
+        .options(selectinload(Proof.carrier))
+        .where(Proof.id == proof_id)
+    )
+    proof = proof_result.scalar_one_or_none()
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    
+    # Parse period
+    try:
+        month, year = proof.period.split('/')
+        month, year = int(month), int(year)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid period format")
+    
+    # Get first and last day of month
+    first_day = datetime(year, month, 1)
+    last_day = datetime(year, month, calendar.monthrange(year, month)[1])
+    
+    # Get all plans that might overlap with this period
+    plans = await get_plans_for_period(proof.carrier_id, proof.period, db)
+    
+    # Build daily breakdown
+    days = []
+    current = first_day
+    
+    totals = {
+        'workingDays': 0,
+        'weekendDays': 0,
+        'dpoRoutes': 0,
+        'sdRoutes': 0,
+        'dpoLinehauls': 0,
+        'sdLinehauls': 0,
+    }
+    
+    while current <= last_day:
+        is_working_day = current.weekday() < 5  # Mon-Fri
+        
+        # Find active plan(s) for this day
+        active_plans = []
+        for plan in plans:
+            plan_start = plan.valid_from
+            plan_end = plan.valid_to or last_day
+            
+            if plan_start <= current <= plan_end:
+                active_plans.append(plan)
+        
+        # Aggregate plan data for this day
+        day_data = {
+            'date': current.strftime('%Y-%m-%d'),
+            'dayOfWeek': current.strftime('%A'),
+            'dayOfWeekShort': ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'][current.weekday()],
+            'dayNumber': current.day,
+            'isWorkingDay': is_working_day,
+            'isWeekend': not is_working_day,
+            'plans': [],
+            'dpoRoutes': 0,
+            'sdRoutes': 0,
+            'dpoLinehauls': 0,
+            'sdLinehauls': 0,
+            'totalRoutes': 0,
+            'totalLinehauls': 0,
+        }
+        
+        if active_plans and is_working_day:
+            for plan in active_plans:
+                plan_info = {
+                    'id': plan.id,
+                    'planType': plan.plan_type,
+                    'fileName': plan.file_name,
+                }
+                day_data['plans'].append(plan_info)
+                
+                # Add routes based on plan type
+                if plan.plan_type in ('BOTH', 'DPO'):
+                    day_data['dpoRoutes'] += plan.dpo_routes_count or 0
+                    day_data['dpoLinehauls'] += plan.dpo_linehaul_count or 0
+                if plan.plan_type in ('BOTH', 'SD'):
+                    day_data['sdRoutes'] += plan.sd_routes_count or 0
+                    day_data['sdLinehauls'] += plan.sd_linehaul_count or 0
+            
+            day_data['totalRoutes'] = day_data['dpoRoutes'] + day_data['sdRoutes']
+            day_data['totalLinehauls'] = day_data['dpoLinehauls'] + day_data['sdLinehauls']
+            
+            # Update totals
+            totals['workingDays'] += 1
+            totals['dpoRoutes'] += day_data['dpoRoutes']
+            totals['sdRoutes'] += day_data['sdRoutes']
+            totals['dpoLinehauls'] += day_data['dpoLinehauls']
+            totals['sdLinehauls'] += day_data['sdLinehauls']
+        elif not is_working_day:
+            totals['weekendDays'] += 1
+        
+        days.append(day_data)
+        current += timedelta(days=1)
+    
+    # Get proof actual data for comparison
+    proof_result2 = await db.execute(
+        select(Proof)
+        .options(
+            selectinload(Proof.route_details),
+            selectinload(Proof.linehaul_details),
+        )
+        .where(Proof.id == proof_id)
+    )
+    proof_full = proof_result2.scalar_one()
+    
+    proof_actuals = {
+        'dpoRoutes': 0,
+        'sdRoutes': 0,
+        'sdSpojenRoutes': 0,
+        'drRoutes': 0,
+        'linehauls': len(proof_full.linehaul_details) if proof_full.linehaul_details else 0,
+    }
+    
+    if proof_full.route_details:
+        for detail in proof_full.route_details:
+            rt = (detail.route_type or '').upper()
+            count = detail.routes_count or getattr(detail, 'count', 0) or 0
+            
+            if 'DR' in rt:
+                proof_actuals['drRoutes'] += count
+            elif 'LH_DPO' in rt or rt == 'DPO':
+                proof_actuals['dpoRoutes'] += count
+            elif 'SPOJENE' in rt or 'SPOJENÉ' in rt:
+                proof_actuals['sdSpojenRoutes'] += count
+            elif 'LH_SD' in rt or rt == 'SD':
+                proof_actuals['sdRoutes'] += count
+    
+    return {
+        'proof': {
+            'id': proof.id,
+            'period': proof.period,
+            'carrierId': proof.carrier_id,
+            'carrierName': proof.carrier.name if proof.carrier else None,
+        },
+        'month': {
+            'year': year,
+            'month': month,
+            'monthName': ['', 'Leden', 'Únor', 'Březen', 'Duben', 'Květen', 'Červen', 
+                         'Červenec', 'Srpen', 'Září', 'Říjen', 'Listopad', 'Prosinec'][month],
+            'totalDays': len(days),
+        },
+        'days': days,
+        'plannedTotals': totals,
+        'proofActuals': proof_actuals,
+        'comparison': {
+            'dpoRoutes': {
+                'planned': totals['dpoRoutes'],
+                'actual': proof_actuals['dpoRoutes'],
+                'diff': proof_actuals['dpoRoutes'] - totals['dpoRoutes'],
+            },
+            'sdRoutes': {
+                'planned': totals['sdRoutes'],
+                'actual': proof_actuals['sdRoutes'] + proof_actuals['sdSpojenRoutes'],
+                'diff': (proof_actuals['sdRoutes'] + proof_actuals['sdSpojenRoutes']) - totals['sdRoutes'],
+            },
+            'linehauls': {
+                'planned': totals['dpoLinehauls'] + totals['sdLinehauls'],
+                'actual': proof_actuals['linehauls'],
+                'diff': proof_actuals['linehauls'] - (totals['dpoLinehauls'] + totals['sdLinehauls']),
+            },
+        }
+    }
+
+
 @router.delete("/{plan_id}", status_code=204)
 async def delete_route_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
     """Delete route plan"""
