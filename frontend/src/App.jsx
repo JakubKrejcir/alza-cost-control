@@ -6,6 +6,7 @@ import Prices from './pages/Prices'
 import History from './pages/History'
 import Carriers from './pages/Carriers'
 import Contracts from './pages/Contracts'
+import RoutePlans from './pages/RoutePlans'
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="upload" element={<Upload />} />
+        <Route path="route-plans" element={<RoutePlans />} />
         <Route path="prices" element={<Prices />} />
         <Route path="history" element={<History />} />
         <Route path="carriers" element={<Carriers />} />

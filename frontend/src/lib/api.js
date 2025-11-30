@@ -87,6 +87,25 @@ export const invoices = {
   }
 }
 
+// Route Plans
+export const routePlans = {
+  getAll: (params) => api.get('/route-plans', { params }).then(r => r.data),
+  getOne: (id) => api.get(`/route-plans/${id}`).then(r => r.data),
+  upload: (file, carrierId, validFrom) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('carrier_id', carrierId)
+    if (validFrom) {
+      formData.append('valid_from', validFrom)
+    }
+    return api.post('/route-plans/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(r => r.data)
+  },
+  compare: (planId, proofId) => api.get(`/route-plans/${planId}/compare/${proofId}`).then(r => r.data),
+  delete: (id) => api.delete(`/route-plans/${id}`)
+}
+
 // Analysis
 export const analysis = {
   analyzeProof: (proofId) => api.post(`/analysis/proof/${proofId}`).then(r => r.data),

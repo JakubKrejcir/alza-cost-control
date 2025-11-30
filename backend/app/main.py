@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import engine, Base
 from app.routers import carriers, depots, contracts, prices, proofs, invoices, analysis
+from app.routers import route_plans
 
 
 @asynccontextmanager
@@ -23,13 +24,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Alza Cost Control API",
     description="Backend API pro kontrolu nákladů na dopravu",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
     redirect_slashes=True
 )
 
 # CORS - configured for Railway deployment
-# Frontend URL is set via environment variable
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 ALLOWED_ORIGINS = [
     origin.strip() 
@@ -37,7 +37,6 @@ ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
-# If no origins configured, allow all (development fallback)
 if not ALLOWED_ORIGINS:
     ALLOWED_ORIGINS = ["*"]
 
@@ -53,7 +52,7 @@ app.add_middleware(
 # Health check
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": "2.1.0"}
 
 
 # Routers
@@ -64,3 +63,4 @@ app.include_router(prices.router, prefix="/api/prices", tags=["Prices"])
 app.include_router(proofs.router, prefix="/api/proofs", tags=["Proofs"])
 app.include_router(invoices.router, prefix="/api/invoices", tags=["Invoices"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
+app.include_router(route_plans.router, prefix="/api/route-plans", tags=["Route Plans"])
