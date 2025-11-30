@@ -248,17 +248,41 @@ class ProofDailyDetail(Base):
     proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
     date: Mapped[datetime] = mapped_column(DateTime)
     
-    # Počty tras (CNT)
+    # Počty tras (CNT) - CELKEM
     dr_dpo_count: Mapped[int] = mapped_column("drDpoCount", Integer, default=0)  # Direct Route DPO
     lh_dpo_count: Mapped[int] = mapped_column("lhDpoCount", Integer, default=0)  # Linehaul DPO
     dr_sd_count: Mapped[int] = mapped_column("drSdCount", Integer, default=0)    # Direct Route SD
     lh_sd_count: Mapped[int] = mapped_column("lhSdCount", Integer, default=0)    # Linehaul SD
     
-    # Kilometry (KM)
+    # Počty tras - VRATIMOV
+    vratimov_dr_dpo: Mapped[int] = mapped_column("vratimovDrDpo", Integer, default=0)
+    vratimov_lh_dpo: Mapped[int] = mapped_column("vratimovLhDpo", Integer, default=0)
+    vratimov_dr_sd: Mapped[int] = mapped_column("vratimovDrSd", Integer, default=0)
+    vratimov_lh_sd: Mapped[int] = mapped_column("vratimovLhSd", Integer, default=0)
+    
+    # Počty tras - NOVÝ BYDŽOV
+    bydzov_dr_dpo: Mapped[int] = mapped_column("bydzovDrDpo", Integer, default=0)
+    bydzov_lh_dpo: Mapped[int] = mapped_column("bydzovLhDpo", Integer, default=0)
+    bydzov_dr_sd: Mapped[int] = mapped_column("bydzovDrSd", Integer, default=0)
+    bydzov_lh_sd: Mapped[int] = mapped_column("bydzovLhSd", Integer, default=0)
+    
+    # Kilometry (KM) - CELKEM
     dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("drDpoKm", Numeric(10, 2), default=0)
     lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("lhDpoKm", Numeric(10, 2), default=0)
     dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("drSdKm", Numeric(10, 2), default=0)
     lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("lhSdKm", Numeric(10, 2), default=0)
+    
+    # Kilometry - VRATIMOV
+    vratimov_dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("vratimovDrDpoKm", Numeric(10, 2), default=0)
+    vratimov_lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("vratimovLhDpoKm", Numeric(10, 2), default=0)
+    vratimov_dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("vratimovDrSdKm", Numeric(10, 2), default=0)
+    vratimov_lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("vratimovLhSdKm", Numeric(10, 2), default=0)
+    
+    # Kilometry - NOVÝ BYDŽOV
+    bydzov_dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("bydzovDrDpoKm", Numeric(10, 2), default=0)
+    bydzov_lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("bydzovLhDpoKm", Numeric(10, 2), default=0)
+    bydzov_dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("bydzovDrSdKm", Numeric(10, 2), default=0)
+    bydzov_lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("bydzovLhSdKm", Numeric(10, 2), default=0)
 
     proof: Mapped["Proof"] = relationship(back_populates="daily_details")
 
@@ -275,16 +299,12 @@ class ProofDailyDetail(Base):
         return self.total_dpo_count + self.total_sd_count
     
     @property
-    def total_dpo_km(self) -> Decimal:
-        return (self.dr_dpo_km or 0) + (self.lh_dpo_km or 0)
+    def vratimov_total(self) -> int:
+        return self.vratimov_dr_dpo + self.vratimov_lh_dpo + self.vratimov_dr_sd + self.vratimov_lh_sd
     
     @property
-    def total_sd_km(self) -> Decimal:
-        return (self.dr_sd_km or 0) + (self.lh_sd_km or 0)
-    
-    @property
-    def total_km(self) -> Decimal:
-        return self.total_dpo_km + self.total_sd_km
+    def bydzov_total(self) -> int:
+        return self.bydzov_dr_dpo + self.bydzov_lh_dpo + self.bydzov_dr_sd + self.bydzov_lh_sd
 
 
 class Invoice(Base):
