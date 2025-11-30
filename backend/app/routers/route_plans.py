@@ -1,12 +1,14 @@
 """
 Route Plans API Router - with XLSX upload and parsing
 UPDATED: Support for plan_type (BOTH/DPO/SD) based on filename suffix
+UPDATED: Aggregated comparison - proof vs all plans valid in the month
 """
 from typing import List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 import re
+import calendar
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,27 +93,43 @@ def detect_plan_type_from_filename(filename: str) -> str:
 
 
 def parse_date_from_filename(filename: str) -> Optional[datetime]:
-    """Extract date from filename like 'Drivecool_25-11-28___kopie.xlsx' -> 2025-11-28"""
-    # Pattern: YY-MM-DD or YYYY-MM-DD
+    """Extract date from filename like 'plan_01.12.2025.xlsx' -> 2025-12-01"""
+    # Patterns for DD.MM.YYYY or DD-MM-YYYY first (more specific)
     patterns = [
-        r'(\d{2})-(\d{2})-(\d{2})',  # YY-MM-DD
-        r'(\d{4})-(\d{2})-(\d{2})',  # YYYY-MM-DD
-        r'(\d{2})\.(\d{2})\.(\d{2})',  # YY.MM.DD
-        r'(\d{4})\.(\d{2})\.(\d{2})',  # YYYY.MM.DD
-        r'(\d{2})_(\d{2})_(\d{2})',  # YY_MM_DD
-        r'(\d{4})_(\d{2})_(\d{2})',  # YYYY_MM_DD
+        r'(\d{2})\.(\d{2})\.(\d{4})',  # DD.MM.YYYY
+        r'(\d{2})-(\d{2})-(\d{4})',    # DD-MM-YYYY
+        r'(\d{2})_(\d{2})_(\d{4})',    # DD_MM_YYYY
+        r'(\d{2})\.(\d{2})\.(\d{2})',  # DD.MM.YY
+        r'(\d{2})-(\d{2})-(\d{2})',    # DD-MM-YY or YY-MM-DD
+        r'(\d{2})_(\d{2})_(\d{2})',    # DD_MM_YY or YY_MM_YY
     ]
     
     for pattern in patterns:
         match = re.search(pattern, filename)
         if match:
             groups = match.groups()
-            if len(groups[0]) == 2:
-                year = 2000 + int(groups[0])
+            g0, g1, g2 = int(groups[0]), int(groups[1]), int(groups[2])
+            
+            # Try to figure out the format
+            # If g2 > 31, it's likely a year
+            if g2 > 31:
+                # DD.MM.YYYY format
+                day, month, year = g0, g1, g2
+            elif g0 > 31:
+                # YYYY.MM.DD format (unlikely but possible)
+                year, month, day = g0, g1, g2
+            elif g0 > 12 and g1 <= 12:
+                # DD.MM.YY (day > 12, so first is day)
+                day, month = g0, g1
+                year = 2000 + g2 if g2 < 100 else g2
+            elif g1 > 12 and g0 <= 12:
+                # MM.DD.YY (second > 12, so second is day)
+                month, day = g0, g1
+                year = 2000 + g2 if g2 < 100 else g2
             else:
-                year = int(groups[0])
-            month = int(groups[1])
-            day = int(groups[2])
+                # Assume DD.MM.YY (Czech format)
+                day, month = g0, g1
+                year = 2000 + g2 if g2 < 100 else g2
             
             try:
                 return datetime(year, month, day)
@@ -119,6 +137,20 @@ def parse_date_from_filename(filename: str) -> Optional[datetime]:
                 continue
     
     return None
+
+
+def get_working_days_in_range(start_date: datetime, end_date: datetime) -> int:
+    """Count working days (Mon-Fri) between two dates inclusive"""
+    if not start_date or not end_date:
+        return 0
+    
+    count = 0
+    current = start_date
+    while current <= end_date:
+        if current.weekday() < 5:  # Monday = 0, Friday = 4
+            count += 1
+        current += timedelta(days=1)
+    return count
 
 
 def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
@@ -211,8 +243,8 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
                 'stops_count': stops_count,
                 'max_capacity': int(sheet.cell(row=row, column=col_map['max_capacity']).value or 0) if col_map['max_capacity'] else 0,
                 'start_time': start_time_str,
-                'end_time': time_to_str(sheet.cell(row=row, column=col_map['end_time']).value) if col_map['end_time'] else None,
-                'work_time': time_to_str(sheet.cell(row=row, column=col_map['work_time']).value) if col_map['work_time'] else None,
+                'end_time': time_to_str(sheet.cell(row=row, column=col_map['end_time']).value if col_map['end_time'] else None),
+                'work_time': time_to_str(sheet.cell(row=row, column=col_map['work_time']).value if col_map['work_time'] else None),
                 'distance_km': distance,
             }
             
@@ -226,31 +258,59 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             else:
                 result['summary']['sd_routes_count'] += 1
         
-        # Počet linehaulů - LH-LH = 2 kamiony pro celý batch
-        for lh_type in dpo_lh_set:
-            result['summary']['dpo_linehaul_count'] += parse_linehaul_count(lh_type)
-        for lh_type in sd_lh_set:
-            result['summary']['sd_linehaul_count'] += parse_linehaul_count(lh_type)
+        # Linehaul count = 2 per batch (LH-LH = 2 kamiony pro celý batch)
+        result['summary']['dpo_linehaul_count'] = 2 if dpo_lh_set else 0
+        result['summary']['sd_linehaul_count'] = 2 if sd_lh_set else 0
     
     return result
+
+
+async def get_route_plan_by_id(plan_id: int, db: AsyncSession) -> Optional[RoutePlan]:
+    """Get route plan with routes loaded"""
+    result = await db.execute(
+        select(RoutePlan)
+        .options(
+            selectinload(RoutePlan.carrier),
+            selectinload(RoutePlan.routes)
+        )
+        .where(RoutePlan.id == plan_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def update_route_plan_validity(carrier_id: int, db: AsyncSession, plan_type: str = None):
+    """Update valid_to dates for all plans of a carrier (optionally filtered by plan_type)"""
+    query = select(RoutePlan).where(RoutePlan.carrier_id == carrier_id)
+    
+    if plan_type:
+        query = query.where(RoutePlan.plan_type == plan_type)
+    
+    query = query.order_by(RoutePlan.valid_from.asc())
+    
+    result = await db.execute(query)
+    plans = result.scalars().all()
+    
+    for i, plan in enumerate(plans):
+        if i + 1 < len(plans):
+            # Set valid_to to day before next plan starts
+            next_plan = plans[i + 1]
+            plan.valid_to = next_plan.valid_from - timedelta(days=1)
+        else:
+            # Last plan - no end date
+            plan.valid_to = None
 
 
 async def check_plan_type_conflicts(
     carrier_id: int, 
     valid_from: datetime, 
-    new_plan_type: str, 
+    plan_type: str, 
     db: AsyncSession
 ) -> Optional[str]:
     """
-    Check for plan type conflicts.
-    
-    Returns error message if conflict exists, None if OK.
-    
-    Rules:
-    - BOTH cannot coexist with DPO or SD
-    - DPO and SD can coexist together
+    Check for conflicting plan types.
+    Returns error message if conflict exists, None otherwise.
     """
-    # Get existing plans for this carrier and date
+    # Find existing plans for same carrier and date
     result = await db.execute(
         select(RoutePlan).where(
             and_(
@@ -261,70 +321,165 @@ async def check_plan_type_conflicts(
     )
     existing_plans = result.scalars().all()
     
-    if not existing_plans:
-        return None  # No conflicts
-    
-    existing_types = {p.plan_type for p in existing_plans}
-    
-    # Check conflicts
-    if new_plan_type == "BOTH":
+    for existing in existing_plans:
         # BOTH cannot coexist with DPO or SD
-        if "DPO" in existing_types or "SD" in existing_types:
-            conflicts = ", ".join(sorted(existing_types))
-            return (
-                f"Nelze nahrát plán typu BOTH (bez přípony). "
-                f"Pro datum {valid_from.strftime('%d.%m.%Y')} již existují oddělené plány: {conflicts}. "
-                f"Nejdříve je smažte, pokud chcete nahrát kombinovaný plán."
-            )
-    else:
-        # DPO or SD cannot coexist with BOTH
-        if "BOTH" in existing_types:
-            return (
-                f"Nelze nahrát plán typu {new_plan_type}. "
-                f"Pro datum {valid_from.strftime('%d.%m.%Y')} již existuje kombinovaný plán (BOTH). "
-                f"Nejdříve ho smažte, pokud chcete nahrát oddělené plány pro DPO a SD."
-            )
-    
-    return None  # No conflicts
-
-
-async def update_route_plan_validity(carrier_id: int, db: AsyncSession):
-    """Update valid_to dates for route plans based on next plan's valid_from"""
-    # Get all plans grouped by plan_type
-    for plan_type in ['BOTH', 'DPO', 'SD']:
-        result = await db.execute(
-            select(RoutePlan)
-            .where(
-                and_(
-                    RoutePlan.carrier_id == carrier_id,
-                    RoutePlan.plan_type == plan_type
-                )
-            )
-            .order_by(RoutePlan.valid_from.asc())
-        )
-        plans = result.scalars().all()
+        if plan_type == "BOTH" and existing.plan_type in ("DPO", "SD"):
+            return f"Pro datum {valid_from.strftime('%d.%m.%Y')} již existuje {existing.plan_type} plán. Nejprve ho smažte nebo nahrajte oddělené _DPO a _SD plány."
         
-        for i, plan in enumerate(plans):
-            if i < len(plans) - 1:
-                # Set valid_to to day before next plan starts
-                next_plan = plans[i + 1]
-                plan.valid_to = next_plan.valid_from - timedelta(days=1)
-            else:
-                # Last plan - no end date
-                plan.valid_to = None
+        if plan_type in ("DPO", "SD") and existing.plan_type == "BOTH":
+            return f"Pro datum {valid_from.strftime('%d.%m.%Y')} již existuje společný plán (BOTH). Nejprve ho smažte nebo nahrajte soubor bez přípony _DPO/_SD."
+        
+        # Same type - will be replaced (no conflict)
+        if plan_type == existing.plan_type:
+            return None  # OK, will replace
+    
+    return None
 
 
-async def get_route_plan_by_id(plan_id: int, db: AsyncSession):
-    """Helper to get route plan with all details"""
+async def get_plans_for_period(
+    carrier_id: int, 
+    period: str, 
+    db: AsyncSession
+) -> List[RoutePlan]:
+    """
+    Get all plans valid during a calendar month period.
+    
+    A plan is valid for a period if:
+    - plan.valid_from <= last day of period AND
+    - (plan.valid_to IS NULL OR plan.valid_to >= first day of period)
+    """
+    # Parse period (MM/YYYY)
+    try:
+        month, year = period.split('/')
+        month, year = int(month), int(year)
+    except ValueError:
+        return []
+    
+    # Get first and last day of month
+    first_day = datetime(year, month, 1)
+    last_day = datetime(year, month, calendar.monthrange(year, month)[1])
+    
+    # Query plans that overlap with this period
     result = await db.execute(
         select(RoutePlan)
-        .options(
-            selectinload(RoutePlan.carrier),
-            selectinload(RoutePlan.routes),
+        .options(selectinload(RoutePlan.routes))
+        .where(
+            and_(
+                RoutePlan.carrier_id == carrier_id,
+                RoutePlan.valid_from <= last_day,
+                or_(
+                    RoutePlan.valid_to == None,
+                    RoutePlan.valid_to >= first_day
+                )
+            )
         )
-        .where(RoutePlan.id == plan_id)
+        .order_by(RoutePlan.valid_from.asc())
     )
-    return result.scalar_one_or_none()
+    return result.scalars().all()
+
+
+def aggregate_plans_for_period(
+    plans: List[RoutePlan], 
+    period: str
+) -> dict:
+    """
+    Aggregate multiple plans for a period, calculating weighted values.
+    
+    Each plan contributes based on how many working days it covers in the period.
+    """
+    # Parse period
+    try:
+        month, year = period.split('/')
+        month, year = int(month), int(year)
+    except ValueError:
+        return None
+    
+    first_day = datetime(year, month, 1)
+    last_day = datetime(year, month, calendar.monthrange(year, month)[1])
+    
+    # Total working days in month
+    total_working_days = get_working_days_in_range(first_day, last_day)
+    
+    if total_working_days == 0:
+        return None
+    
+    aggregated = {
+        'plans': [],
+        'totalWorkingDays': total_working_days,
+        'dpoRoutesCount': 0,
+        'sdRoutesCount': 0,
+        'dpoLinehaulCount': 0,
+        'sdLinehaulCount': 0,
+        'totalRoutes': 0,
+        'coverage': [],
+        'missingDays': 0,
+    }
+    
+    covered_days = set()
+    
+    for plan in plans:
+        # Calculate overlap with period
+        plan_start = max(plan.valid_from, first_day)
+        plan_end = min(plan.valid_to, last_day) if plan.valid_to else last_day
+        
+        if plan_start > plan_end:
+            continue  # No overlap
+        
+        working_days = get_working_days_in_range(plan_start, plan_end)
+        weight = working_days / total_working_days
+        
+        # Track covered days
+        current = plan_start
+        while current <= plan_end:
+            if current.weekday() < 5:
+                covered_days.add(current.date())
+            current += timedelta(days=1)
+        
+        plan_info = {
+            'id': plan.id,
+            'planType': plan.plan_type,
+            'fileName': plan.file_name,
+            'validFrom': plan.valid_from.isoformat(),
+            'validTo': plan.valid_to.isoformat() if plan.valid_to else None,
+            'overlapStart': plan_start.isoformat(),
+            'overlapEnd': plan_end.isoformat(),
+            'workingDays': working_days,
+            'weight': round(weight, 3),
+            'dpoRoutesCount': plan.dpo_routes_count,
+            'sdRoutesCount': plan.sd_routes_count,
+            'dpoLinehaulCount': plan.dpo_linehaul_count,
+            'sdLinehaulCount': plan.sd_linehaul_count,
+        }
+        aggregated['plans'].append(plan_info)
+        
+        # Weighted contribution
+        # Routes: multiply by working days (routes run every day)
+        if plan.plan_type in ('BOTH', 'DPO'):
+            aggregated['dpoRoutesCount'] += plan.dpo_routes_count * working_days
+        if plan.plan_type in ('BOTH', 'SD'):
+            aggregated['sdRoutesCount'] += plan.sd_routes_count * working_days
+        
+        # Linehaul: multiply by working days (linehaul runs every day too)
+        if plan.plan_type in ('BOTH', 'DPO'):
+            aggregated['dpoLinehaulCount'] += plan.dpo_linehaul_count * working_days
+        if plan.plan_type in ('BOTH', 'SD'):
+            aggregated['sdLinehaulCount'] += plan.sd_linehaul_count * working_days
+    
+    # Calculate missing days
+    all_working_days = set()
+    current = first_day
+    while current <= last_day:
+        if current.weekday() < 5:
+            all_working_days.add(current.date())
+        current += timedelta(days=1)
+    
+    missing_days = all_working_days - covered_days
+    aggregated['missingDays'] = len(missing_days)
+    aggregated['missingDates'] = sorted([d.isoformat() for d in missing_days])
+    
+    aggregated['totalRoutes'] = aggregated['dpoRoutesCount'] + aggregated['sdRoutesCount']
+    
+    return aggregated
 
 
 # =============================================================================
@@ -339,71 +494,44 @@ async def get_route_plans(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all route plans with optional filters"""
-    query = select(RoutePlan).options(
-        selectinload(RoutePlan.carrier),
-        selectinload(RoutePlan.routes)
-    )
+    query = select(RoutePlan).options(selectinload(RoutePlan.carrier))
     
     filters = []
     if carrier_id:
         filters.append(RoutePlan.carrier_id == carrier_id)
-    
     if plan_type:
         filters.append(RoutePlan.plan_type == plan_type)
-    
-    # If period specified (MM/YYYY), find plans valid during that period
-    if period:
-        try:
-            month, year = period.split('/')
-            period_start = datetime(int(year), int(month), 1)
-            if int(month) == 12:
-                period_end = datetime(int(year) + 1, 1, 1) - timedelta(days=1)
-            else:
-                period_end = datetime(int(year), int(month) + 1, 1) - timedelta(days=1)
-            
-            filters.append(RoutePlan.valid_from <= period_end)
-            filters.append(
-                or_(
-                    RoutePlan.valid_to == None,
-                    RoutePlan.valid_to >= period_start
-                )
-            )
-        except ValueError:
-            pass
     
     if filters:
         query = query.where(and_(*filters))
     
-    query = query.order_by(RoutePlan.valid_from.desc(), RoutePlan.plan_type)
+    query = query.order_by(RoutePlan.valid_from.desc())
     
     result = await db.execute(query)
     plans = result.scalars().all()
     
-    # Convert to response format
-    response = []
-    for plan in plans:
-        response.append({
-            'id': plan.id,
-            'carrierId': plan.carrier_id,
-            'carrierName': plan.carrier.name if plan.carrier else None,
-            'validFrom': plan.valid_from.isoformat() if plan.valid_from else None,
-            'validTo': plan.valid_to.isoformat() if plan.valid_to else None,
-            'fileName': plan.file_name,
-            'planType': plan.plan_type,
-            'totalRoutes': plan.total_routes,
-            'dpoRoutesCount': plan.dpo_routes_count,
-            'sdRoutesCount': plan.sd_routes_count,
-            'dpoLinehaulCount': plan.dpo_linehaul_count,
-            'sdLinehaulCount': plan.sd_linehaul_count,
-            'totalDistanceKm': float(plan.total_distance_km) if plan.total_distance_km else 0,
-            'totalStops': plan.total_stops,
-            'routesCount': len(plan.routes),
-        })
-    
-    return response
+    return [
+        {
+            'id': p.id,
+            'carrierId': p.carrier_id,
+            'carrierName': p.carrier.name if p.carrier else None,
+            'validFrom': p.valid_from.isoformat() if p.valid_from else None,
+            'validTo': p.valid_to.isoformat() if p.valid_to else None,
+            'fileName': p.file_name,
+            'planType': p.plan_type,
+            'totalRoutes': p.total_routes,
+            'dpoRoutesCount': p.dpo_routes_count,
+            'sdRoutesCount': p.sd_routes_count,
+            'dpoLinehaulCount': p.dpo_linehaul_count,
+            'sdLinehaulCount': p.sd_linehaul_count,
+            'totalDistanceKm': float(p.total_distance_km) if p.total_distance_km else 0,
+            'totalStops': p.total_stops,
+        }
+        for p in plans
+    ]
 
 
-@router.post("/upload", status_code=201)
+@router.post("/upload")
 async def upload_route_plan(
     file: UploadFile = File(...),
     carrier_id: int = Form(...),
@@ -411,12 +539,11 @@ async def upload_route_plan(
     db: AsyncSession = Depends(get_db)
 ):
     """Upload and parse route plan XLSX"""
-    # Verify carrier exists
+    # Validate carrier
     carrier_result = await db.execute(
         select(Carrier).where(Carrier.id == carrier_id)
     )
-    carrier = carrier_result.scalar_one_or_none()
-    if not carrier:
+    if not carrier_result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Carrier not found")
     
     content = await file.read()
@@ -426,44 +553,30 @@ async def upload_route_plan(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse XLSX: {str(e)}")
     
-    # Detect plan type from filename
-    plan_type = plan_data['plan_type']
-    
-    # Determine valid_from date
-    plan_valid_from = None
+    # Determine valid_from
     if valid_from:
         try:
-            plan_valid_from = datetime.fromisoformat(valid_from.replace('Z', '+00:00'))
+            parsed_date = datetime.fromisoformat(valid_from)
         except ValueError:
-            try:
-                # Try DD.MM.YYYY format
-                parts = valid_from.split('.')
-                plan_valid_from = datetime(int(parts[2]), int(parts[1]), int(parts[0]))
-            except:
-                pass
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    elif plan_data['valid_from']:
+        parsed_date = plan_data['valid_from']
+    else:
+        raise HTTPException(status_code=400, detail="Could not detect date from filename. Please provide valid_from parameter.")
     
-    if not plan_valid_from:
-        plan_valid_from = plan_data['valid_from']
+    plan_type = plan_data['plan_type']
     
-    if not plan_valid_from:
-        raise HTTPException(
-            status_code=400, 
-            detail="Could not determine valid_from date. Please specify it manually."
-        )
-    
-    # Check for plan type conflicts
-    conflict_error = await check_plan_type_conflicts(
-        carrier_id, plan_valid_from, plan_type, db
-    )
+    # Check for conflicts
+    conflict_error = await check_plan_type_conflicts(carrier_id, parsed_date, plan_type, db)
     if conflict_error:
         raise HTTPException(status_code=409, detail=conflict_error)
     
-    # Check if plan already exists for this date AND type (replace it)
+    # Check for existing plan with same type and date - replace it
     existing_result = await db.execute(
         select(RoutePlan).where(
             and_(
                 RoutePlan.carrier_id == carrier_id,
-                RoutePlan.valid_from == plan_valid_from,
+                RoutePlan.valid_from == parsed_date,
                 RoutePlan.plan_type == plan_type
             )
         )
@@ -471,16 +584,16 @@ async def upload_route_plan(
     existing = existing_result.scalar_one_or_none()
     
     if existing:
-        # Delete old plan and recreate
+        # Delete existing plan (cascade deletes routes)
         await db.delete(existing)
         await db.flush()
     
     # Create new plan
     route_plan = RoutePlan(
         carrier_id=carrier_id,
-        valid_from=plan_valid_from,
-        plan_type=plan_type,
+        valid_from=parsed_date,
         file_name=file.filename,
+        plan_type=plan_type,
         total_routes=plan_data['summary']['total_routes'],
         dpo_routes_count=plan_data['summary']['dpo_routes_count'],
         sd_routes_count=plan_data['summary']['sd_routes_count'],
@@ -492,8 +605,8 @@ async def upload_route_plan(
     db.add(route_plan)
     await db.flush()
     
-    # Add routes
-    route_map = {}  # For linking details later
+    # Create routes
+    route_map = {}
     for route_data in plan_data['routes']:
         route = RoutePlanRoute(
             route_plan_id=route_plan.id,
@@ -514,14 +627,14 @@ async def upload_route_plan(
         await db.flush()
         route_map[route_data['route_name']] = route.id
     
-    # Update validity of all plans for this carrier
-    await update_route_plan_validity(carrier_id, db)
+    # Update validity of all plans for this carrier and plan type
+    await update_route_plan_validity(carrier_id, db, plan_type)
     
     await db.commit()
     
     return {
         'success': True,
-        'message': f'Plánovací soubor ({plan_type}) úspěšně nahrán',
+        'message': f'Plánovací soubor úspěšně nahrán jako {plan_type}',
         'data': {
             'id': route_plan.id,
             'planType': route_plan.plan_type,
@@ -535,6 +648,169 @@ async def upload_route_plan(
             'totalDistanceKm': float(route_plan.total_distance_km) if route_plan.total_distance_km else 0,
             'totalStops': route_plan.total_stops,
         }
+    }
+
+
+@router.get("/compare-period/{proof_id}")
+async def compare_plans_vs_proof(
+    proof_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Compare ALL route plans valid in the proof's period against the proof.
+    
+    This aggregates multiple plans if they exist for the period,
+    weighting each by the number of working days it covers.
+    """
+    # Get proof with details
+    proof_result = await db.execute(
+        select(Proof)
+        .options(
+            selectinload(Proof.route_details),
+            selectinload(Proof.linehaul_details),
+            selectinload(Proof.carrier),
+        )
+        .where(Proof.id == proof_id)
+    )
+    proof = proof_result.scalar_one_or_none()
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    
+    # Get all plans for this carrier and period
+    plans = await get_plans_for_period(proof.carrier_id, proof.period, db)
+    
+    if not plans:
+        return {
+            'proof': {
+                'id': proof.id,
+                'period': proof.period,
+                'carrierId': proof.carrier_id,
+                'carrierName': proof.carrier.name if proof.carrier else None,
+            },
+            'plans': None,
+            'status': 'error',
+            'message': f'Žádné plány pro období {proof.period}',
+            'differences': [],
+            'warnings': [{
+                'type': 'no_plans',
+                'label': 'Chybí plány',
+                'note': f'Pro období {proof.period} neexistují žádné platné plány'
+            }]
+        }
+    
+    # Aggregate plans
+    aggregated = aggregate_plans_for_period(plans, proof.period)
+    
+    # Count routes from proof
+    proof_data = {
+        'dpoRoutesCount': 0,
+        'sdRoutesCount': 0,
+        'sdSpojenCount': 0,
+        'drCount': 0,
+        'linehaulCount': len(proof.linehaul_details) if proof.linehaul_details else 0,
+    }
+    
+    if proof.route_details:
+        for detail in proof.route_details:
+            rt = (detail.route_type or '').upper()
+            count = detail.routes_count or detail.count or 0
+            
+            if 'DR' in rt:
+                proof_data['drCount'] += count
+            elif 'LH_DPO' in rt or rt == 'DPO':
+                proof_data['dpoRoutesCount'] += count
+            elif 'SPOJENE' in rt or 'SPOJENÉ' in rt:
+                proof_data['sdSpojenCount'] += count
+            elif 'LH_SD' in rt or rt == 'SD':
+                proof_data['sdRoutesCount'] += count
+    
+    # Build comparison
+    differences = []
+    warnings = []
+    status = 'ok'
+    
+    # DPO routes comparison
+    dpo_diff = proof_data['dpoRoutesCount'] - aggregated['dpoRoutesCount']
+    if abs(dpo_diff) > 0:
+        differences.append({
+            'type': 'dpo_routes',
+            'label': 'DPO trasy',
+            'planned': aggregated['dpoRoutesCount'],
+            'actual': proof_data['dpoRoutesCount'],
+            'diff': dpo_diff,
+            'note': f"{'Více' if dpo_diff > 0 else 'Méně'} tras než plán ({aggregated['totalWorkingDays']} pracovních dnů)"
+        })
+        status = 'warning'
+    
+    # SD routes comparison
+    sd_diff = proof_data['sdRoutesCount'] - aggregated['sdRoutesCount']
+    if abs(sd_diff) > 0:
+        differences.append({
+            'type': 'sd_routes',
+            'label': 'SD trasy',
+            'planned': aggregated['sdRoutesCount'],
+            'actual': proof_data['sdRoutesCount'],
+            'diff': sd_diff,
+            'note': f"{'Více' if sd_diff > 0 else 'Méně'} tras než plán"
+        })
+        status = 'warning'
+    
+    # Linehaul comparison
+    expected_lh = aggregated['dpoLinehaulCount'] + aggregated['sdLinehaulCount']
+    lh_diff = proof_data['linehaulCount'] - expected_lh
+    if abs(lh_diff) > 0:
+        differences.append({
+            'type': 'linehaul',
+            'label': 'Linehauly',
+            'planned': expected_lh,
+            'actual': proof_data['linehaulCount'],
+            'diff': lh_diff,
+            'note': 'Rozdíl v počtu linehaulů'
+        })
+    
+    # Warnings
+    if proof_data['sdSpojenCount'] > 0:
+        warnings.append({
+            'type': 'merged_routes',
+            'label': 'Spojené SD trasy',
+            'count': proof_data['sdSpojenCount'],
+            'note': f"{proof_data['sdSpojenCount']} spojených SD tras"
+        })
+    
+    if proof_data['drCount'] > 0:
+        warnings.append({
+            'type': 'direct_routes',
+            'label': 'Přímé rozvozy (DR)',
+            'count': proof_data['drCount'],
+            'note': f"{proof_data['drCount']} přímých rozvozů bez DEPA"
+        })
+    
+    if aggregated['missingDays'] > 0:
+        warnings.append({
+            'type': 'missing_coverage',
+            'label': 'Nepokryté dny',
+            'count': aggregated['missingDays'],
+            'dates': aggregated['missingDates'][:5],  # First 5
+            'note': f"{aggregated['missingDays']} pracovních dnů bez platného plánu"
+        })
+        status = 'warning'
+    
+    return {
+        'proof': {
+            'id': proof.id,
+            'period': proof.period,
+            'carrierId': proof.carrier_id,
+            'carrierName': proof.carrier.name if proof.carrier else None,
+            'dpoRoutesCount': proof_data['dpoRoutesCount'],
+            'sdRoutesCount': proof_data['sdRoutesCount'],
+            'sdSpojenCount': proof_data['sdSpojenCount'],
+            'drCount': proof_data['drCount'],
+            'linehaulCount': proof_data['linehaulCount'],
+        },
+        'plans': aggregated,
+        'status': status,
+        'differences': differences,
+        'warnings': warnings,
     }
 
 
@@ -587,7 +863,7 @@ async def compare_plan_vs_proof(
     proof_id: int, 
     db: AsyncSession = Depends(get_db)
 ):
-    """Compare route plan against proof"""
+    """Compare single route plan against proof (legacy endpoint)"""
     # Get plan
     plan = await get_route_plan_by_id(plan_id, db)
     if not plan:
@@ -634,12 +910,15 @@ async def compare_plan_vs_proof(
     # Count routes by type from proof
     if proof.route_details:
         for detail in proof.route_details:
-            if detail.route_type == 'LH_DPO':
-                comparison['proof']['dpoRoutesCount'] += detail.routes_count or 0
-            elif detail.route_type == 'LH_SD':
-                comparison['proof']['sdRoutesCount'] += detail.routes_count or 0
-            elif detail.route_type == 'LH_SD_SPOJENE':
-                comparison['proof']['sdSpojenCount'] += detail.routes_count or 0
+            rt = (detail.route_type or '').upper()
+            count = detail.routes_count or detail.count or 0
+            
+            if 'LH_DPO' in rt or rt == 'DPO':
+                comparison['proof']['dpoRoutesCount'] += count
+            elif 'SPOJENE' in rt or 'SPOJENÉ' in rt:
+                comparison['proof']['sdSpojenCount'] += count
+            elif 'LH_SD' in rt or rt == 'SD':
+                comparison['proof']['sdRoutesCount'] += count
     
     # Adjust comparison based on plan type
     if plan.plan_type == 'DPO':
@@ -728,9 +1007,10 @@ async def delete_route_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Route plan not found")
     
     carrier_id = plan.carrier_id
+    plan_type = plan.plan_type
     await db.delete(plan)
     
     # Update validity of remaining plans
-    await update_route_plan_validity(carrier_id, db)
+    await update_route_plan_validity(carrier_id, db, plan_type)
     
     await db.commit()

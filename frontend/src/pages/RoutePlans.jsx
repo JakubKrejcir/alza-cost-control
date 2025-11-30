@@ -13,7 +13,9 @@ import {
   Trash2,
   ChevronDown,
   ChevronUp,
-  ArrowRight
+  ArrowRight,
+  FileSpreadsheet,
+  BarChart3
 } from 'lucide-react'
 import { routePlans, carriers, proofs } from '../lib/api'
 
@@ -32,13 +34,26 @@ function getPeriodOptions() {
   return options
 }
 
+function PlanTypeBadge({ type }) {
+  const colors = {
+    'BOTH': 'bg-purple-500/20 text-purple-400',
+    'DPO': 'bg-blue-500/20 text-blue-400',
+    'SD': 'bg-orange-500/20 text-orange-400',
+  }
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[type] || colors.BOTH}`}>
+      {type || 'BOTH'}
+    </span>
+  )
+}
+
 export default function RoutePlans() {
   const [selectedCarrier, setSelectedCarrier] = useState('')
   const [selectedPeriod, setSelectedPeriod] = useState(getPeriodOptions()[0])
   const [dragOver, setDragOver] = useState(false)
   const [uploadResult, setUploadResult] = useState(null)
   const [expandedPlan, setExpandedPlan] = useState(null)
-  const [comparison, setComparison] = useState(null)
+  const [periodComparison, setPeriodComparison] = useState(null)
   
   const queryClient = useQueryClient()
 
@@ -70,6 +85,7 @@ export default function RoutePlans() {
     onSuccess: (data) => {
       setUploadResult({ success: true, data: data.data, message: data.message })
       queryClient.invalidateQueries(['route-plans'])
+      setPeriodComparison(null)
     },
     onError: (error) => {
       setUploadResult({ 
@@ -84,13 +100,14 @@ export default function RoutePlans() {
     onSuccess: () => {
       queryClient.invalidateQueries(['route-plans'])
       setExpandedPlan(null)
+      setPeriodComparison(null)
     }
   })
 
-  const compareMutation = useMutation({
-    mutationFn: ({ planId, proofId }) => routePlans.compare(planId, proofId),
+  const comparePeriodMutation = useMutation({
+    mutationFn: (proofId) => routePlans.comparePeriod(proofId),
     onSuccess: (data) => {
-      setComparison(data)
+      setPeriodComparison(data)
     }
   })
 
@@ -119,13 +136,13 @@ export default function RoutePlans() {
     handleFiles(e.dataTransfer.files)
   }, [handleFiles])
 
-  const handleCompare = (planId) => {
+  const handleComparePeriod = () => {
     const proof = proofList?.[0]
     if (!proof) {
       alert('Není k dispozici proof pro porovnání')
       return
     }
-    compareMutation.mutate({ planId, proofId: proof.id })
+    comparePeriodMutation.mutate(proof.id)
   }
 
   const currentProof = proofList?.[0]
@@ -139,14 +156,14 @@ export default function RoutePlans() {
 
       {/* Filters */}
       <div className="card p-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="label">Dopravce</label>
             <select
               value={selectedCarrier}
               onChange={(e) => {
                 setSelectedCarrier(e.target.value)
-                setComparison(null)
+                setPeriodComparison(null)
               }}
               className="input"
             >
@@ -165,7 +182,7 @@ export default function RoutePlans() {
               value={selectedPeriod}
               onChange={(e) => {
                 setSelectedPeriod(e.target.value)
-                setComparison(null)
+                setPeriodComparison(null)
               }}
               className="input"
             >
@@ -176,7 +193,35 @@ export default function RoutePlans() {
               ))}
             </select>
           </div>
+
+          <div className="flex items-end">
+            <button
+              onClick={handleComparePeriod}
+              disabled={!currentProof || comparePeriodMutation.isPending}
+              className="btn btn-primary w-full flex items-center justify-center gap-2"
+            >
+              <BarChart3 size={18} />
+              {comparePeriodMutation.isPending ? 'Porovnávám...' : 'Porovnat období'}
+            </button>
+          </div>
         </div>
+
+        {/* Current proof info */}
+        {selectedCarrier && (
+          <div className="mt-4 pt-4 border-t border-white/10">
+            {currentProof ? (
+              <div className="flex items-center gap-2 text-sm text-green-400">
+                <CheckCircle size={16} />
+                Proof pro {selectedPeriod}: {currentProof.fileName || 'nahrán'}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-sm text-yellow-400">
+                <AlertTriangle size={16} />
+                Žádný proof pro období {selectedPeriod}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Upload Zone */}
@@ -191,51 +236,47 @@ export default function RoutePlans() {
         } ${!selectedCarrier ? 'opacity-50 pointer-events-none' : ''}`}
       >
         <div className="text-center">
-          <Map className={`w-12 h-12 mx-auto mb-3 ${dragOver ? 'text-alza-orange' : 'text-gray-500'}`} />
-          
-          <p className="text-lg font-medium mb-2">
-            {uploadMutation.isPending ? 'Nahrávám...' : 'Přetáhněte plánovací soubor (XLSX)'}
-          </p>
-          
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={(e) => handleFiles(e.target.files)}
-            className="hidden"
-            id="plan-file-input"
-            disabled={!selectedCarrier || uploadMutation.isPending}
-          />
-          <label
-            htmlFor="plan-file-input"
-            className={`btn btn-primary inline-flex items-center gap-2 cursor-pointer ${
-              (!selectedCarrier || uploadMutation.isPending) ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            <UploadIcon size={18} />
+          <Map className={`w-12 h-12 mx-auto mb-3 ${dragOver ? 'text-alza-orange' : 'text-gray-400'}`} />
+          <p className="text-lg mb-2">Přetáhněte plánovací XLSX soubor</p>
+          <p className="text-sm text-gray-400 mb-4">nebo</p>
+          <label className="btn btn-primary cursor-pointer">
+            <UploadIcon className="w-4 h-4 mr-2" />
             Vybrat soubor
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => handleFiles(e.target.files)}
+              className="hidden"
+            />
           </label>
+          <p className="text-xs text-gray-500 mt-4">
+            Formát názvu: <code className="bg-white/10 px-1 rounded">plan_DD.MM.YYYY.xlsx</code>
+            {' '}nebo{' '}
+            <code className="bg-white/10 px-1 rounded">plan_DD.MM.YYYY_DPO.xlsx</code>
+            {' '}pro oddělené plány
+          </p>
         </div>
       </div>
 
       {/* Upload Result */}
       {uploadResult && (
-        <div className={`card p-4 ${uploadResult.success ? 'border-green-500/30 bg-green-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+        <div className={`card p-4 ${uploadResult.success ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
           <div className="flex items-start gap-3">
             {uploadResult.success ? (
-              <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+              <CheckCircle className="w-5 h-5 text-green-400 mt-0.5" />
             ) : (
-              <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <AlertCircle className="w-5 h-5 text-red-400 mt-0.5" />
             )}
             <div>
               <p className={uploadResult.success ? 'text-green-400' : 'text-red-400'}>
                 {uploadResult.message}
               </p>
-              {uploadResult.success && uploadResult.data && (
+              {uploadResult.data && (
                 <div className="mt-2 text-sm text-gray-400">
-                  Platnost: {formatDate(uploadResult.data.validFrom)} 
-                  {uploadResult.data.validTo && ` → ${formatDate(uploadResult.data.validTo)}`}
-                  {' | '}
-                  {uploadResult.data.totalRoutes} tras ({uploadResult.data.dpoRoutesCount} DPO, {uploadResult.data.sdRoutesCount} SD)
+                  <span className="mr-4">Typ: <PlanTypeBadge type={uploadResult.data.planType} /></span>
+                  <span className="mr-4">DPO tras: {uploadResult.data.dpoRoutesCount}</span>
+                  <span className="mr-4">SD tras: {uploadResult.data.sdRoutesCount}</span>
+                  <span>Platí od: {formatDate(uploadResult.data.validFrom)}</span>
                 </div>
               )}
             </div>
@@ -246,11 +287,10 @@ export default function RoutePlans() {
       {/* Plans List */}
       {selectedCarrier && (
         <div className="card overflow-hidden">
-          <div className="card-header flex items-center justify-between">
-            <h2 className="font-semibold">Plánovací soubory — {selectedPeriod}</h2>
-            <span className="badge badge-info">{planList?.length || 0} plánů</span>
+          <div className="card-header">
+            <h2 className="font-semibold">Nahrané plány pro {selectedPeriod}</h2>
           </div>
-
+          
           {loadingPlans ? (
             <div className="p-8 text-center text-gray-500">Načítám...</div>
           ) : !planList?.length ? (
@@ -268,14 +308,15 @@ export default function RoutePlans() {
                         <Calendar className="w-5 h-5 text-blue-400" />
                       </div>
                       <div>
-                        <div className="font-medium">
+                        <div className="font-medium flex items-center gap-2">
                           {formatDate(plan.validFrom)}
                           {plan.validTo && (
                             <span className="text-gray-400"> → {formatDate(plan.validTo)}</span>
                           )}
                           {!plan.validTo && (
-                            <span className="text-green-400 ml-2 text-sm">aktivní</span>
+                            <span className="text-green-400 text-sm">aktivní</span>
                           )}
+                          <PlanTypeBadge type={plan.planType} />
                         </div>
                         <div className="text-sm text-gray-400">
                           {plan.fileName}
@@ -292,13 +333,6 @@ export default function RoutePlans() {
                       </div>
                       
                       <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleCompare(plan.id)}
-                          disabled={!currentProof || compareMutation.isPending}
-                          className="btn btn-secondary text-sm"
-                        >
-                          Porovnat s proof
-                        </button>
                         <button
                           onClick={() => setExpandedPlan(expandedPlan === plan.id ? null : plan.id)}
                           className="p-2 rounded-lg hover:bg-white/5"
@@ -357,34 +391,73 @@ export default function RoutePlans() {
         </div>
       )}
 
-      {/* Comparison Results */}
-      {comparison && (
+      {/* Period Comparison Results */}
+      {periodComparison && (
         <div className="card overflow-hidden">
-          <div className="card-header bg-purple-500/10">
-            <h2 className="font-semibold text-purple-400">📊 Porovnání: Plán vs. Proof</h2>
+          <div className={`card-header ${
+            periodComparison.status === 'ok' ? 'bg-green-500/10' :
+            periodComparison.status === 'warning' ? 'bg-yellow-500/10' :
+            'bg-red-500/10'
+          }`}>
+            <h2 className="font-semibold flex items-center gap-2">
+              <BarChart3 size={20} />
+              Porovnání období {periodComparison.proof?.period}
+              {periodComparison.status === 'ok' && <CheckCircle className="text-green-400" size={18} />}
+              {periodComparison.status === 'warning' && <AlertTriangle className="text-yellow-400" size={18} />}
+              {periodComparison.status === 'error' && <AlertCircle className="text-red-400" size={18} />}
+            </h2>
           </div>
           
           <div className="p-6 space-y-6">
-            {/* Summary */}
+            {/* Plans aggregation info */}
+            {periodComparison.plans && (
+              <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                <h3 className="font-medium text-blue-400 mb-3 flex items-center gap-2">
+                  <FileSpreadsheet size={18} />
+                  Agregované plány ({periodComparison.plans.plans?.length || 0})
+                </h3>
+                <div className="space-y-3">
+                  {periodComparison.plans.plans?.map((plan, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-sm p-2 bg-white/5 rounded">
+                      <div className="flex items-center gap-2">
+                        <PlanTypeBadge type={plan.planType} />
+                        <span className="text-gray-300">{plan.fileName}</span>
+                      </div>
+                      <div className="text-gray-400">
+                        {plan.workingDays} pracovních dnů ({Math.round(plan.weight * 100)}%)
+                      </div>
+                    </div>
+                  ))}
+                  <div className="flex justify-between pt-2 border-t border-white/10 text-sm">
+                    <span className="text-gray-400">Celkem pracovních dnů:</span>
+                    <span className="font-medium">{periodComparison.plans.totalWorkingDays}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Summary comparison */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Plan */}
+              {/* Aggregated Plan */}
               <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg">
                 <h3 className="font-medium text-blue-400 mb-3 flex items-center gap-2">
                   <Map size={18} />
-                  Plán
+                  Plán (agregovaný)
                 </h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-gray-400">DPO trasy:</span>
-                    <span className="font-medium">{comparison.plan.dpoRoutesCount}</span>
+                    <span className="text-gray-400">DPO trasy (celkem):</span>
+                    <span className="font-medium">{periodComparison.plans?.dpoRoutesCount || 0}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-400">SD trasy:</span>
-                    <span className="font-medium">{comparison.plan.sdRoutesCount}</span>
+                    <span className="text-gray-400">SD trasy (celkem):</span>
+                    <span className="font-medium">{periodComparison.plans?.sdRoutesCount || 0}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-400">Linehauly (DPO+SD):</span>
-                    <span className="font-medium">{comparison.plan.dpoLinehaulCount + comparison.plan.sdLinehaulCount}</span>
+                    <span className="text-gray-400">Linehauly (celkem):</span>
+                    <span className="font-medium">
+                      {(periodComparison.plans?.dpoLinehaulCount || 0) + (periodComparison.plans?.sdLinehaulCount || 0)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -398,35 +471,42 @@ export default function RoutePlans() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
                     <span className="text-gray-400">DPO trasy:</span>
-                    <span className="font-medium">{comparison.proof.dpoRoutesCount}</span>
+                    <span className="font-medium">{periodComparison.proof?.dpoRoutesCount || 0}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">SD trasy:</span>
-                    <span className="font-medium">{comparison.proof.sdRoutesCount}</span>
+                    <span className="font-medium">{periodComparison.proof?.sdRoutesCount || 0}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">SD spojené:</span>
-                    <span className="font-medium">{comparison.proof.sdSpojenCount}</span>
+                    <span className="font-medium">{periodComparison.proof?.sdSpojenCount || 0}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-400">Přímé (DR):</span>
+                    <span className="font-medium">{periodComparison.proof?.drCount || 0}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-400">Linehauly:</span>
-                    <span className="font-medium">{comparison.proof.linehaulCount}</span>
+                    <span className="font-medium">{periodComparison.proof?.linehaulCount || 0}</span>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Differences */}
-            {comparison.differences.length > 0 && (
+            {periodComparison.differences?.length > 0 && (
               <div>
                 <h3 className="font-medium text-yellow-400 mb-3 flex items-center gap-2">
                   <AlertTriangle size={18} />
                   Rozdíly
                 </h3>
                 <div className="space-y-2">
-                  {comparison.differences.map((diff, idx) => (
+                  {periodComparison.differences.map((diff, idx) => (
                     <div key={idx} className="flex items-center justify-between p-3 bg-yellow-500/5 border border-yellow-500/20 rounded-lg">
-                      <span className="text-gray-300">{diff.label}</span>
+                      <div>
+                        <span className="text-gray-300">{diff.label}</span>
+                        <span className="text-gray-500 text-sm ml-2">{diff.note}</span>
+                      </div>
                       <div className="flex items-center gap-4">
                         <span className="text-gray-400">{diff.planned}</span>
                         <ArrowRight size={16} className="text-gray-500" />
@@ -442,24 +522,41 @@ export default function RoutePlans() {
             )}
 
             {/* Warnings */}
-            {comparison.warnings.length > 0 && (
+            {periodComparison.warnings?.length > 0 && (
               <div>
                 <h3 className="font-medium text-orange-400 mb-3">Upozornění</h3>
                 <div className="space-y-2">
-                  {comparison.warnings.map((warn, idx) => (
+                  {periodComparison.warnings.map((warn, idx) => (
                     <div key={idx} className="p-3 bg-orange-500/5 border border-orange-500/20 rounded-lg text-sm">
-                      {warn.note}
+                      <div className="flex items-center justify-between">
+                        <span>{warn.note}</span>
+                        {warn.count && <span className="font-medium">{warn.count}</span>}
+                      </div>
+                      {warn.dates && warn.dates.length > 0 && (
+                        <div className="mt-2 text-xs text-gray-500">
+                          Dny: {warn.dates.map(d => formatDate(d)).join(', ')}
+                          {warn.count > 5 && <span> a další...</span>}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* Status */}
-            {comparison.differences.length === 0 && comparison.warnings.length === 0 && (
+            {/* All OK */}
+            {periodComparison.status === 'ok' && (
               <div className="p-4 bg-green-500/5 border border-green-500/20 rounded-lg flex items-center gap-3">
                 <CheckCircle className="w-5 h-5 text-green-400" />
-                <span className="text-green-400">Plán odpovídá proofu</span>
+                <span className="text-green-400">Plány odpovídají proofu</span>
+              </div>
+            )}
+
+            {/* Error message */}
+            {periodComparison.message && periodComparison.status === 'error' && (
+              <div className="p-4 bg-red-500/5 border border-red-500/20 rounded-lg flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-red-400" />
+                <span className="text-red-400">{periodComparison.message}</span>
               </div>
             )}
           </div>
@@ -471,9 +568,10 @@ export default function RoutePlans() {
         <h3 className="font-semibold text-blue-400 mb-3">💡 Jak to funguje</h3>
         <ul className="space-y-2 text-sm text-gray-400">
           <li>• Nahrajte XLSX soubor s plánováním tras (datum se extrahuje z názvu souboru)</li>
+          <li>• Použijte příponu <code className="bg-white/10 px-1 rounded">_DPO</code> nebo <code className="bg-white/10 px-1 rounded">_SD</code> pro oddělené ranní/odpolední plány</li>
           <li>• Systém automaticky rozpozná DPO (ranní) a SD (odpolední) trasy podle času začátku</li>
-          <li>• Porovnání s proofem ukáže rozdíly v počtu tras, linehaulů a spojených trasách</li>
-          <li>• Pro jeden měsíc může být více plánů – platnost se nastaví automaticky</li>
+          <li>• <strong>Porovnání období</strong> agreguje všechny plány platné v měsíci a porovná je s proofem</li>
+          <li>• Trasy se počítají: plán × počet pracovních dnů platnosti</li>
         </ul>
       </div>
     </div>

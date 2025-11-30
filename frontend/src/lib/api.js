@@ -104,6 +104,7 @@ export const routePlans = {
     }).then(r => r.data)
   },
   compare: (planId, proofId) => api.get(`/route-plans/${planId}/compare/${proofId}`).then(r => r.data),
+  comparePeriod: (proofId) => api.get(`/route-plans/compare-period/${proofId}`).then(r => r.data),
   delete: (id) => api.delete(`/route-plans/${id}`)
 }
 
