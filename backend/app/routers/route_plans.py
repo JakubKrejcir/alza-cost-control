@@ -233,7 +233,7 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             'end_time': headers.get('Konec'),
             'distance': headers.get('Celková vzdálenost'),
             'work_time': headers.get('Čas práce'),
-            'delivery_type': headers.get('DR/LH'),
+            'delivery_type': headers.get('DR/LH') or headers.get('rozlišení DR/LH'),
         }
         
         dpo_lh_set = set()
