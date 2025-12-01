@@ -42,35 +42,54 @@ async def run_migrations():
             
             print("Migration: planType column added successfully")
         
-        # Check if unique constraint exists
+        # Check if depot column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'depot'
+        """))
+        depot_column_exists = result.fetchone() is not None
+        
+        if not depot_column_exists:
+            print("Migration: Adding depot column to RoutePlan...")
+            
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN "depot" VARCHAR(20) DEFAULT 'BOTH'
+            """))
+            
+            print("Migration: depot column added successfully")
+        
+        # Check if NEW unique constraint exists (with depot)
         result = await conn.execute(text("""
             SELECT constraint_name 
             FROM information_schema.table_constraints 
             WHERE table_name = 'RoutePlan' 
-            AND constraint_name = 'uq_carrier_date_plantype'
+            AND constraint_name = 'uq_carrier_date_plantype_depot'
         """))
-        constraint_exists = result.fetchone() is not None
+        new_constraint_exists = result.fetchone() is not None
         
-        if not constraint_exists:
-            print("Migration: Adding unique constraint for carrier+date+planType...")
+        if not new_constraint_exists:
+            print("Migration: Updating unique constraint to include depot...")
             
-            # Drop old constraint if exists (ignore error if not exists)
-            try:
-                await conn.execute(text("""
-                    ALTER TABLE "RoutePlan" 
-                    DROP CONSTRAINT IF EXISTS uq_carrier_date
-                """))
-            except:
-                pass
-            
-            # Add new constraint
+            # Drop old constraints if they exist
             await conn.execute(text("""
                 ALTER TABLE "RoutePlan" 
-                ADD CONSTRAINT uq_carrier_date_plantype 
-                UNIQUE ("carrierId", "validFrom", "planType")
+                DROP CONSTRAINT IF EXISTS uq_carrier_date_plantype
+            """))
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                DROP CONSTRAINT IF EXISTS uq_carrier_date
             """))
             
-            print("Migration: Unique constraint added successfully")
+            # Add new constraint with depot
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD CONSTRAINT uq_carrier_date_plantype_depot 
+                UNIQUE ("carrierId", "validFrom", "planType", "depot")
+            """))
+            
+            print("Migration: Unique constraint updated successfully")
 
 
 @asynccontextmanager
