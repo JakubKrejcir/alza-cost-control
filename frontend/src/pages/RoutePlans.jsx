@@ -15,7 +15,10 @@ import {
   ChevronUp,
   ArrowRight,
   FileSpreadsheet,
-  BarChart3
+  BarChart3,
+  Square,
+  CheckSquare,
+  MinusSquare
 } from 'lucide-react'
 import { routePlans, carriers, proofs } from '../lib/api'
 
@@ -54,6 +57,7 @@ export default function RoutePlans() {
   const [uploadResult, setUploadResult] = useState(null)
   const [expandedPlan, setExpandedPlan] = useState(null)
   const [periodComparison, setPeriodComparison] = useState(null)
+  const [selectedPlans, setSelectedPlans] = useState(new Set())
   
   const queryClient = useQueryClient()
 
@@ -126,6 +130,69 @@ export default function RoutePlans() {
       alert('Chyba při mazání: ' + (error.response?.data?.detail || error.message))
     }
   })
+
+  const deleteBatchMutation = useMutation({
+    mutationFn: async (ids) => {
+      // Delete one by one
+      for (const id of ids) {
+        await routePlans.delete(id)
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['route-plans'])
+      setSelectedPlans(new Set())
+      setPeriodComparison(null)
+    },
+    onError: (error) => {
+      alert('Chyba při mazání: ' + (error.response?.data?.detail || error.message))
+    }
+  })
+
+  // Helper pro toggle výběru plánu
+  const togglePlanSelection = (planId) => {
+    setSelectedPlans(prev => {
+      const next = new Set(prev)
+      if (next.has(planId)) {
+        next.delete(planId)
+      } else {
+        next.add(planId)
+      }
+      return next
+    })
+  }
+
+  // Helper pro výběr všech plánů
+  const toggleSelectAll = () => {
+    if (!planList) return
+    if (selectedPlans.size === planList.length) {
+      setSelectedPlans(new Set())
+    } else {
+      setSelectedPlans(new Set(planList.map(p => p.id)))
+    }
+  }
+
+  // Helper pro výběr plánů v roce
+  const toggleSelectYear = (yearPlans) => {
+    const yearPlanIds = yearPlans.map(p => p.id)
+    const allSelected = yearPlanIds.every(id => selectedPlans.has(id))
+    
+    setSelectedPlans(prev => {
+      const next = new Set(prev)
+      if (allSelected) {
+        yearPlanIds.forEach(id => next.delete(id))
+      } else {
+        yearPlanIds.forEach(id => next.add(id))
+      }
+      return next
+    })
+  }
+
+  const handleDeleteSelected = () => {
+    if (selectedPlans.size === 0) return
+    if (confirm(`Opravdu smazat ${selectedPlans.size} vybraných plánů?`)) {
+      deleteBatchMutation.mutate(Array.from(selectedPlans))
+    }
+  }
 
   const comparePeriodMutation = useMutation({
     mutationFn: (proofId) => routePlans.comparePeriod(proofId),
@@ -369,8 +436,41 @@ export default function RoutePlans() {
       {/* Plans List */}
       {selectedCarrier && (
         <div className="card overflow-hidden">
-          <div className="card-header">
-            <h2 className="font-semibold">Nahrané plány</h2>
+          <div className="card-header flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <h2 className="font-semibold">Nahrané plány</h2>
+              {planList?.length > 0 && (
+                <button
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-white"
+                >
+                  {selectedPlans.size === planList.length ? (
+                    <CheckSquare size={18} className="text-purple-400" />
+                  ) : selectedPlans.size > 0 ? (
+                    <MinusSquare size={18} className="text-purple-400" />
+                  ) : (
+                    <Square size={18} />
+                  )}
+                  <span>
+                    {selectedPlans.size === 0 
+                      ? 'Vybrat vše' 
+                      : selectedPlans.size === planList.length 
+                        ? 'Zrušit výběr' 
+                        : `Vybráno ${selectedPlans.size}`}
+                  </span>
+                </button>
+              )}
+            </div>
+            {selectedPlans.size > 0 && (
+              <button
+                onClick={handleDeleteSelected}
+                disabled={deleteBatchMutation.isLoading}
+                className="flex items-center gap-2 px-3 py-1.5 bg-red-500/20 text-red-400 rounded-lg hover:bg-red-500/30 disabled:opacity-50"
+              >
+                <Trash2 size={16} />
+                <span>Smazat vybrané ({selectedPlans.size})</span>
+              </button>
+            )}
           </div>
           
           {loadingPlans ? (
@@ -384,16 +484,47 @@ export default function RoutePlans() {
             <div>
               {Object.entries(groupedPlans)
                 .sort(([a], [b]) => Number(b) - Number(a))
-                .map(([year, yearPlans]) => (
+                .map(([year, yearPlans]) => {
+                  const yearPlanIds = yearPlans.map(p => p.id)
+                  const allYearSelected = yearPlanIds.every(id => selectedPlans.has(id))
+                  const someYearSelected = yearPlanIds.some(id => selectedPlans.has(id))
+                  
+                  return (
                   <div key={year}>
-                    <div className="px-4 py-2 bg-white/5 text-sm font-medium text-gray-400">
-                      {year}
+                    <div className="px-4 py-2 bg-white/5 text-sm font-medium text-gray-400 flex items-center gap-3">
+                      <button
+                        onClick={() => toggleSelectYear(yearPlans)}
+                        className="hover:text-white"
+                      >
+                        {allYearSelected ? (
+                          <CheckSquare size={16} className="text-purple-400" />
+                        ) : someYearSelected ? (
+                          <MinusSquare size={16} className="text-purple-400" />
+                        ) : (
+                          <Square size={16} />
+                        )}
+                      </button>
+                      <span>{year}</span>
+                      <span className="text-xs text-gray-500">({yearPlans.length} plánů)</span>
                     </div>
                     <div className="divide-y divide-white/5">
                       {yearPlans.map(plan => (
-                        <div key={plan.id} className="p-4">
+                        <div 
+                          key={plan.id} 
+                          className={`p-4 ${selectedPlans.has(plan.id) ? 'bg-purple-500/5' : ''}`}
+                        >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-4">
+                              <button
+                                onClick={() => togglePlanSelection(plan.id)}
+                                className="hover:text-white"
+                              >
+                                {selectedPlans.has(plan.id) ? (
+                                  <CheckSquare size={20} className="text-purple-400" />
+                                ) : (
+                                  <Square size={20} className="text-gray-500" />
+                                )}
+                              </button>
                               <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
                                 <Calendar className="w-5 h-5 text-blue-400" />
                               </div>
@@ -480,7 +611,8 @@ export default function RoutePlans() {
                       ))}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
             </div>
           )}
         </div>
