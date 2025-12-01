@@ -185,8 +185,22 @@ function ComparisonSummary({ data }) {
             </div>
           </div>
           
-          <div className="text-xs text-gray-500">
-            {(actual.vratimovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} km
+          {/* Statistiky km */}
+          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10">
+            <div className="text-center">
+              <div className="text-lg font-semibold text-purple-300">
+                {(actual.vratimovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
+              </div>
+              <div className="text-xs text-gray-500">celkem km</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-purple-300">
+                {actual.vratimovRoutes > 0 
+                  ? Math.round((actual.vratimovKm || 0) / actual.vratimovRoutes).toLocaleString('cs-CZ')
+                  : '—'}
+              </div>
+              <div className="text-xs text-gray-500">Ø km/trasa</div>
+            </div>
           </div>
         </div>
         
@@ -237,8 +251,22 @@ function ComparisonSummary({ data }) {
             </div>
           </div>
           
-          <div className="text-xs text-gray-500">
-            {(actual.bydzovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })} km
+          {/* Statistiky km */}
+          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10">
+            <div className="text-center">
+              <div className="text-lg font-semibold text-cyan-300">
+                {(actual.bydzovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
+              </div>
+              <div className="text-xs text-gray-500">celkem km</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-cyan-300">
+                {actual.bydzovRoutes > 0 
+                  ? Math.round((actual.bydzovKm || 0) / actual.bydzovRoutes).toLocaleString('cs-CZ')
+                  : '—'}
+              </div>
+              <div className="text-xs text-gray-500">Ø km/trasa</div>
+            </div>
           </div>
         </div>
       </div>
