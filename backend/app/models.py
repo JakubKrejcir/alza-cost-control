@@ -391,6 +391,9 @@ class RoutePlan(Base):
     # Typ plánu - BOTH (bez přípony), DPO (_DPO), SD (_SD)
     plan_type: Mapped[str] = mapped_column("planType", String(10), default="BOTH")
     
+    # Depo - VRATIMOV, BYDZOV, nebo BOTH (obsahuje trasy pro obě depa)
+    depot: Mapped[str] = mapped_column("depot", String(20), default="BOTH")
+    
     # Souhrn z plánu - celkem
     total_routes: Mapped[int] = mapped_column("totalRoutes", Integer, default=0)
     dpo_routes_count: Mapped[int] = mapped_column("dpoRoutesCount", Integer, default=0)
@@ -415,9 +418,9 @@ class RoutePlan(Base):
     carrier: Mapped["Carrier"] = relationship(back_populates="route_plans")
     routes: Mapped[List["RoutePlanRoute"]] = relationship(back_populates="route_plan", cascade="all, delete-orphan")
 
-    # Unique constraint: carrier + valid_from + plan_type
+    # Unique constraint: carrier + valid_from + plan_type + depot
     __table_args__ = (
-        UniqueConstraint('carrierId', 'validFrom', 'planType', name='uq_carrier_date_plantype'),
+        UniqueConstraint('carrierId', 'validFrom', 'planType', 'depot', name='uq_carrier_date_plantype_depot'),
     )
 
 

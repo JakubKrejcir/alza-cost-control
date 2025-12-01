@@ -213,7 +213,8 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             'vratimov_sd_count': 0,
             'bydzov_dpo_count': 0,
             'bydzov_sd_count': 0,
-        }
+        },
+        'detected_depot': None,  # Will be set based on route names
     }
     
     # Parse Routes sheet
@@ -333,6 +334,19 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
         # Linehaul count = 2 per batch (LH-LH = 2 kamiony pro celý batch)
         result['summary']['dpo_linehaul_count'] = 2 if dpo_lh_set else 0
         result['summary']['sd_linehaul_count'] = 2 if sd_lh_set else 0
+    
+    # Determine detected depot based on route counts
+    vratimov_total = result['summary']['vratimov_dpo_count'] + result['summary']['vratimov_sd_count']
+    bydzov_total = result['summary']['bydzov_dpo_count'] + result['summary']['bydzov_sd_count']
+    
+    if vratimov_total > 0 and bydzov_total > 0:
+        result['detected_depot'] = 'BOTH'
+    elif vratimov_total > 0:
+        result['detected_depot'] = 'VRATIMOV'
+    elif bydzov_total > 0:
+        result['detected_depot'] = 'BYDZOV'
+    else:
+        result['detected_depot'] = 'BOTH'  # Default
     
     return result
 
@@ -722,7 +736,8 @@ async def upload_route_plan(
             and_(
                 RoutePlan.carrier_id == carrier_id,
                 RoutePlan.valid_from == parsed_date,
-                RoutePlan.plan_type == plan_type
+                RoutePlan.plan_type == plan_type,
+                RoutePlan.depot == plan_data['detected_depot']
             )
         )
     )
@@ -739,6 +754,7 @@ async def upload_route_plan(
         valid_from=parsed_date,
         file_name=file.filename,
         plan_type=plan_type,
+        depot=plan_data['detected_depot'],
         total_routes=plan_data['summary']['total_routes'],
         dpo_routes_count=plan_data['summary']['dpo_routes_count'],
         sd_routes_count=plan_data['summary']['sd_routes_count'],
@@ -846,13 +862,14 @@ async def upload_route_plans_batch(
                 })
                 continue
             
-            # Check for existing plan with same type and date - replace it
+            # Check for existing plan with same type, date and depot - replace it
             existing_result = await db.execute(
                 select(RoutePlan).where(
                     and_(
                         RoutePlan.carrier_id == carrier_id,
                         RoutePlan.valid_from == parsed_date,
-                        RoutePlan.plan_type == plan_type
+                        RoutePlan.plan_type == plan_type,
+                        RoutePlan.depot == plan_data['detected_depot']
                     )
                 )
             )
@@ -868,6 +885,7 @@ async def upload_route_plans_batch(
                 valid_from=parsed_date,
                 file_name=file.filename,
                 plan_type=plan_type,
+                depot=plan_data['detected_depot'],
                 total_routes=plan_data['summary']['total_routes'],
                 dpo_routes_count=plan_data['summary']['dpo_routes_count'],
                 sd_routes_count=plan_data['summary']['sd_routes_count'],
@@ -1405,6 +1423,7 @@ async def get_daily_breakdown(
                 active_plans.append({
                     'id': plan.id,
                     'planType': plan.plan_type,
+                    'depot': plan.depot,
                     'fileName': plan.file_name,
                 })
                 
