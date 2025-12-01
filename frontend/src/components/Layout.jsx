@@ -23,9 +23,9 @@ export default function Layout() {
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-alza-orange to-alza-orange-light flex items-center justify-center font-bold text-black">
-              A
+              🚚
             </div>
-            <h1 className="text-lg font-semibold hidden sm:block">Cost Control</h1>
+            <h1 className="text-lg font-semibold hidden sm:block">Transport Tycoon</h1>
           </div>
 
           {/* Desktop Navigation */}
