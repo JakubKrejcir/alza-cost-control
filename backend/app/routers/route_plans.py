@@ -368,46 +368,64 @@ async def update_route_plan_validity(carrier_id: int, db: AsyncSession, plan_typ
     """
     Update valid_to dates for all plans of a carrier.
     
-    Logic: Plans are grouped by validFrom (period start). 
-    All plans in a period end when the next period starts.
+    Logic: Plans are grouped by depot AND validFrom (period start). 
+    Each depot has its own timeline - plans for different depots don't affect each other.
     
     Example:
-    - Period 1 (2025-10-10): DPO + SD plans -> valid_to = 2025-10-23
-    - Period 2 (2025-10-24): BOTH plan -> valid_to = None (current)
+    - VRATIMOV: Period 1 (2025-10-03) -> valid_to = 2025-10-13
+    - VRATIMOV: Period 2 (2025-10-14) -> valid_to = None (current)
+    - BYDZOV: Period 1 (2025-10-07) -> valid_to = 2025-10-16  
+    - BYDZOV: Period 2 (2025-10-17) -> valid_to = None (current)
     """
-    # Get all unique validFrom dates for this carrier
-    result = await db.execute(
-        select(RoutePlan.valid_from)
+    # Get all unique depot values for this carrier
+    depot_result = await db.execute(
+        select(RoutePlan.depot)
         .where(RoutePlan.carrier_id == carrier_id)
         .distinct()
-        .order_by(RoutePlan.valid_from.asc())
     )
-    periods = [row[0] for row in result.fetchall()]
+    depots = [row[0] for row in depot_result.fetchall()]
     
-    # For each period, set valid_to based on next period
-    for i, period_start in enumerate(periods):
-        # Get all plans for this period
-        plans_result = await db.execute(
-            select(RoutePlan).where(
+    # Process each depot separately
+    for depot in depots:
+        # Get all unique validFrom dates for this carrier AND depot
+        result = await db.execute(
+            select(RoutePlan.valid_from)
+            .where(
                 and_(
                     RoutePlan.carrier_id == carrier_id,
-                    RoutePlan.valid_from == period_start
+                    RoutePlan.depot == depot
                 )
             )
+            .distinct()
+            .order_by(RoutePlan.valid_from.asc())
         )
-        plans = plans_result.scalars().all()
+        periods = [row[0] for row in result.fetchall()]
         
-        # Determine valid_to
-        if i + 1 < len(periods):
-            # There's a next period - end day before it starts
-            valid_to = periods[i + 1] - timedelta(days=1)
-        else:
-            # Last period - no end date
-            valid_to = None
-        
-        # Update all plans in this period
-        for plan in plans:
-            plan.valid_to = valid_to
+        # For each period in this depot, set valid_to based on next period
+        for i, period_start in enumerate(periods):
+            # Get all plans for this period and depot
+            plans_result = await db.execute(
+                select(RoutePlan).where(
+                    and_(
+                        RoutePlan.carrier_id == carrier_id,
+                        RoutePlan.depot == depot,
+                        RoutePlan.valid_from == period_start
+                    )
+                )
+            )
+            plans = plans_result.scalars().all()
+            
+            # Determine valid_to based on next period for THIS depot
+            if i + 1 < len(periods):
+                # There's a next period for this depot - end day before it starts
+                valid_to = periods[i + 1] - timedelta(days=1)
+            else:
+                # Last period for this depot - no end date
+                valid_to = None
+            
+            # Update all plans in this period
+            for plan in plans:
+                plan.valid_to = valid_to
 
 
 async def delete_plans_for_date(
