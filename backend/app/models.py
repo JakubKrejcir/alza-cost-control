@@ -406,10 +406,12 @@ class RoutePlan(Base):
     # Souhrn per depo - Vratimov (Moravskoslezsko)
     vratimov_dpo_count: Mapped[int] = mapped_column("vratimovDpoCount", Integer, default=0)
     vratimov_sd_count: Mapped[int] = mapped_column("vratimovSdCount", Integer, default=0)
+    vratimov_stops: Mapped[int] = mapped_column("vratimovStops", Integer, default=0)
     
     # Souhrn per depo - Nový Bydžov (ostatní regiony)
     bydzov_dpo_count: Mapped[int] = mapped_column("bydzovDpoCount", Integer, default=0)
     bydzov_sd_count: Mapped[int] = mapped_column("bydzovSdCount", Integer, default=0)
+    bydzov_stops: Mapped[int] = mapped_column("bydzovStops", Integer, default=0)
     
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

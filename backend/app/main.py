@@ -60,6 +60,28 @@ async def run_migrations():
             
             print("Migration: depot column added successfully")
         
+        # Check if vratimovStops column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'vratimovStops'
+        """))
+        stops_column_exists = result.fetchone() is not None
+        
+        if not stops_column_exists:
+            print("Migration: Adding stops per depot columns to RoutePlan...")
+            
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "vratimovStops" INTEGER DEFAULT 0
+            """))
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "bydzovStops" INTEGER DEFAULT 0
+            """))
+            
+            print("Migration: stops columns added successfully")
+        
         # Check if NEW unique constraint exists (with depot)
         result = await conn.execute(text("""
             SELECT constraint_name 

@@ -185,13 +185,13 @@ function ComparisonSummary({ data }) {
             </div>
           </div>
           
-          {/* Statistiky km */}
-          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10">
+          {/* Statistiky */}
+          <div className="grid grid-cols-3 gap-3 pt-3 border-t border-white/10">
             <div className="text-center">
               <div className="text-lg font-semibold text-purple-300">
                 {(actual.vratimovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
               </div>
-              <div className="text-xs text-gray-500">celkem km</div>
+              <div className="text-xs text-gray-500">odjetých km</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-semibold text-purple-300">
@@ -200,6 +200,14 @@ function ComparisonSummary({ data }) {
                   : '—'}
               </div>
               <div className="text-xs text-gray-500">Ø km/trasa</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-gray-400">
+                {planned.vratimovTotal > 0 && planned.vratimovStops > 0
+                  ? Math.round((planned.vratimovStops || 0) / planned.vratimovTotal).toLocaleString('cs-CZ')
+                  : '—'}
+              </div>
+              <div className="text-xs text-gray-500">Ø plán. boxů</div>
             </div>
           </div>
         </div>
@@ -251,13 +259,13 @@ function ComparisonSummary({ data }) {
             </div>
           </div>
           
-          {/* Statistiky km */}
-          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10">
+          {/* Statistiky */}
+          <div className="grid grid-cols-3 gap-3 pt-3 border-t border-white/10">
             <div className="text-center">
               <div className="text-lg font-semibold text-cyan-300">
                 {(actual.bydzovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
               </div>
-              <div className="text-xs text-gray-500">celkem km</div>
+              <div className="text-xs text-gray-500">odjetých km</div>
             </div>
             <div className="text-center">
               <div className="text-lg font-semibold text-cyan-300">
@@ -266,6 +274,14 @@ function ComparisonSummary({ data }) {
                   : '—'}
               </div>
               <div className="text-xs text-gray-500">Ø km/trasa</div>
+            </div>
+            <div className="text-center">
+              <div className="text-lg font-semibold text-gray-400">
+                {planned.bydzovTotal > 0 && planned.bydzovStops > 0
+                  ? Math.round((planned.bydzovStops || 0) / planned.bydzovTotal).toLocaleString('cs-CZ')
+                  : '—'}
+              </div>
+              <div className="text-xs text-gray-500">Ø plán. boxů</div>
             </div>
           </div>
         </div>
