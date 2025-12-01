@@ -249,6 +249,38 @@ function ComparisonSummary({ data }) {
 function DailyTable({ days, viewMode = 'total' }) {
   if (!days || days.length === 0) return null
   
+  // Helper pro zkrácený název plánu
+  const formatPlanName = (plan) => {
+    if (!plan?.fileName) return ''
+    // "Drivecool 25-10-03.xlsx" → "25-10-03"
+    // "Drivecool Depo Východ 25-10-07.xlsx" → "Východ 25-10-07"
+    const name = plan.fileName.replace('.xlsx', '').replace('.xls', '')
+    if (name.includes('Depo Východ') || name.includes('Depo_Vy_chod') || name.includes('Depo Vychod')) {
+      const match = name.match(/(\d{2}-\d{2}-\d{2})(_DPO|_SD)?$/)
+      return match ? `Východ ${match[1]}${match[2] || ''}` : name
+    }
+    const match = name.match(/(\d{2}-\d{2}-\d{2})(_DPO|_SD)?$/)
+    return match ? `${match[1]}${match[2] || ''}` : name
+  }
+  
+  // Formátuje plány pro zobrazení s ikonkami dep
+  const formatPlansWithDepot = (plans) => {
+    if (!plans || plans.length === 0) return '—'
+    
+    const vratimovPlans = plans.filter(p => p.depot === 'VRATIMOV' || p.depot === 'BOTH')
+    const bydzovPlans = plans.filter(p => p.depot === 'BYDZOV' || p.depot === 'BOTH')
+    
+    const parts = []
+    if (vratimovPlans.length > 0) {
+      parts.push(`🟣 ${vratimovPlans.map(formatPlanName).join(', ')}`)
+    }
+    if (bydzovPlans.length > 0) {
+      parts.push(`🔵 ${bydzovPlans.map(formatPlanName).join(', ')}`)
+    }
+    
+    return parts.length > 0 ? parts.join(' | ') : '—'
+  }
+  
   // View mode: 'total' | 'vratimov' | 'bydzov'
   
   if (viewMode === 'total') {
@@ -264,6 +296,7 @@ function DailyTable({ days, viewMode = 'total' }) {
               <th className="text-right p-3 font-medium text-gray-400">KM</th>
               <th className="text-center p-3 font-medium text-gray-400">Vratimov</th>
               <th className="text-center p-3 font-medium text-gray-400">Bydžov</th>
+              <th className="text-left p-3 font-medium text-gray-400">Plány</th>
             </tr>
             <tr className="border-b border-white/10 text-xs">
               <th className="text-left p-2 font-normal text-gray-500">Datum</th>
@@ -279,6 +312,7 @@ function DailyTable({ days, viewMode = 'total' }) {
               <th className="text-right p-2 font-normal text-gray-500">Celkem</th>
               <th className="text-center p-2 font-normal text-gray-500">Tras</th>
               <th className="text-center p-2 font-normal text-gray-500">Tras</th>
+              <th className="text-left p-2 font-normal text-gray-500">Soubory</th>
             </tr>
           </thead>
           <tbody>
@@ -345,6 +379,11 @@ function DailyTable({ days, viewMode = 'total' }) {
                   <td className="text-center p-3 text-cyan-400">
                     {day.hasData ? day.bydzovTotal : '—'}
                   </td>
+                  
+                  {/* Plány */}
+                  <td className="text-left p-3 text-xs text-gray-400">
+                    {formatPlansWithDepot(day.plans)}
+                  </td>
                 </tr>
               )
             })}
@@ -388,6 +427,7 @@ function DailyTable({ days, viewMode = 'total' }) {
               <td className="text-center p-3 text-cyan-400">
                 {days.reduce((sum, d) => sum + (d.bydzovTotal || 0), 0)}
               </td>
+              <td></td>
             </tr>
           </tfoot>
         </table>
