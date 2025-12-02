@@ -82,6 +82,50 @@ async def run_migrations():
             
             print("Migration: stops columns added successfully")
         
+        # Check if vratimovKm column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'vratimovKm'
+        """))
+        km_column_exists = result.fetchone() is not None
+        
+        if not km_column_exists:
+            print("Migration: Adding km per depot columns to RoutePlan...")
+            
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "vratimovKm" NUMERIC(10, 2) DEFAULT 0
+            """))
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "bydzovKm" NUMERIC(10, 2) DEFAULT 0
+            """))
+            
+            print("Migration: km columns added successfully")
+        
+        # Check if vratimovDurationMin column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'vratimovDurationMin'
+        """))
+        duration_column_exists = result.fetchone() is not None
+        
+        if not duration_column_exists:
+            print("Migration: Adding duration per depot columns to RoutePlan...")
+            
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "vratimovDurationMin" INTEGER DEFAULT 0
+            """))
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "bydzovDurationMin" INTEGER DEFAULT 0
+            """))
+            
+            print("Migration: duration columns added successfully")
+        
         # Check if NEW unique constraint exists (with depot)
         result = await conn.execute(text("""
             SELECT constraint_name 

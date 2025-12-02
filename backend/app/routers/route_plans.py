@@ -40,6 +40,24 @@ def parse_time_to_hour(time_val) -> Optional[int]:
     return None
 
 
+def parse_work_time_to_minutes(work_time_str) -> int:
+    """Convert work_time string (HH:MM) to total minutes"""
+    if not work_time_str:
+        return 0
+    
+    try:
+        if isinstance(work_time_str, str):
+            parts = work_time_str.split(':')
+            if len(parts) >= 2:
+                hours = int(parts[0])
+                minutes = int(parts[1])
+                return hours * 60 + minutes
+    except (ValueError, AttributeError):
+        pass
+    
+    return 0
+
+
 def determine_route_type(start_time) -> str:
     """Determine if route is DPO (morning) or SD (afternoon) based on start time"""
     hour = parse_time_to_hour(start_time)
@@ -212,9 +230,13 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             'vratimov_dpo_count': 0,
             'vratimov_sd_count': 0,
             'vratimov_stops': 0,
+            'vratimov_km': Decimal('0'),
+            'vratimov_duration_min': 0,
             'bydzov_dpo_count': 0,
             'bydzov_sd_count': 0,
             'bydzov_stops': 0,
+            'bydzov_km': Decimal('0'),
+            'bydzov_duration_min': 0,
         },
         'detected_depot': None,  # Will be set based on route names
     }
@@ -309,11 +331,18 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             result['summary']['total_stops'] += stops_count
             result['summary']['total_distance_km'] += distance
             
-            # Count stops per depot
+            # Parse work_time to minutes
+            work_time_minutes = parse_work_time_to_minutes(route_data['work_time'])
+            
+            # Count stops, km, and duration per depot
             if is_vratimov:
                 result['summary']['vratimov_stops'] += stops_count
+                result['summary']['vratimov_km'] += distance
+                result['summary']['vratimov_duration_min'] += work_time_minutes
             else:
                 result['summary']['bydzov_stops'] += stops_count
+                result['summary']['bydzov_km'] += distance
+                result['summary']['bydzov_duration_min'] += work_time_minutes
             
             # DR-DR counts as both DPO and SD (runs twice daily)
             if is_dr_dr:
@@ -792,9 +821,13 @@ async def upload_route_plan(
         vratimov_dpo_count=plan_data['summary']['vratimov_dpo_count'],
         vratimov_sd_count=plan_data['summary']['vratimov_sd_count'],
         vratimov_stops=plan_data['summary']['vratimov_stops'],
+        vratimov_km=plan_data['summary']['vratimov_km'],
+        vratimov_duration_min=plan_data['summary']['vratimov_duration_min'],
         bydzov_dpo_count=plan_data['summary']['bydzov_dpo_count'],
         bydzov_sd_count=plan_data['summary']['bydzov_sd_count'],
         bydzov_stops=plan_data['summary']['bydzov_stops'],
+        bydzov_km=plan_data['summary']['bydzov_km'],
+        bydzov_duration_min=plan_data['summary']['bydzov_duration_min'],
     )
     db.add(route_plan)
     await db.flush()
@@ -925,9 +958,13 @@ async def upload_route_plans_batch(
                 vratimov_dpo_count=plan_data['summary']['vratimov_dpo_count'],
                 vratimov_sd_count=plan_data['summary']['vratimov_sd_count'],
                 vratimov_stops=plan_data['summary']['vratimov_stops'],
+                vratimov_km=plan_data['summary']['vratimov_km'],
+                vratimov_duration_min=plan_data['summary']['vratimov_duration_min'],
                 bydzov_dpo_count=plan_data['summary']['bydzov_dpo_count'],
                 bydzov_sd_count=plan_data['summary']['bydzov_sd_count'],
                 bydzov_stops=plan_data['summary']['bydzov_stops'],
+                bydzov_km=plan_data['summary']['bydzov_km'],
+                bydzov_duration_min=plan_data['summary']['bydzov_duration_min'],
             )
             db.add(route_plan)
             await db.flush()
@@ -1443,9 +1480,13 @@ async def get_daily_breakdown(
         planned_vratimov_dpo = 0
         planned_vratimov_sd = 0
         planned_vratimov_stops = 0
+        planned_vratimov_km = 0
+        planned_vratimov_duration = 0
         planned_bydzov_dpo = 0
         planned_bydzov_sd = 0
         planned_bydzov_stops = 0
+        planned_bydzov_km = 0
+        planned_bydzov_duration = 0
         
         for plan in plans:
             plan_start = plan.valid_from
@@ -1469,9 +1510,13 @@ async def get_daily_breakdown(
                     planned_vratimov_sd += plan.vratimov_sd_count or 0
                     planned_bydzov_sd += plan.bydzov_sd_count or 0
                 
-                # Add stops per depot (from all plan types)
+                # Add stops, km, and duration per depot (from all plan types)
                 planned_vratimov_stops += plan.vratimov_stops or 0
                 planned_bydzov_stops += plan.bydzov_stops or 0
+                planned_vratimov_km += float(plan.vratimov_km or 0)
+                planned_bydzov_km += float(plan.bydzov_km or 0)
+                planned_vratimov_duration += plan.vratimov_duration_min or 0
+                planned_bydzov_duration += plan.bydzov_duration_min or 0
         
         # Get actual from proof
         proof_day = proof_daily_map.get(date_key, {})
@@ -1561,6 +1606,10 @@ async def get_daily_breakdown(
         totals_planned['bydzovDpo'] = totals_planned.get('bydzovDpo', 0) + planned_bydzov_dpo
         totals_planned['bydzovSd'] = totals_planned.get('bydzovSd', 0) + planned_bydzov_sd
         totals_planned['bydzovStops'] = totals_planned.get('bydzovStops', 0) + planned_bydzov_stops
+        totals_planned['vratimovKm'] = totals_planned.get('vratimovKm', 0) + planned_vratimov_km
+        totals_planned['bydzovKm'] = totals_planned.get('bydzovKm', 0) + planned_bydzov_km
+        totals_planned['vratimovDuration'] = totals_planned.get('vratimovDuration', 0) + planned_vratimov_duration
+        totals_planned['bydzovDuration'] = totals_planned.get('bydzovDuration', 0) + planned_bydzov_duration
         
         totals_actual['dpoRoutes'] += actual_dpo
         totals_actual['sdRoutes'] += actual_sd
@@ -1606,10 +1655,14 @@ async def get_daily_breakdown(
                 'vratimovSd': totals_planned.get('vratimovSd', 0),
                 'vratimovTotal': totals_planned.get('vratimovDpo', 0) + totals_planned.get('vratimovSd', 0),
                 'vratimovStops': totals_planned.get('vratimovStops', 0),
+                'vratimovKm': totals_planned.get('vratimovKm', 0),
+                'vratimovDuration': totals_planned.get('vratimovDuration', 0),
                 'bydzovDpo': totals_planned.get('bydzovDpo', 0),
                 'bydzovSd': totals_planned.get('bydzovSd', 0),
                 'bydzovTotal': totals_planned.get('bydzovDpo', 0) + totals_planned.get('bydzovSd', 0),
                 'bydzovStops': totals_planned.get('bydzovStops', 0),
+                'bydzovKm': totals_planned.get('bydzovKm', 0),
+                'bydzovDuration': totals_planned.get('bydzovDuration', 0),
             },
             'actual': {
                 'dpoRoutes': totals_actual['dpoRoutes'],

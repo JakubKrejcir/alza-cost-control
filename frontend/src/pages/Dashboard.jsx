@@ -186,28 +186,50 @@ function ComparisonSummary({ data }) {
           </div>
           
           {/* Statistiky */}
-          <div className="grid grid-cols-3 gap-3 pt-3 border-t border-white/10">
+          <div className="grid grid-cols-5 gap-1 pt-3 border-t border-white/10">
             <div className="text-center">
-              <div className="text-lg font-semibold text-purple-300">
+              <div className="text-sm font-semibold text-purple-300">
                 {(actual.vratimovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
               </div>
-              <div className="text-xs text-gray-500">odjetých km</div>
+              <div className="text-xs text-gray-500">km</div>
             </div>
             <div className="text-center">
-              <div className="text-lg font-semibold text-purple-300">
+              <div className="text-sm font-semibold text-purple-300">
                 {actual.vratimovRoutes > 0 
                   ? Math.round((actual.vratimovKm || 0) / actual.vratimovRoutes).toLocaleString('cs-CZ')
                   : '—'}
               </div>
-              <div className="text-xs text-gray-500">Ø km/trasa</div>
+              <div className="text-xs text-gray-500">Ø km</div>
             </div>
             <div className="text-center">
-              <div className="text-lg font-semibold text-gray-400">
+              <div className="text-sm font-semibold text-gray-400">
+                {planned.vratimovTotal > 0 && planned.vratimovKm > 0
+                  ? Math.round((planned.vratimovKm || 0) / planned.vratimovTotal).toLocaleString('cs-CZ')
+                  : '—'}
+              </div>
+              <div className="text-xs text-gray-500">Ø pl. km</div>
+            </div>
+            <div className="text-center">
+              <div className="text-sm font-semibold text-gray-400">
+                {(() => {
+                  const avgMin = planned.vratimovTotal > 0 && planned.vratimovDuration > 0
+                    ? Math.round((planned.vratimovDuration || 0) / planned.vratimovTotal)
+                    : 0;
+                  if (avgMin === 0) return '—';
+                  const h = Math.floor(avgMin / 60);
+                  const m = avgMin % 60;
+                  return `${h}:${m.toString().padStart(2, '0')}`;
+                })()}
+              </div>
+              <div className="text-xs text-gray-500">Ø pl. čas</div>
+            </div>
+            <div className="text-center">
+              <div className="text-sm font-semibold text-gray-400">
                 {planned.vratimovTotal > 0 && planned.vratimovStops > 0
                   ? Math.round((planned.vratimovStops || 0) / planned.vratimovTotal).toLocaleString('cs-CZ')
                   : '—'}
               </div>
-              <div className="text-xs text-gray-500">Ø plán. boxů</div>
+              <div className="text-xs text-gray-500">Ø boxů</div>
             </div>
           </div>
         </div>
@@ -260,28 +282,50 @@ function ComparisonSummary({ data }) {
           </div>
           
           {/* Statistiky */}
-          <div className="grid grid-cols-3 gap-3 pt-3 border-t border-white/10">
+          <div className="grid grid-cols-5 gap-1 pt-3 border-t border-white/10">
             <div className="text-center">
-              <div className="text-lg font-semibold text-cyan-300">
+              <div className="text-sm font-semibold text-cyan-300">
                 {(actual.bydzovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
               </div>
-              <div className="text-xs text-gray-500">odjetých km</div>
+              <div className="text-xs text-gray-500">km</div>
             </div>
             <div className="text-center">
-              <div className="text-lg font-semibold text-cyan-300">
+              <div className="text-sm font-semibold text-cyan-300">
                 {actual.bydzovRoutes > 0 
                   ? Math.round((actual.bydzovKm || 0) / actual.bydzovRoutes).toLocaleString('cs-CZ')
                   : '—'}
               </div>
-              <div className="text-xs text-gray-500">Ø km/trasa</div>
+              <div className="text-xs text-gray-500">Ø km</div>
             </div>
             <div className="text-center">
-              <div className="text-lg font-semibold text-gray-400">
+              <div className="text-sm font-semibold text-gray-400">
+                {planned.bydzovTotal > 0 && planned.bydzovKm > 0
+                  ? Math.round((planned.bydzovKm || 0) / planned.bydzovTotal).toLocaleString('cs-CZ')
+                  : '—'}
+              </div>
+              <div className="text-xs text-gray-500">Ø pl. km</div>
+            </div>
+            <div className="text-center">
+              <div className="text-sm font-semibold text-gray-400">
+                {(() => {
+                  const avgMin = planned.bydzovTotal > 0 && planned.bydzovDuration > 0
+                    ? Math.round((planned.bydzovDuration || 0) / planned.bydzovTotal)
+                    : 0;
+                  if (avgMin === 0) return '—';
+                  const h = Math.floor(avgMin / 60);
+                  const m = avgMin % 60;
+                  return `${h}:${m.toString().padStart(2, '0')}`;
+                })()}
+              </div>
+              <div className="text-xs text-gray-500">Ø pl. čas</div>
+            </div>
+            <div className="text-center">
+              <div className="text-sm font-semibold text-gray-400">
                 {planned.bydzovTotal > 0 && planned.bydzovStops > 0
                   ? Math.round((planned.bydzovStops || 0) / planned.bydzovTotal).toLocaleString('cs-CZ')
                   : '—'}
               </div>
-              <div className="text-xs text-gray-500">Ø plán. boxů</div>
+              <div className="text-xs text-gray-500">Ø boxů</div>
             </div>
           </div>
         </div>

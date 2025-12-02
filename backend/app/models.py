@@ -407,11 +407,15 @@ class RoutePlan(Base):
     vratimov_dpo_count: Mapped[int] = mapped_column("vratimovDpoCount", Integer, default=0)
     vratimov_sd_count: Mapped[int] = mapped_column("vratimovSdCount", Integer, default=0)
     vratimov_stops: Mapped[int] = mapped_column("vratimovStops", Integer, default=0)
+    vratimov_km: Mapped[Optional[Decimal]] = mapped_column("vratimovKm", Numeric(10, 2), default=0)
+    vratimov_duration_min: Mapped[int] = mapped_column("vratimovDurationMin", Integer, default=0)  # celková doba v minutách
     
     # Souhrn per depo - Nový Bydžov (ostatní regiony)
     bydzov_dpo_count: Mapped[int] = mapped_column("bydzovDpoCount", Integer, default=0)
     bydzov_sd_count: Mapped[int] = mapped_column("bydzovSdCount", Integer, default=0)
     bydzov_stops: Mapped[int] = mapped_column("bydzovStops", Integer, default=0)
+    bydzov_km: Mapped[Optional[Decimal]] = mapped_column("bydzovKm", Numeric(10, 2), default=0)
+    bydzov_duration_min: Mapped[int] = mapped_column("bydzovDurationMin", Integer, default=0)  # celková doba v minutách
     
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
