@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { format, subMonths } from 'date-fns'
+import { format } from 'date-fns'
 import { cs } from 'date-fns/locale'
 import { 
   Upload as UploadIcon, 
@@ -15,9 +15,11 @@ import {
   CheckSquare,
   MinusSquare,
   FileSignature,
-  Calendar
+  Calendar,
+  AlertTriangle
 } from 'lucide-react'
-import { proofs, invoices, carriers, routePlans, contracts } from '../lib/api'
+import { proofs, invoices, routePlans, contracts } from '../lib/api'
+import { useCarrier } from '../lib/CarrierContext'
 
 function formatCZK(amount) {
   if (amount == null) return '—'
@@ -31,16 +33,6 @@ function formatCZK(amount) {
 function formatDate(dateStr) {
   if (!dateStr) return '—'
   return format(new Date(dateStr), 'd. M. yyyy', { locale: cs })
-}
-
-function getPeriodOptions() {
-  const options = []
-  const now = new Date()
-  for (let i = 0; i < 12; i++) {
-    const date = subMonths(now, i)
-    options.push(format(date, 'MM/yyyy'))
-  }
-  return options
 }
 
 function PlanTypeBadge({ type }) {
@@ -92,9 +84,9 @@ function Tab({ active, onClick, children, count }) {
 }
 
 export default function Documents() {
+  const { selectedCarrierId, selectedPeriod } = useCarrier()
+  
   const [activeTab, setActiveTab] = useState('plans') // 'plans', 'proofs', 'invoices', 'contracts'
-  const [selectedCarrier, setSelectedCarrier] = useState('')
-  const [selectedPeriod, setSelectedPeriod] = useState(getPeriodOptions()[0])
   const [dragOver, setDragOver] = useState(false)
   const [uploadResults, setUploadResults] = useState([])
   const [selectedPlans, setSelectedPlans] = useState(new Set())
@@ -103,38 +95,32 @@ export default function Documents() {
   
   const queryClient = useQueryClient()
 
-  // Carriers
-  const { data: carrierList } = useQuery({
-    queryKey: ['carriers'],
-    queryFn: carriers.getAll
-  })
-
   // Route Plans - všechny pro dopravce
   const { data: planList, isLoading: loadingPlans } = useQuery({
-    queryKey: ['route-plans', selectedCarrier],
-    queryFn: () => routePlans.getAll({ carrier_id: selectedCarrier }),
-    enabled: !!selectedCarrier
+    queryKey: ['route-plans', selectedCarrierId],
+    queryFn: () => routePlans.getAll({ carrier_id: selectedCarrierId }),
+    enabled: !!selectedCarrierId
   })
 
   // Proofy - VŠECHNY pro dopravce (bez filtru období)
   const { data: allProofList, isLoading: loadingProofs } = useQuery({
-    queryKey: ['proofs-all', selectedCarrier],
-    queryFn: () => proofs.getAll({ carrier_id: selectedCarrier }),
-    enabled: !!selectedCarrier
+    queryKey: ['proofs-all', selectedCarrierId],
+    queryFn: () => proofs.getAll({ carrier_id: selectedCarrierId }),
+    enabled: !!selectedCarrierId
   })
 
   // Invoices - pro dopravce a období
   const { data: invoiceList, isLoading: loadingInvoices } = useQuery({
-    queryKey: ['invoices', selectedCarrier, selectedPeriod],
-    queryFn: () => invoices.getAll({ carrier_id: selectedCarrier, period: selectedPeriod }),
-    enabled: !!selectedCarrier
+    queryKey: ['invoices', selectedCarrierId, selectedPeriod],
+    queryFn: () => invoices.getAll({ carrier_id: selectedCarrierId, period: selectedPeriod }),
+    enabled: !!selectedCarrierId
   })
 
   // Contracts - všechny pro dopravce
   const { data: contractList, isLoading: loadingContracts } = useQuery({
-    queryKey: ['contracts', selectedCarrier],
-    queryFn: () => contracts.getAll(selectedCarrier),
-    enabled: !!selectedCarrier
+    queryKey: ['contracts', selectedCarrierId],
+    queryFn: () => contracts.getAll(selectedCarrierId),
+    enabled: !!selectedCarrierId
   })
 
   // Upload mutations
@@ -285,7 +271,7 @@ export default function Documents() {
 
   // File handling
   const handleFiles = useCallback((files) => {
-    if (!selectedCarrier) {
+    if (!selectedCarrierId) {
       alert('Vyberte dopravce')
       return
     }
@@ -298,16 +284,16 @@ export default function Documents() {
       if (ext === 'pdf') {
         // PDF - rozlišit fakturu vs smlouvu
         if (fileName.includes('smlouva') || fileName.includes('contract') || fileName.includes('ramcova')) {
-          uploadContractMutation.mutate({ file, carrierId: selectedCarrier })
+          uploadContractMutation.mutate({ file, carrierId: selectedCarrierId })
         } else {
-          uploadInvoiceMutation.mutate({ file, carrierId: selectedCarrier, period: selectedPeriod })
+          uploadInvoiceMutation.mutate({ file, carrierId: selectedCarrierId, period: selectedPeriod })
         }
       } else if (ext === 'xlsx' || ext === 'xls') {
         // Excel - rozlišit podle názvu
         if (fileName.includes('drivecool') || fileName.includes('plan') || fileName.includes('route')) {
-          uploadPlanMutation.mutate({ file, carrierId: selectedCarrier })
+          uploadPlanMutation.mutate({ file, carrierId: selectedCarrierId })
         } else {
-          uploadProofMutation.mutate({ file, carrierId: selectedCarrier, period: selectedPeriod })
+          uploadProofMutation.mutate({ file, carrierId: selectedCarrierId, period: selectedPeriod })
         }
       } else {
         setUploadResults(prev => [...prev, { 
@@ -318,7 +304,7 @@ export default function Documents() {
         }])
       }
     })
-  }, [selectedCarrier, selectedPeriod, uploadPlanMutation, uploadProofMutation, uploadInvoiceMutation, uploadContractMutation])
+  }, [selectedCarrierId, selectedPeriod, uploadPlanMutation, uploadProofMutation, uploadInvoiceMutation, uploadContractMutation])
 
   const handleDrop = useCallback((e) => {
     e.preventDefault()
@@ -411,86 +397,59 @@ export default function Documents() {
         <p className="text-gray-400 text-sm mt-1">Nahrávejte a spravujte plány, proofy, faktury a smlouvy</p>
       </div>
 
-      {/* Filters */}
-      <div className="card p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="label">Dopravce</label>
-            <select
-              value={selectedCarrier}
-              onChange={(e) => {
-                setSelectedCarrier(e.target.value)
-                setSelectedPlans(new Set())
-                setSelectedProofs(new Set())
-                setSelectedContracts(new Set())
-              }}
-              className="input"
-            >
-              <option value="">Vyberte dopravce...</option>
-              {carrierList?.map(carrier => (
-                <option key={carrier.id} value={carrier.id}>
-                  {carrier.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          
-          <div>
-            <label className="label">Období (pro proofy a faktury)</label>
-            <select
-              value={selectedPeriod}
-              onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="input"
-            >
-              {getPeriodOptions().map(period => (
-                <option key={period} value={period}>
-                  {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
-                </option>
-              ))}
-            </select>
+      {/* Warning if no carrier selected */}
+      {!selectedCarrierId && (
+        <div className="card p-6 border border-yellow-500/20 bg-yellow-500/5">
+          <div className="flex items-center gap-3 text-yellow-400">
+            <AlertTriangle size={24} />
+            <div>
+              <div className="font-medium">Vyberte dopravce</div>
+              <div className="text-sm text-gray-400">Pro zobrazení a nahrávání dokumentů vyberte dopravce v horním menu</div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Drop Zone */}
-      <div
-        onDrop={handleDrop}
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-        onDragLeave={() => setDragOver(false)}
-        className={`card p-8 border-2 border-dashed transition-all ${
-          dragOver 
-            ? 'border-alza-orange bg-alza-orange/5' 
-            : 'border-white/20 hover:border-white/40'
-        } ${!selectedCarrier ? 'opacity-50 pointer-events-none' : ''}`}
-      >
-        <div className="text-center">
-          <UploadIcon className={`w-12 h-12 mx-auto mb-3 ${dragOver ? 'text-alza-orange' : 'text-gray-500'}`} />
-          
-          <p className="text-lg font-medium mb-1">
-            {isUploading ? 'Nahrávám...' : 'Přetáhněte soubory sem'}
-          </p>
-          <p className="text-gray-400 text-sm mb-4">
-            nebo klikněte pro výběr
-          </p>
-          
-          <input
-            type="file"
-            multiple
-            accept=".xlsx,.xls,.pdf"
-            onChange={(e) => handleFiles(e.target.files)}
-            className="hidden"
-            id="file-input"
-            disabled={!selectedCarrier || isUploading}
-          />
-          <label
-            htmlFor="file-input"
-            className={`btn btn-primary inline-flex items-center gap-2 cursor-pointer ${
-              (!selectedCarrier || isUploading) ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
-          >
-            <UploadIcon size={18} />
-            Vybrat soubory
-          </label>
+      {selectedCarrierId && (
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          className={`card p-8 border-2 border-dashed transition-all ${
+            dragOver 
+              ? 'border-alza-orange bg-alza-orange/5' 
+              : 'border-white/20 hover:border-white/40'
+          }`}
+        >
+          <div className="text-center">
+            <UploadIcon className={`w-12 h-12 mx-auto mb-3 ${dragOver ? 'text-alza-orange' : 'text-gray-500'}`} />
+            
+            <p className="text-lg font-medium mb-1">
+              {isUploading ? 'Nahrávám...' : 'Přetáhněte soubory sem'}
+            </p>
+            <p className="text-gray-400 text-sm mb-4">
+              nebo klikněte pro výběr
+            </p>
+            
+            <input
+              type="file"
+              multiple
+              accept=".xlsx,.xls,.pdf"
+              onChange={(e) => handleFiles(e.target.files)}
+              className="hidden"
+              id="file-input"
+              disabled={isUploading}
+            />
+            <label
+              htmlFor="file-input"
+              className={`btn btn-primary inline-flex items-center gap-2 cursor-pointer ${
+                isUploading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+            >
+              <UploadIcon size={18} />
+              Vybrat soubory
+            </label>
 
           <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
             <div className="flex items-center gap-1.5">
@@ -512,6 +471,7 @@ export default function Documents() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Upload Results */}
       {uploadResults.length > 0 && (
@@ -556,7 +516,7 @@ export default function Documents() {
       )}
 
       {/* Tabs */}
-      {selectedCarrier && (
+      {selectedCarrierId && (
         <div className="flex flex-wrap gap-2 border-b border-white/10 pb-3">
           <Tab active={activeTab === 'plans'} onClick={() => setActiveTab('plans')} count={planList?.length}>
             <Map size={16} /> Plány
@@ -574,7 +534,7 @@ export default function Documents() {
       )}
 
       {/* === PLÁNY === */}
-      {selectedCarrier && activeTab === 'plans' && (
+      {selectedCarrierId && activeTab === 'plans' && (
         <div className="card overflow-hidden">
           <div className="card-header flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -634,7 +594,7 @@ export default function Documents() {
       )}
 
       {/* === PROOFY === */}
-      {selectedCarrier && activeTab === 'proofs' && (
+      {selectedCarrierId && activeTab === 'proofs' && (
         <div className="card overflow-hidden">
           <div className="card-header flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -708,7 +668,7 @@ export default function Documents() {
       )}
 
       {/* === FAKTURY === */}
-      {selectedCarrier && activeTab === 'invoices' && (
+      {selectedCarrierId && activeTab === 'invoices' && (
         <div className="card overflow-hidden">
           <div className="card-header flex items-center justify-between">
             <h2 className="font-semibold">Faktury — {selectedPeriod}</h2>
@@ -775,7 +735,7 @@ export default function Documents() {
       )}
 
       {/* === SMLOUVY === */}
-      {selectedCarrier && activeTab === 'contracts' && (
+      {selectedCarrierId && activeTab === 'contracts' && (
         <div className="card overflow-hidden">
           <div className="card-header flex items-center justify-between">
             <div className="flex items-center gap-3">

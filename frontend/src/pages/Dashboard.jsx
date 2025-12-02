@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { format, subMonths } from 'date-fns'
+import { format } from 'date-fns'
 import { cs } from 'date-fns/locale'
 import { 
   AlertCircle, CheckCircle, FileText, TrendingUp, 
-  Map, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Minus
+  Map, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Minus,
+  AlertTriangle
 } from 'lucide-react'
-import { analysis, proofs, invoices, routePlans, carriers } from '../lib/api'
+import { analysis, proofs, invoices, routePlans } from '../lib/api'
+import { useCarrier } from '../lib/CarrierContext'
 
 function formatCZK(amount) {
   if (amount == null) return '—'
@@ -15,16 +17,6 @@ function formatCZK(amount) {
     currency: 'CZK',
     maximumFractionDigits: 0 
   }).format(amount)
-}
-
-function getPeriodOptions() {
-  const options = []
-  const now = new Date()
-  for (let i = 0; i < 12; i++) {
-    const date = subMonths(now, i)
-    options.push(format(date, 'MM/yyyy'))
-  }
-  return options
 }
 
 function DiffBadge({ diff, size = 'normal' }) {
@@ -658,21 +650,9 @@ function DailyTable({ days, viewMode = 'total' }) {
 }
 
 export default function Dashboard() {
-  const [selectedPeriod, setSelectedPeriod] = useState(getPeriodOptions()[0])
-  const [selectedCarrier, setSelectedCarrier] = useState(null)
+  const { selectedCarrierId, selectedCarrier, selectedPeriod } = useCarrier()
   const [showDailyBreakdown, setShowDailyBreakdown] = useState(false)
   const [viewMode, setViewMode] = useState('total') // 'total' | 'vratimov' | 'bydzov'
-
-  // Fetch carriers
-  const { data: carrierList } = useQuery({
-    queryKey: ['carriers'],
-    queryFn: carriers.getAll
-  })
-
-  // Auto-select first carrier
-  if (carrierList?.length > 0 && !selectedCarrier) {
-    setSelectedCarrier(carrierList[0].id)
-  }
 
   const { data: dashboardData, isLoading } = useQuery({
     queryKey: ['dashboard', selectedPeriod],
@@ -680,15 +660,15 @@ export default function Dashboard() {
   })
 
   const { data: periodProofs } = useQuery({
-    queryKey: ['proofs', selectedPeriod, selectedCarrier],
-    queryFn: () => proofs.getAll({ period: selectedPeriod, carrier_id: selectedCarrier }),
-    enabled: !!selectedCarrier
+    queryKey: ['proofs', selectedPeriod, selectedCarrierId],
+    queryFn: () => proofs.getAll({ period: selectedPeriod, carrier_id: selectedCarrierId }),
+    enabled: !!selectedCarrierId
   })
 
   const { data: periodInvoices } = useQuery({
-    queryKey: ['invoices', selectedPeriod, selectedCarrier],
-    queryFn: () => invoices.getAll({ period: selectedPeriod, carrier_id: selectedCarrier }),
-    enabled: !!selectedCarrier
+    queryKey: ['invoices', selectedPeriod, selectedCarrierId],
+    queryFn: () => invoices.getAll({ period: selectedPeriod, carrier_id: selectedCarrierId }),
+    enabled: !!selectedCarrierId
   })
 
   const proof = periodProofs?.[0]
@@ -709,38 +689,33 @@ export default function Dashboard() {
   const comparisonStatus = dailyData?.summary?.status || 'unknown'
   const daysWithDiff = dailyData?.summary?.daysWithDiff || 0
 
+  // Show warning if no carrier selected
+  if (!selectedCarrierId) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div>
+          <h1 className="text-2xl font-bold">Fakturace</h1>
+          <p className="text-gray-400 text-sm mt-1">Přehled nákladů na dopravu</p>
+        </div>
+        <div className="card p-6 border border-yellow-500/20 bg-yellow-500/5">
+          <div className="flex items-center gap-3 text-yellow-400">
+            <AlertTriangle size={24} />
+            <div>
+              <div className="font-medium">Vyberte dopravce</div>
+              <div className="text-sm text-gray-400">Pro zobrazení fakturačního přehledu vyberte dopravce a období v horním menu</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-gray-400 text-sm mt-1">Přehled nákladů na dopravu</p>
-        </div>
-        
-        <div className="flex gap-3">
-          <select
-            value={selectedCarrier || ''}
-            onChange={(e) => setSelectedCarrier(Number(e.target.value))}
-            className="input w-48"
-          >
-            {carrierList?.map(carrier => (
-              <option key={carrier.id} value={carrier.id}>{carrier.name}</option>
-            ))}
-          </select>
-          
-          <select
-            value={selectedPeriod}
-            onChange={(e) => setSelectedPeriod(e.target.value)}
-            className="input w-48"
-          >
-            {getPeriodOptions().map(period => (
-              <option key={period} value={period}>
-                {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold">Fakturace</h1>
+        <p className="text-gray-400 text-sm mt-1">Přehled nákladů na dopravu</p>
       </div>
 
       {/* Summary Cards */}

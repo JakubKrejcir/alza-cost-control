@@ -1,19 +1,37 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
-import { Receipt, Upload, DollarSign, Calendar, Truck, Menu, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Receipt, Upload, DollarSign, Calendar, Truck, Menu, X, ChevronLeft, ChevronRight, Building2 } from 'lucide-react'
+import { format } from 'date-fns'
+import { cs } from 'date-fns/locale'
+import { useCarrier } from '../lib/CarrierContext'
 
 const navItems = [
-  { path: '/dashboard', label: 'Fakturace', icon: Receipt },
-  { path: '/upload', label: 'Dokumenty', icon: Upload },
-  { path: '/prices', label: 'Ceníky', icon: DollarSign },
-  { path: '/history', label: 'Historie', icon: Calendar },
-  { path: '/carriers', label: 'Dopravci', icon: Truck },
+  { path: '/dashboard', label: 'Fakturace', icon: Receipt, needsCarrier: true, needsPeriod: true },
+  { path: '/upload', label: 'Dokumenty', icon: Upload, needsCarrier: true, needsPeriod: true },
+  { path: '/prices', label: 'Ceníky', icon: DollarSign, needsCarrier: true, needsPeriod: false },
+  { path: '/history', label: 'Historie', icon: Calendar, needsCarrier: true, needsPeriod: false },
+  { path: '/carriers', label: 'Dopravci', icon: Truck, needsCarrier: false, needsPeriod: false },
 ]
 
 export default function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const location = useLocation()
+  
+  const {
+    selectedCarrierId,
+    setSelectedCarrierId,
+    selectedCarrier,
+    carrierList,
+    selectedPeriod,
+    setSelectedPeriod,
+    periodOptions
+  } = useCarrier()
+
+  // Determine what selectors to show based on current route
+  const currentNav = navItems.find(item => location.pathname.startsWith(item.path))
+  const showCarrierSelect = currentNav?.needsCarrier ?? false
+  const showPeriodSelect = currentNav?.needsPeriod ?? false
 
   return (
     <div className="min-h-screen bg-alza-dark text-white flex">
@@ -112,6 +130,58 @@ export default function Layout() {
       <main className={`flex-1 transition-all duration-300 ${
         sidebarCollapsed ? 'md:ml-16' : 'md:ml-56'
       } mt-14 md:mt-0`}>
+        
+        {/* Global Carrier/Period Selector Bar */}
+        {(showCarrierSelect || showPeriodSelect) && (
+          <div className="sticky top-0 z-40 bg-alza-dark/95 backdrop-blur border-b border-white/10">
+            <div className="max-w-7xl mx-auto px-4 py-3">
+              <div className="flex flex-wrap items-center gap-4">
+                {showCarrierSelect && (
+                  <div className="flex items-center gap-2">
+                    <Building2 size={18} className="text-gray-500" />
+                    <select
+                      value={selectedCarrierId}
+                      onChange={(e) => setSelectedCarrierId(e.target.value)}
+                      className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-alza-orange min-w-[180px]"
+                    >
+                      <option value="">Vyberte dopravce...</option>
+                      {carrierList.map(carrier => (
+                        <option key={carrier.id} value={carrier.id}>
+                          {carrier.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                
+                {showPeriodSelect && (
+                  <div className="flex items-center gap-2">
+                    <Calendar size={18} className="text-gray-500" />
+                    <select
+                      value={selectedPeriod}
+                      onChange={(e) => setSelectedPeriod(e.target.value)}
+                      className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-alza-orange min-w-[150px]"
+                    >
+                      {periodOptions.map(period => (
+                        <option key={period} value={period}>
+                          {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {selectedCarrier && (
+                  <div className="ml-auto text-sm text-gray-400">
+                    <span className="text-alza-orange font-medium">{selectedCarrier.name}</span>
+                    {selectedCarrier.ico && <span className="ml-2">IČO: {selectedCarrier.ico}</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="max-w-7xl mx-auto px-4 py-6">
           <Outlet />
         </div>
