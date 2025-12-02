@@ -80,6 +80,11 @@ function ProofDetailCard({ proof }) {
     { label: 'DEPO', value: proof?.totalDepo },
   ]
   
+  // Součet dílčích hodnot
+  const calculatedTotal = items.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0)
+  const grandTotal = parseFloat(proof?.grandTotal) || 0
+  const totalsMatch = Math.abs(calculatedTotal - grandTotal) < 1 // tolerance 1 Kč
+  
   return (
     <div className="stat-card">
       <div className="flex items-center gap-3 mb-3">
@@ -99,6 +104,18 @@ function ProofDetailCard({ proof }) {
               </span>
             </div>
           ))}
+          <div className="flex justify-between text-sm pt-1 mt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
+            <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>Celkem</span>
+            <span className="font-bold" style={{ color: totalsMatch ? 'var(--color-primary)' : 'var(--color-orange)' }}>
+              {formatCZK(grandTotal)}
+            </span>
+          </div>
+          {!totalsMatch && (
+            <div className="text-xs mt-1 flex items-center gap-1" style={{ color: 'var(--color-orange)' }}>
+              <AlertTriangle size={12} />
+              Součet nesedí ({formatCZK(calculatedTotal)})
+            </div>
+          )}
         </div>
       ) : (
         <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Chybí proof</div>
@@ -107,7 +124,10 @@ function ProofDetailCard({ proof }) {
   )
 }
 
-function InvoicesDetailCard({ invoices }) {
+function InvoicesDetailCard({ invoices, proofTotal }) {
+  const invoiceTotal = invoices?.reduce((sum, inv) => sum + (parseFloat(inv.totalWithoutVat) || 0), 0) || 0
+  const totalsMatch = proofTotal ? Math.abs(invoiceTotal - proofTotal) < 1 : true
+  
   return (
     <div className="stat-card">
       <div className="flex items-center gap-3 mb-3">
@@ -118,17 +138,31 @@ function InvoicesDetailCard({ invoices }) {
         <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Faktury</span>
       </div>
       {invoices && invoices.length > 0 ? (
-        <div className="space-y-1 max-h-32 overflow-y-auto">
-          {invoices.map(inv => (
-            <div key={inv.id} className="flex justify-between text-sm">
-              <span style={{ color: 'var(--color-text-muted)' }} title={inv.type}>
-                {inv.invoiceNumber}
-              </span>
-              <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
-                {formatCZK(inv.totalWithoutVat)}
-              </span>
+        <div className="space-y-1">
+          <div className="max-h-24 overflow-y-auto space-y-1">
+            {invoices.map(inv => (
+              <div key={inv.id} className="flex justify-between text-sm">
+                <span style={{ color: 'var(--color-text-muted)' }} title={inv.type}>
+                  {inv.invoiceNumber}
+                </span>
+                <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                  {formatCZK(inv.totalWithoutVat)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between text-sm pt-1 mt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
+            <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>Celkem</span>
+            <span className="font-bold" style={{ color: totalsMatch ? 'var(--color-green)' : 'var(--color-orange)' }}>
+              {formatCZK(invoiceTotal)}
+            </span>
+          </div>
+          {!totalsMatch && proofTotal && (
+            <div className="text-xs mt-1 flex items-center gap-1" style={{ color: 'var(--color-orange)' }}>
+              <AlertTriangle size={12} />
+              Nesedí s proofem
             </div>
-          ))}
+          )}
         </div>
       ) : (
         <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Žádné faktury</div>
@@ -772,7 +806,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <ProofDetailCard proof={proof} />
         
-        <InvoicesDetailCard invoices={invoiceList} />
+        <InvoicesDetailCard invoices={invoiceList} proofTotal={totalProof} />
         
         <SummaryCard 
           icon={TrendingUp}
@@ -787,7 +821,7 @@ export default function Dashboard() {
           label="Plánovací soubory vs Proof"
           value={
             comparisonStatus === 'ok' ? '✓ OK' :
-            comparisonStatus === 'warning' ? `⚠ ${daysWithDiff} dnů` :
+            comparisonStatus === 'warning' ? `⚠ ${daysWithDiff} dnů s rozdílem` :
             '—'
           }
           subtext={dailyData ? `${dailyData.month?.totalDays} dnů v měsíci` : 'Načítání...'}
