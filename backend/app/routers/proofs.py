@@ -461,14 +461,15 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
         row = find_row_by_label(label)
         if row is None:
             return None
-        # Hodnoty jsou ve sloupci C (3), ne D (4)
-        val = sheet.cell(row=row, column=3).value
-        if val is None:
-            return None
-        try:
-            return float(val)
-        except (ValueError, TypeError):
-            return None
+        # Hledej hodnotu ve sloupcích C, D, E (3, 4, 5) - různé formáty mají hodnoty v různých sloupcích
+        for col in [3, 4, 5]:
+            val = sheet.cell(row=row, column=col).value
+            if val is not None:
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    continue
+        return None
     
     # Extract totals
     result['totals']['total_fix'] = get_value_by_label('Cena FIX')
