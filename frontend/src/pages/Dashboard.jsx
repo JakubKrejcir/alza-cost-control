@@ -72,6 +72,71 @@ function SummaryCard({ icon: Icon, label, value, subtext, color = 'blue' }) {
   )
 }
 
+function ProofDetailCard({ proof }) {
+  const items = [
+    { label: 'FIX', value: proof?.totalFix },
+    { label: 'KM', value: proof?.totalKm },
+    { label: 'Linehaul', value: proof?.totalLinehaul },
+    { label: 'DEPO', value: proof?.totalDepo },
+  ]
+  
+  return (
+    <div className="stat-card">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center" 
+          style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
+          <FileText className="w-5 h-5" />
+        </div>
+        <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Proof</span>
+      </div>
+      {proof ? (
+        <div className="space-y-1">
+          {items.map(item => (
+            <div key={item.label} className="flex justify-between text-sm">
+              <span style={{ color: 'var(--color-text-muted)' }}>{item.label}</span>
+              <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                {item.value ? formatCZK(item.value) : '—'}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Chybí proof</div>
+      )}
+    </div>
+  )
+}
+
+function InvoicesDetailCard({ invoices }) {
+  return (
+    <div className="stat-card">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center" 
+          style={{ backgroundColor: 'var(--color-green-light)', color: 'var(--color-green)' }}>
+          <CheckCircle className="w-5 h-5" />
+        </div>
+        <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Faktury</span>
+      </div>
+      {invoices && invoices.length > 0 ? (
+        <div className="space-y-1 max-h-32 overflow-y-auto">
+          {invoices.map(inv => (
+            <div key={inv.id} className="flex justify-between text-sm">
+              <span style={{ color: 'var(--color-text-muted)' }} title={inv.type}>
+                {inv.invoiceNumber}
+              </span>
+              <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                {formatCZK(inv.totalWithoutVat)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Žádné faktury</div>
+      )}
+    </div>
+  )
+}
+
 function ComparisonSummary({ data }) {
   if (!data?.totals) return null
   
@@ -215,8 +280,8 @@ function ComparisonSummary({ data }) {
             </div>
             <div className="text-center">
               <div className="text-sm font-semibold" style={{ color: 'var(--color-text-muted)' }}>
-                {planned.vratimovTotal > 0 && planned.vratimovDurationMin > 0
-                  ? formatDuration((planned.vratimovDurationMin || 0) / planned.vratimovTotal)
+                {planned.vratimovTotal > 0 && planned.vratimovDuration > 0
+                  ? formatDuration((planned.vratimovDuration || 0) / planned.vratimovTotal)
                   : '—'}
               </div>
               <div className="text-xs" style={{ color: 'var(--color-text-light)' }}>Ø pl. čas</div>
@@ -300,8 +365,8 @@ function ComparisonSummary({ data }) {
             </div>
             <div className="text-center">
               <div className="text-sm font-semibold" style={{ color: 'var(--color-text-muted)' }}>
-                {planned.bydzovTotal > 0 && planned.bydzovDurationMin > 0
-                  ? formatDuration((planned.bydzovDurationMin || 0) / planned.bydzovTotal)
+                {planned.bydzovTotal > 0 && planned.bydzovDuration > 0
+                  ? formatDuration((planned.bydzovDuration || 0) / planned.bydzovTotal)
                   : '—'}
               </div>
               <div className="text-xs" style={{ color: 'var(--color-text-light)' }}>Ø pl. čas</div>
@@ -557,6 +622,84 @@ function DailyTable({ days, viewMode = 'total' }) {
             )
           })}
         </tbody>
+        <tfoot>
+          <tr className="font-bold" style={{ borderTop: '2px solid var(--color-border)' }}>
+            <td className="p-3" style={{ color: 'var(--color-text-dark)' }}>CELKEM</td>
+            <td className="text-center p-3" style={{ color: 'var(--color-text-muted)' }}>
+              {days.reduce((sum, d) => {
+                const planned = isVratimov 
+                  ? (d.plannedVratimovDpo || 0) 
+                  : (d.plannedBydzovDpo || 0)
+                return sum + planned
+              }, 0)}
+            </td>
+            <td className="text-center p-3" style={{ color: depotColor }}>
+              {days.reduce((sum, d) => {
+                if (!d.hasData) return sum
+                const actual = isVratimov ? (d.vratimovDpo || 0) : (d.bydzovDpo || 0)
+                return sum + actual
+              }, 0)}
+            </td>
+            <td className="text-center p-3">
+              <DiffBadge diff={days.reduce((sum, d) => {
+                if (!d.hasData) return sum
+                const diff = isVratimov ? (d.diffVratimovDpo || 0) : (d.diffBydzovDpo || 0)
+                return sum + diff
+              }, 0)} />
+            </td>
+            <td className="text-center p-3" style={{ color: 'var(--color-text-muted)' }}>
+              {days.reduce((sum, d) => {
+                const planned = isVratimov 
+                  ? (d.plannedVratimovSd || 0) 
+                  : (d.plannedBydzovSd || 0)
+                return sum + planned
+              }, 0)}
+            </td>
+            <td className="text-center p-3" style={{ color: depotColor }}>
+              {days.reduce((sum, d) => {
+                if (!d.hasData) return sum
+                const actual = isVratimov ? (d.vratimovSd || 0) : (d.bydzovSd || 0)
+                return sum + actual
+              }, 0)}
+            </td>
+            <td className="text-center p-3">
+              <DiffBadge diff={days.reduce((sum, d) => {
+                if (!d.hasData) return sum
+                const diff = isVratimov ? (d.diffVratimovSd || 0) : (d.diffBydzovSd || 0)
+                return sum + diff
+              }, 0)} />
+            </td>
+            <td className="text-center p-3" style={{ color: 'var(--color-text-muted)' }}>
+              {days.reduce((sum, d) => {
+                const planned = isVratimov 
+                  ? (d.plannedVratimovTotal || 0) 
+                  : (d.plannedBydzovTotal || 0)
+                return sum + planned
+              }, 0)}
+            </td>
+            <td className="text-center p-3" style={{ color: depotColor }}>
+              {days.reduce((sum, d) => {
+                if (!d.hasData) return sum
+                const actual = isVratimov ? (d.vratimovTotal || 0) : (d.bydzovTotal || 0)
+                return sum + actual
+              }, 0)}
+            </td>
+            <td className="text-center p-3">
+              <DiffBadge diff={days.reduce((sum, d) => {
+                if (!d.hasData) return sum
+                const diff = isVratimov ? (d.diffVratimovTotal || 0) : (d.diffBydzovTotal || 0)
+                return sum + diff
+              }, 0)} />
+            </td>
+            <td className="text-right p-3 font-mono" style={{ color: 'var(--color-primary)' }}>
+              {days.reduce((sum, d) => {
+                if (!d.hasData) return sum
+                const km = isVratimov ? (d.vratimovKm || 0) : (d.bydzovKm || 0)
+                return sum + km
+              }, 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
+            </td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   )
@@ -627,33 +770,21 @@ export default function Dashboard() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <SummaryCard 
-          icon={FileText}
-          label="Proof"
-          value={formatCZK(totalProof)}
-          subtext={proof ? 'Nahráno' : 'Chybí proof'}
-          color="blue"
-        />
+        <ProofDetailCard proof={proof} />
         
-        <SummaryCard 
-          icon={CheckCircle}
-          label="Fakturováno"
-          value={formatCZK(totalInvoiced)}
-          subtext={`${invoiceList.length} faktur`}
-          color="green"
-        />
+        <InvoicesDetailCard invoices={invoiceList} />
         
         <SummaryCard 
           icon={TrendingUp}
-          label="Zbývá"
-          value={formatCZK(remaining)}
-          subtext={remaining > 0 ? 'K vyfakturování' : 'Vše vyfakturováno'}
-          color={remaining > 0 ? 'orange' : 'green'}
+          label="Faktury vs. Proof"
+          value={formatCZK(Math.abs(remaining))}
+          subtext={remaining === 0 ? 'Vše sedí' : remaining > 0 ? 'Chybí faktury' : 'Přebytek faktur'}
+          color={remaining === 0 ? 'green' : 'orange'}
         />
         
         <SummaryCard 
           icon={Map}
-          label="Plán vs Skutečnost"
+          label="Plánovací soubory vs Proof"
           value={
             comparisonStatus === 'ok' ? '✓ OK' :
             comparisonStatus === 'warning' ? `⚠ ${daysWithDiff} dnů` :
@@ -670,7 +801,7 @@ export default function Dashboard() {
           <div className="card-header flex items-center justify-between">
             <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
               <Map size={20} style={{ color: 'var(--color-primary)' }} />
-              Porovnání plán vs. skutečnost — {dailyData.month?.monthName} {dailyData.month?.year}
+              Plánovací soubory vs Proof — {dailyData.month?.monthName} {dailyData.month?.year}
             </h2>
             <div className="flex items-center gap-3">
               {dailyData.summary && (
@@ -763,29 +894,6 @@ export default function Dashboard() {
       {proof && !dailyData && dailyLoading && (
         <div className="card p-8 text-center">
           <div style={{ color: 'var(--color-text-muted)' }}>Načítání porovnání...</div>
-        </div>
-      )}
-
-      {/* Invoices list */}
-      {invoiceList.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            <h2 className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>Faktury za období</h2>
-          </div>
-          <div className="p-6 space-y-2">
-            {invoiceList.map(invoice => (
-              <div key={invoice.id} className="flex items-center justify-between p-3 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
-                <div>
-                  <div className="font-medium" style={{ color: 'var(--color-text-dark)' }}>{invoice.invoiceNumber}</div>
-                  <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{invoice.type}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-medium" style={{ color: 'var(--color-text-dark)' }}>{formatCZK(invoice.totalWithoutVat)}</div>
-                  <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>bez DPH</div>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       )}
 
