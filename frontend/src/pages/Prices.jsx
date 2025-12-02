@@ -13,11 +13,26 @@ function formatCZK(amount) {
   }).format(amount)
 }
 
-function PriceRow({ label, value, color = 'var(--color-primary)' }) {
+function PriceRow({ label, value, color = 'var(--color-primary)', dodatek }) {
+  const isMissing = dodatek === '?'
   return (
-    <div className="flex justify-between p-3 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
+    <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
       <span style={{ color: 'var(--color-text-muted)' }}>{label}</span>
-      <span className="font-semibold" style={{ color }}>{value}</span>
+      <div className="flex items-center gap-2">
+        {dodatek && (
+          <span 
+            className="text-xs px-1.5 py-0.5 rounded" 
+            style={{ 
+              backgroundColor: isMissing ? 'var(--color-orange-light)' : 'var(--color-border)', 
+              color: isMissing ? '#e67e22' : 'var(--color-text-light)' 
+            }}
+            title={isMissing ? 'Chybí ve smlouvách' : `Dodatek č. ${dodatek}`}
+          >
+            {isMissing ? '?' : `D${dodatek}`}
+          </span>
+        )}
+        <span className="font-semibold" style={{ color }}>{value}</span>
+      </div>
     </div>
   )
 }
@@ -82,7 +97,7 @@ export default function Prices() {
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {missingRates.map((item, idx) => (
-              <PriceRow key={idx} label={item.name} value={item.value} color="#e67e22" />
+              <PriceRow key={idx} label={item.name} value={item.value} color="#e67e22" dodatek="?" />
             ))}
           </div>
         </div>
@@ -107,19 +122,19 @@ export default function Prices() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <PriceSection title="FIX za trasu" color="var(--color-purple)">
-                <PriceRow label="DIRECT Praha (DPO)" value="3 200 Kč" color="var(--color-purple)" />
-                <PriceRow label="DIRECT Vratimov (DPO)" value="2 500 Kč" color="var(--color-purple)" />
-                <PriceRow label="DIRECT SD (odpolední)" value="1 800 Kč" color="var(--color-purple)" />
+                <PriceRow label="DIRECT Praha (DPO)" value="3 200 Kč" color="var(--color-purple)" dodatek={7} />
+                <PriceRow label="DIRECT Vratimov (DPO)" value="2 500 Kč" color="var(--color-purple)" dodatek={7} />
+                <PriceRow label="DIRECT SD (odpolední)" value="1 800 Kč" color="var(--color-purple)" dodatek={12} />
               </PriceSection>
               
               <PriceSection title="Variabilní náklady" color="var(--color-purple)">
-                <PriceRow label="Kč/km" value="10,97 Kč" color="var(--color-purple)" />
-                <PriceRow label="Hodinová sazba DEPO" value="850 Kč" color="var(--color-purple)" />
+                <PriceRow label="Kč/km" value="10,97 Kč" color="var(--color-purple)" dodatek={7} />
+                <PriceRow label="Hodinová sazba DEPO" value="850 Kč" color="var(--color-purple)" dodatek={7} />
               </PriceSection>
               
               <PriceSection title="POSILY (příplatek)" color="var(--color-purple)">
-                <PriceRow label="Sólo (18-21 pal)" value="16 500 Kč" color="var(--color-purple)" />
-                <PriceRow label="Dodávka (8-10 pal)" value="10 100 Kč" color="var(--color-purple)" />
+                <PriceRow label="Sólo (18-21 pal)" value="16 500 Kč" color="var(--color-purple)" dodatek={9} />
+                <PriceRow label="Dodávka (8-10 pal)" value="10 100 Kč" color="var(--color-purple)" dodatek={9} />
               </PriceSection>
             </div>
           </div>
@@ -132,17 +147,17 @@ export default function Prices() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <PriceSection title="CZLC4 (Log. centrum) → Vratimov" color="var(--color-purple)">
-                <PriceRow label="Kamion (33 pal)" value="24 180 Kč" color="var(--color-purple)" />
-                <PriceRow label="Solo (18-21 pal)" value="16 500 Kč" color="var(--color-purple)" />
-                <PriceRow label="Dodávka (8-10 pal)" value="10 100 Kč" color="var(--color-purple)" />
-                <PriceRow label="Dodávka 6 300" value="6 300 Kč" color="var(--color-purple)" />
+                <PriceRow label="Kamion (33 pal)" value="24 180 Kč" color="var(--color-purple)" dodatek={8} />
+                <PriceRow label="Solo (18-21 pal)" value="16 500 Kč" color="var(--color-purple)" dodatek={8} />
+                <PriceRow label="Dodávka (8-10 pal)" value="10 100 Kč" color="var(--color-purple)" dodatek={8} />
+                <PriceRow label="Dodávka 6 300" value="6 300 Kč" color="var(--color-purple)" dodatek={12} />
               </PriceSection>
               
               <PriceSection title="CZTC1 (Třídírna) → Vratimov" color="var(--color-purple)">
-                <PriceRow label="Kamion (33 pal)" value="22 000 Kč" color="var(--color-purple)" />
-                <PriceRow label="Solo (15-18 pal)" value="14 800 Kč" color="var(--color-purple)" />
-                <PriceRow label="Dodávka (8-10 pal)" value="9 100 Kč" color="var(--color-purple)" />
-                <PriceRow label="Dodávka 6 300" value="6 300 Kč" color="var(--color-purple)" />
+                <PriceRow label="Kamion (33 pal)" value="22 000 Kč" color="var(--color-purple)" dodatek={8} />
+                <PriceRow label="Solo (15-18 pal)" value="14 800 Kč" color="var(--color-purple)" dodatek={8} />
+                <PriceRow label="Dodávka (8-10 pal)" value="9 100 Kč" color="var(--color-purple)" dodatek={8} />
+                <PriceRow label="Dodávka 6 300" value="6 300 Kč" color="var(--color-purple)" dodatek={12} />
               </PriceSection>
             </div>
           </div>
@@ -155,7 +170,7 @@ export default function Prices() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <PriceSection title="Provoz depa" color="var(--color-purple)">
-                <PriceRow label="Depo Vratimov / den" value="5 950 Kč" color="var(--color-purple)" />
+                <PriceRow label="Depo Vratimov / den" value="5 950 Kč" color="var(--color-purple)" dodatek="?" />
               </PriceSection>
             </div>
           </div>
@@ -182,12 +197,12 @@ export default function Prices() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <PriceSection title="FIX za trasu" color="#0891b2">
-                <PriceRow label="DIRECT DPO" value="2 500 Kč" color="#0891b2" />
-                <PriceRow label="DIRECT SD" value="1 800 Kč" color="#0891b2" />
+                <PriceRow label="DIRECT DPO" value="2 500 Kč" color="#0891b2" dodatek={12} />
+                <PriceRow label="DIRECT SD" value="1 800 Kč" color="#0891b2" dodatek={12} />
               </PriceSection>
               
               <PriceSection title="Variabilní náklady" color="#0891b2">
-                <PriceRow label="Kč/km" value="10,97 Kč" color="#0891b2" />
+                <PriceRow label="Kč/km" value="10,97 Kč" color="#0891b2" dodatek={12} />
               </PriceSection>
             </div>
           </div>
@@ -200,18 +215,18 @@ export default function Prices() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <PriceSection title="Kamion (33 pal)" color="#0891b2">
-                <PriceRow label="CZLC4 → NB" value="9 950 Kč" color="#0891b2" />
-                <PriceRow label="CZTC1 → NB" value="9 500 Kč" color="#0891b2" />
+                <PriceRow label="CZLC4 → NB" value="9 950 Kč" color="#0891b2" dodatek={12} />
+                <PriceRow label="CZTC1 → NB" value="9 500 Kč" color="#0891b2" dodatek={12} />
               </PriceSection>
               
               <PriceSection title="Sólo (18-21 pal)" color="#0891b2">
-                <PriceRow label="CZLC4 → NB" value="7 750 Kč" color="#0891b2" />
-                <PriceRow label="CZTC1 → NB" value="7 500 Kč" color="#0891b2" />
+                <PriceRow label="CZLC4 → NB" value="7 750 Kč" color="#0891b2" dodatek={12} />
+                <PriceRow label="CZTC1 → NB" value="7 500 Kč" color="#0891b2" dodatek={12} />
               </PriceSection>
               
               <PriceSection title="Dodávka (8-10 pal)" color="#0891b2">
-                <PriceRow label="CZLC4 → NB" value="5 250 Kč" color="#0891b2" />
-                <PriceRow label="CZTC1 → NB" value="5 000 Kč" color="#0891b2" />
+                <PriceRow label="CZLC4 → NB" value="5 250 Kč" color="#0891b2" dodatek={12} />
+                <PriceRow label="CZTC1 → NB" value="5 000 Kč" color="#0891b2" dodatek={12} />
               </PriceSection>
             </div>
           </div>
@@ -224,12 +239,12 @@ export default function Prices() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <PriceSection title="Sklad ALL IN" color="#0891b2">
-                <PriceRow label="Základní cena" value="410 000 Kč/měs" color="#0891b2" />
-                <PriceRow label="Po slevě (bonusy)" value="396 000 Kč/měs" color="#0891b2" />
+                <PriceRow label="Základní cena" value="410 000 Kč/měs" color="#0891b2" dodatek={12} />
+                <PriceRow label="Po slevě (bonusy)" value="396 000 Kč/měs" color="#0891b2" dodatek={12} />
               </PriceSection>
               
               <PriceSection title="Personál" color="#0891b2">
-                <PriceRow label="4× skladník" value="194 800 Kč/měs" color="#0891b2" />
+                <PriceRow label="4× skladník" value="194 800 Kč/měs" color="#0891b2" dodatek={12} />
               </PriceSection>
             </div>
             
@@ -279,13 +294,28 @@ export default function Prices() {
               </span>
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <PriceRow label="Trasa A-I" value="8 500 Kč" color="var(--color-red)" />
-              <PriceRow label="Dopoledne" value="8 500 Kč" color="var(--color-red)" />
-              <PriceRow label="Posila C, D, H" value="11 600 Kč" color="var(--color-red)" />
-              <PriceRow label="Sobotní trasa" value="8 500 Kč" color="var(--color-red)" />
+              <PriceRow label="Trasa A-I" value="8 500 Kč" color="var(--color-red)" dodatek={13} />
+              <PriceRow label="Dopoledne" value="8 500 Kč" color="var(--color-red)" dodatek={13} />
+              <PriceRow label="Posila C, D, H" value="11 600 Kč" color="var(--color-red)" dodatek={13} />
+              <PriceRow label="Sobotní trasa" value="8 500 Kč" color="var(--color-red)" dodatek={13} />
             </div>
           </div>
 
+        </div>
+      </div>
+
+      {/* ====== LEGENDA ====== */}
+      <div className="flex flex-wrap items-center gap-4 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+        <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Legenda:</span>
+        <div className="flex flex-wrap items-center gap-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="flex items-center gap-1">
+            <span className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>D7</span>
+            = Dodatek č. 7
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-orange-light)', color: '#e67e22' }}>?</span>
+            = Chybí ve smlouvách
+          </span>
         </div>
       </div>
 
