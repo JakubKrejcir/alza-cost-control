@@ -24,20 +24,19 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
     """
     Parse daily breakdown from 'Podkladove tab' sheet.
     
-    Structure:
-    - TABLE 1 (CNT - počty tras): Rows 2-61
-      - Row 3: Dates (every 4th column starting from C)
-      - Row 4: Headers (DR DPO cnt, LH DPO cnt, DR SD cnt, LH SD cnt)
-      - Rows 5-39: DEPO VRATIMOV
-      - Rows 40-60: DEPO NOVÝ BYDŽOV  
-      - Row 61: 'Celkový súčet' - daily totals
-      
-    - TABLE 2 (KM - kilometry): Rows 64-123
-      - Row 65: Dates (every 4th column starting from C)
-      - Row 66: Headers (DR DPO km, LH DPO km, DR SD km, LH SD km)
-      - Rows 67-101: DEPO VRATIMOV
-      - Rows 102-122: DEPO NOVÝ BYDŽOV
-      - Row 123: 'Celkový súčet' - daily totals
+    Supports two formats:
+    
+    NEW FORMAT (October+):
+    - CNT: 4 columns per day (DR DPO cnt, LH DPO cnt, DR SD cnt, LH SD cnt)
+    - KM: 4 columns per day (DR DPO km, LH DPO km, DR SD km, LH SD km)
+    - Has depot markers: "DR + DEPO VRATIMOV", "DEPO NOVÝ BYDŽOV"
+    - Has summary row "Celkový súčet"
+    
+    OLD FORMAT (September):
+    - CNT: 2 columns per day (DR cnt, LH cnt) - no DPO/SD distinction
+    - KM: 1 column per day
+    - Only Moravskoslezsko routes (all counted as Vratimov)
+    - No summary row
     """
     # Try different sheet names
     sheet_names = ['Podkladove tab', 'Podkladová tab', 'Podkladove', 'Daily']
@@ -50,6 +49,19 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
     
     if sheet is None:
         return []  # No daily data sheet found
+    
+    # Detect format by checking headers in row 4
+    header_row_3 = sheet.cell(row=4, column=3).value or ''
+    is_new_format = 'DPO' in str(header_row_3).upper() or 'SD' in str(header_row_3).upper()
+    
+    if is_new_format:
+        return parse_daily_data_new_format(sheet)
+    else:
+        return parse_daily_data_old_format(sheet)
+
+
+def parse_daily_data_new_format(sheet) -> List[dict]:
+    """Parse new format with 4 columns per day and depot separation"""
     
     # Find depot boundaries by looking for markers in column A
     vratimov_cnt_start = None
@@ -68,7 +80,7 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
         if cell_a and 'VRATIMOV' in str(cell_a).upper() and vratimov_cnt_start is None:
             vratimov_cnt_start = row
         elif cell_a and ('BYDŽOV' in str(cell_a).upper() or 'BYDZOV' in str(cell_a).upper()):
-            if bydzov_cnt_start is None and vratimov_cnt_start is not None and row < 65:
+            if bydzov_cnt_start is None and vratimov_cnt_start is not None and row < 80:
                 bydzov_cnt_start = row
             elif bydzov_km_start is None and vratimov_km_start is not None:
                 bydzov_km_start = row
@@ -104,7 +116,7 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
     vratimov_km_end = bydzov_km_start - 1
     bydzov_km_end = km_summary_row - 1
     
-    # Parse dates and data
+    # Parse dates and data - 4 columns per day
     daily_data = {}
     
     col = 3
@@ -142,7 +154,7 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
                         pass
             return total
         
-        # CNT - Vratimov
+        # CNT - Vratimov (4 columns: DR DPO, LH DPO, DR SD, LH SD)
         vratimov_dr_dpo = int(sum_range(vratimov_cnt_start, vratimov_cnt_end, 0))
         vratimov_lh_dpo = int(sum_range(vratimov_cnt_start, vratimov_cnt_end, 1))
         vratimov_dr_sd = int(sum_range(vratimov_cnt_start, vratimov_cnt_end, 2))
@@ -154,7 +166,7 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
         bydzov_dr_sd = int(sum_range(bydzov_cnt_start, bydzov_cnt_end, 2))
         bydzov_lh_sd = int(sum_range(bydzov_cnt_start, bydzov_cnt_end, 3))
         
-        # CNT - Total (from summary row for verification, or sum)
+        # CNT - Total
         total_dr_dpo = vratimov_dr_dpo + bydzov_dr_dpo
         total_lh_dpo = vratimov_lh_dpo + bydzov_lh_dpo
         total_dr_sd = vratimov_dr_sd + bydzov_dr_sd
@@ -185,11 +197,20 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
         
         col += 4
     
-    # Parse KM data
+    # Parse KM data - find KM section start row
+    km_date_row = None
+    for row in range(60, min(sheet.max_row + 1, 80)):
+        cell_b = sheet.cell(row=row, column=2).value
+        if cell_b and 'KM' in str(cell_b).upper():
+            km_date_row = row + 1  # Dates are on next row
+            break
+    
+    if km_date_row is None:
+        km_date_row = 64
+    
     col = 3
     while col <= sheet.max_column:
-        # KM table has dates in row 65
-        date_val = sheet.cell(row=65, column=col).value
+        date_val = sheet.cell(row=km_date_row, column=col).value
         
         if date_val is None:
             col += 4
@@ -246,7 +267,161 @@ def parse_daily_data_from_xlsx(wb: openpyxl.Workbook) -> List[dict]:
         
         col += 4
     
-    # Return as sorted list
+    return [daily_data[key] for key in sorted(daily_data.keys())]
+
+
+def parse_daily_data_old_format(sheet) -> List[dict]:
+    """
+    Parse old format (September) with 2 columns per day for CNT, 1 column per day for KM.
+    All routes are counted as Vratimov (Moravskoslezsko), no SD distinction.
+    """
+    
+    # Find data boundaries
+    data_start_row = 5  # First data row after headers
+    data_end_row = None
+    km_start_row = None
+    km_data_start_row = None
+    
+    for row in range(1, min(sheet.max_row + 1, 100)):
+        cell_b = sheet.cell(row=row, column=2).value
+        if cell_b:
+            # Find last route row before KM section
+            if 'Výpočet KM' in str(cell_b) or 'KM' == str(cell_b).strip():
+                km_start_row = row
+                data_end_row = row - 1
+                break
+            # Track last Moravskoslezsko row
+            if 'Moravskoslezsko' in str(cell_b):
+                data_end_row = row
+    
+    if data_end_row is None:
+        data_end_row = 30
+    
+    # Find KM data start (row with dates)
+    if km_start_row:
+        for row in range(km_start_row, min(km_start_row + 5, sheet.max_row + 1)):
+            cell_c = sheet.cell(row=row, column=3).value
+            if cell_c and isinstance(cell_c, datetime):
+                km_data_start_row = row
+                break
+    
+    # Parse CNT data - 2 columns per day (DR cnt, LH cnt)
+    daily_data = {}
+    
+    col = 3
+    while col <= sheet.max_column:
+        date_val = sheet.cell(row=3, column=col).value
+        
+        if date_val is None:
+            col += 2
+            continue
+        
+        # Parse date
+        if isinstance(date_val, datetime):
+            date = date_val
+        elif isinstance(date_val, str):
+            try:
+                date = datetime.strptime(date_val[:10], '%Y-%m-%d')
+            except:
+                col += 2
+                continue
+        else:
+            col += 2
+            continue
+        
+        date_key = date.strftime('%Y-%m-%d')
+        
+        # Sum all routes (DR cnt in col, LH cnt in col+1)
+        dr_total = 0
+        lh_total = 0
+        for r in range(data_start_row, data_end_row + 1):
+            dr_val = sheet.cell(row=r, column=col).value
+            lh_val = sheet.cell(row=r, column=col + 1).value
+            if dr_val:
+                try:
+                    dr_total += int(float(dr_val))
+                except (ValueError, TypeError):
+                    pass
+            if lh_val:
+                try:
+                    lh_total += int(float(lh_val))
+                except (ValueError, TypeError):
+                    pass
+        
+        # Old format: DR = DR DPO, LH = LH DPO (no SD distinction)
+        # All counted as Vratimov
+        daily_data[date_key] = {
+            'date': date,
+            # Celkem (DR = DPO, no SD)
+            'dr_dpo_count': dr_total,
+            'lh_dpo_count': lh_total,
+            'dr_sd_count': 0,
+            'lh_sd_count': 0,
+            # Vratimov = all
+            'vratimov_dr_dpo': dr_total,
+            'vratimov_lh_dpo': lh_total,
+            'vratimov_dr_sd': 0,
+            'vratimov_lh_sd': 0,
+            # Nový Bydžov = 0
+            'bydzov_dr_dpo': 0,
+            'bydzov_lh_dpo': 0,
+            'bydzov_dr_sd': 0,
+            'bydzov_lh_sd': 0,
+            # KM - inicializace
+            'dr_dpo_km': 0, 'lh_dpo_km': 0, 'dr_sd_km': 0, 'lh_sd_km': 0,
+            'vratimov_dr_dpo_km': 0, 'vratimov_lh_dpo_km': 0, 'vratimov_dr_sd_km': 0, 'vratimov_lh_sd_km': 0,
+            'bydzov_dr_dpo_km': 0, 'bydzov_lh_dpo_km': 0, 'bydzov_dr_sd_km': 0, 'bydzov_lh_sd_km': 0,
+        }
+        
+        col += 2
+    
+    # Parse KM data - 1 column per day
+    if km_data_start_row:
+        km_data_row = km_data_start_row + 1  # Data starts after date row
+        
+        col = 3
+        while col <= sheet.max_column:
+            date_val = sheet.cell(row=km_data_start_row, column=col).value
+            
+            if date_val is None:
+                col += 1
+                continue
+            
+            # Parse date
+            if isinstance(date_val, datetime):
+                date = date_val
+            elif isinstance(date_val, str):
+                try:
+                    date = datetime.strptime(date_val[:10], '%Y-%m-%d')
+                except:
+                    col += 1
+                    continue
+            else:
+                col += 1
+                continue
+            
+            date_key = date.strftime('%Y-%m-%d')
+            
+            if date_key not in daily_data:
+                col += 1
+                continue
+            
+            # Sum all KM values in this column
+            total_km = 0.0
+            for r in range(km_data_row, min(km_data_row + 30, sheet.max_row + 1)):
+                val = sheet.cell(row=r, column=col).value
+                if val:
+                    try:
+                        total_km += float(val)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # Old format: all KM goes to LH DPO (linehaul)
+            daily_data[date_key]['lh_dpo_km'] = total_km
+            daily_data[date_key]['vratimov_lh_dpo_km'] = total_km
+            
+            col += 1
+    
     return [daily_data[key] for key in sorted(daily_data.keys())]
 
 
