@@ -31,6 +31,14 @@ export const contracts = {
   getAll: (carrierId) => api.get('/contracts', { params: { carrier_id: carrierId } }).then(r => r.data),
   getOne: (id) => api.get(`/contracts/${id}`).then(r => r.data),
   create: (data) => api.post('/contracts', data).then(r => r.data),
+  upload: (file, carrierId) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('carrier_id', carrierId)
+    return api.post('/contracts/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(r => r.data)
+  },
   update: (id, data) => api.put(`/contracts/${id}`, data).then(r => r.data),
   delete: (id) => api.delete(`/contracts/${id}`)
 }

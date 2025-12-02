@@ -9,17 +9,15 @@ import {
   Map,
   CheckCircle, 
   AlertCircle,
-  AlertTriangle,
   X,
   Trash2,
-  ChevronDown,
-  ChevronUp,
   Square,
   CheckSquare,
   MinusSquare,
-  Factory
+  FileSignature,
+  Calendar
 } from 'lucide-react'
-import { proofs, invoices, carriers, routePlans } from '../lib/api'
+import { proofs, invoices, carriers, routePlans, contracts } from '../lib/api'
 
 function formatCZK(amount) {
   if (amount == null) return '—'
@@ -94,13 +92,14 @@ function Tab({ active, onClick, children, count }) {
 }
 
 export default function Documents() {
-  const [activeTab, setActiveTab] = useState('plans') // 'plans', 'proofs', 'invoices'
+  const [activeTab, setActiveTab] = useState('plans') // 'plans', 'proofs', 'invoices', 'contracts'
   const [selectedCarrier, setSelectedCarrier] = useState('')
   const [selectedPeriod, setSelectedPeriod] = useState(getPeriodOptions()[0])
   const [dragOver, setDragOver] = useState(false)
   const [uploadResults, setUploadResults] = useState([])
   const [selectedPlans, setSelectedPlans] = useState(new Set())
-  const [expandedPlan, setExpandedPlan] = useState(null)
+  const [selectedProofs, setSelectedProofs] = useState(new Set())
+  const [selectedContracts, setSelectedContracts] = useState(new Set())
   
   const queryClient = useQueryClient()
 
@@ -117,10 +116,10 @@ export default function Documents() {
     enabled: !!selectedCarrier
   })
 
-  // Proofs - pro dopravce a období
-  const { data: proofList } = useQuery({
-    queryKey: ['proofs', selectedCarrier, selectedPeriod],
-    queryFn: () => proofs.getAll({ carrier_id: selectedCarrier, period: selectedPeriod }),
+  // Proofy - VŠECHNY pro dopravce (bez filtru období)
+  const { data: allProofList, isLoading: loadingProofs } = useQuery({
+    queryKey: ['proofs-all', selectedCarrier],
+    queryFn: () => proofs.getAll({ carrier_id: selectedCarrier }),
     enabled: !!selectedCarrier
   })
 
@@ -128,6 +127,13 @@ export default function Documents() {
   const { data: invoiceList, isLoading: loadingInvoices } = useQuery({
     queryKey: ['invoices', selectedCarrier, selectedPeriod],
     queryFn: () => invoices.getAll({ carrier_id: selectedCarrier, period: selectedPeriod }),
+    enabled: !!selectedCarrier
+  })
+
+  // Contracts - všechny pro dopravce
+  const { data: contractList, isLoading: loadingContracts } = useQuery({
+    queryKey: ['contracts', selectedCarrier],
+    queryFn: () => contracts.getAll(selectedCarrier),
     enabled: !!selectedCarrier
   })
 
@@ -162,7 +168,7 @@ export default function Documents() {
         success: true,
         message: `Proof nahrán: ${data.period}`
       }])
-      queryClient.invalidateQueries(['proofs'])
+      queryClient.invalidateQueries(['proofs-all'])
     },
     onError: (error, variables) => {
       setUploadResults(prev => [...prev, { 
@@ -195,6 +201,27 @@ export default function Documents() {
     }
   })
 
+  const uploadContractMutation = useMutation({
+    mutationFn: ({ file, carrierId }) => contracts.upload(file, carrierId),
+    onSuccess: (data, variables) => {
+      setUploadResults(prev => [...prev, { 
+        type: 'contract', 
+        fileName: variables.file.name, 
+        success: true,
+        message: `Smlouva nahrána`
+      }])
+      queryClient.invalidateQueries(['contracts'])
+    },
+    onError: (error, variables) => {
+      setUploadResults(prev => [...prev, { 
+        type: 'contract', 
+        fileName: variables.file.name, 
+        success: false,
+        message: error.response?.data?.detail || 'Chyba při nahrávání'
+      }])
+    }
+  })
+
   // Delete mutations
   const deletePlanMutation = useMutation({
     mutationFn: (id) => routePlans.delete(id),
@@ -206,7 +233,10 @@ export default function Documents() {
 
   const deleteProofMutation = useMutation({
     mutationFn: (id) => proofs.delete(id),
-    onSuccess: () => queryClient.invalidateQueries(['proofs'])
+    onSuccess: () => {
+      queryClient.invalidateQueries(['proofs-all'])
+      setSelectedProofs(new Set())
+    }
   })
 
   const deleteInvoiceMutation = useMutation({
@@ -214,16 +244,42 @@ export default function Documents() {
     onSuccess: () => queryClient.invalidateQueries(['invoices'])
   })
 
-  // Batch delete for plans
-  const deleteBatchMutation = useMutation({
+  const deleteContractMutation = useMutation({
+    mutationFn: (id) => contracts.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['contracts'])
+      setSelectedContracts(new Set())
+    }
+  })
+
+  // Batch delete mutations
+  const deletePlansBatchMutation = useMutation({
     mutationFn: async (ids) => {
-      for (const id of ids) {
-        await routePlans.delete(id)
-      }
+      for (const id of ids) await routePlans.delete(id)
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['route-plans'])
       setSelectedPlans(new Set())
+    }
+  })
+
+  const deleteProofsBatchMutation = useMutation({
+    mutationFn: async (ids) => {
+      for (const id of ids) await proofs.delete(id)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['proofs-all'])
+      setSelectedProofs(new Set())
+    }
+  })
+
+  const deleteContractsBatchMutation = useMutation({
+    mutationFn: async (ids) => {
+      for (const id of ids) await contracts.delete(id)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries(['contracts'])
+      setSelectedContracts(new Set())
     }
   })
 
@@ -240,15 +296,17 @@ export default function Documents() {
       
       // Rozpoznání typu souboru
       if (ext === 'pdf') {
-        // PDF = faktura
-        uploadInvoiceMutation.mutate({ file, carrierId: selectedCarrier, period: selectedPeriod })
+        // PDF - rozlišit fakturu vs smlouvu
+        if (fileName.includes('smlouva') || fileName.includes('contract') || fileName.includes('ramcova')) {
+          uploadContractMutation.mutate({ file, carrierId: selectedCarrier })
+        } else {
+          uploadInvoiceMutation.mutate({ file, carrierId: selectedCarrier, period: selectedPeriod })
+        }
       } else if (ext === 'xlsx' || ext === 'xls') {
         // Excel - rozlišit podle názvu
         if (fileName.includes('drivecool') || fileName.includes('plan') || fileName.includes('route')) {
-          // Plánovací soubor
           uploadPlanMutation.mutate({ file, carrierId: selectedCarrier })
         } else {
-          // Proof
           uploadProofMutation.mutate({ file, carrierId: selectedCarrier, period: selectedPeriod })
         }
       } else {
@@ -260,7 +318,7 @@ export default function Documents() {
         }])
       }
     })
-  }, [selectedCarrier, selectedPeriod, uploadPlanMutation, uploadProofMutation, uploadInvoiceMutation])
+  }, [selectedCarrier, selectedPeriod, uploadPlanMutation, uploadProofMutation, uploadInvoiceMutation, uploadContractMutation])
 
   const handleDrop = useCallback((e) => {
     e.preventDefault()
@@ -268,30 +326,61 @@ export default function Documents() {
     handleFiles(e.dataTransfer.files)
   }, [handleFiles])
 
-  // Plan selection helpers
-  const togglePlanSelection = (planId) => {
+  // Selection helpers - Plans
+  const togglePlanSelection = (id) => {
     const newSelected = new Set(selectedPlans)
-    if (newSelected.has(planId)) {
-      newSelected.delete(planId)
-    } else {
-      newSelected.add(planId)
-    }
+    newSelected.has(id) ? newSelected.delete(id) : newSelected.add(id)
     setSelectedPlans(newSelected)
   }
 
-  const toggleSelectAll = () => {
+  const toggleSelectAllPlans = () => {
     if (!planList) return
-    if (selectedPlans.size === planList.length) {
-      setSelectedPlans(new Set())
-    } else {
-      setSelectedPlans(new Set(planList.map(p => p.id)))
+    setSelectedPlans(selectedPlans.size === planList.length ? new Set() : new Set(planList.map(p => p.id)))
+  }
+
+  // Selection helpers - Proofs
+  const toggleProofSelection = (id) => {
+    const newSelected = new Set(selectedProofs)
+    newSelected.has(id) ? newSelected.delete(id) : newSelected.add(id)
+    setSelectedProofs(newSelected)
+  }
+
+  const toggleSelectAllProofs = () => {
+    if (!allProofList) return
+    setSelectedProofs(selectedProofs.size === allProofList.length ? new Set() : new Set(allProofList.map(p => p.id)))
+  }
+
+  // Selection helpers - Contracts
+  const toggleContractSelection = (id) => {
+    const newSelected = new Set(selectedContracts)
+    newSelected.has(id) ? newSelected.delete(id) : newSelected.add(id)
+    setSelectedContracts(newSelected)
+  }
+
+  const toggleSelectAllContracts = () => {
+    if (!contractList) return
+    setSelectedContracts(selectedContracts.size === contractList.length ? new Set() : new Set(contractList.map(c => c.id)))
+  }
+
+  // Delete handlers
+  const handleDeleteSelectedPlans = () => {
+    if (selectedPlans.size === 0) return
+    if (confirm(`Opravdu smazat ${selectedPlans.size} vybraných plánů?`)) {
+      deletePlansBatchMutation.mutate(Array.from(selectedPlans))
     }
   }
 
-  const handleDeleteSelected = () => {
-    if (selectedPlans.size === 0) return
-    if (confirm(`Opravdu smazat ${selectedPlans.size} vybraných plánů?`)) {
-      deleteBatchMutation.mutate(Array.from(selectedPlans))
+  const handleDeleteSelectedProofs = () => {
+    if (selectedProofs.size === 0) return
+    if (confirm(`Opravdu smazat ${selectedProofs.size} vybraných proofů?`)) {
+      deleteProofsBatchMutation.mutate(Array.from(selectedProofs))
+    }
+  }
+
+  const handleDeleteSelectedContracts = () => {
+    if (selectedContracts.size === 0) return
+    if (confirm(`Opravdu smazat ${selectedContracts.size} vybraných smluv?`)) {
+      deleteContractsBatchMutation.mutate(Array.from(selectedContracts))
     }
   }
 
@@ -303,15 +392,23 @@ export default function Documents() {
     return acc
   }, {}) || {}
 
-  const isUploading = uploadPlanMutation.isPending || uploadProofMutation.isPending || uploadInvoiceMutation.isPending
-  const currentProof = proofList?.[0]
+  // Group proofs by year
+  const proofsByYear = allProofList?.reduce((acc, proof) => {
+    const year = proof.period ? '20' + proof.period.split('/')[1] : 'Bez data'
+    if (!acc[year]) acc[year] = []
+    acc[year].push(proof)
+    return acc
+  }, {}) || {}
+
+  const isUploading = uploadPlanMutation.isPending || uploadProofMutation.isPending || 
+                      uploadInvoiceMutation.isPending || uploadContractMutation.isPending
 
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold">Dokumenty</h1>
-        <p className="text-gray-400 text-sm mt-1">Nahrávejte a spravujte plány, proofy a faktury</p>
+        <p className="text-gray-400 text-sm mt-1">Nahrávejte a spravujte plány, proofy, faktury a smlouvy</p>
       </div>
 
       {/* Filters */}
@@ -324,6 +421,8 @@ export default function Documents() {
               onChange={(e) => {
                 setSelectedCarrier(e.target.value)
                 setSelectedPlans(new Set())
+                setSelectedProofs(new Set())
+                setSelectedContracts(new Set())
               }}
               className="input"
             >
@@ -393,7 +492,7 @@ export default function Documents() {
             Vybrat soubory
           </label>
 
-          <div className="flex justify-center gap-6 mt-4 text-xs text-gray-500">
+          <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
             <div className="flex items-center gap-1.5">
               <Map size={16} className="text-purple-400" />
               Drivecool*.xlsx = Plán
@@ -405,6 +504,10 @@ export default function Documents() {
             <div className="flex items-center gap-1.5">
               <FileText size={16} className="text-red-400" />
               *.pdf = Faktura
+            </div>
+            <div className="flex items-center gap-1.5">
+              <FileSignature size={16} className="text-blue-400" />
+              *smlouva*.pdf = Smlouva
             </div>
           </div>
         </div>
@@ -433,15 +536,17 @@ export default function Documents() {
                     {result.message}
                   </div>
                 </div>
-                <span className={`badge ${
-                  result.type === 'plan' ? 'badge-purple' : 
-                  result.type === 'proof' ? 'badge-success' : 
-                  result.type === 'invoice' ? 'badge-info' : 
-                  'badge-error'
+                <span className={`text-xs px-2 py-1 rounded ${
+                  result.type === 'plan' ? 'bg-purple-500/20 text-purple-400' : 
+                  result.type === 'proof' ? 'bg-green-500/20 text-green-400' : 
+                  result.type === 'invoice' ? 'bg-red-500/20 text-red-400' : 
+                  result.type === 'contract' ? 'bg-blue-500/20 text-blue-400' :
+                  'bg-gray-500/20 text-gray-400'
                 }`}>
                   {result.type === 'plan' ? 'Plán' :
                    result.type === 'proof' ? 'Proof' : 
                    result.type === 'invoice' ? 'Faktura' : 
+                   result.type === 'contract' ? 'Smlouva' :
                    'Neznámý'}
                 </span>
               </div>
@@ -452,64 +557,38 @@ export default function Documents() {
 
       {/* Tabs */}
       {selectedCarrier && (
-        <div className="flex gap-2 border-b border-white/10 pb-3">
-          <Tab 
-            active={activeTab === 'plans'} 
-            onClick={() => setActiveTab('plans')}
-            count={planList?.length}
-          >
-            <Map size={16} />
-            Plány tras
+        <div className="flex flex-wrap gap-2 border-b border-white/10 pb-3">
+          <Tab active={activeTab === 'plans'} onClick={() => setActiveTab('plans')} count={planList?.length}>
+            <Map size={16} /> Plány
           </Tab>
-          <Tab 
-            active={activeTab === 'proofs'} 
-            onClick={() => setActiveTab('proofs')}
-            count={proofList?.length}
-          >
-            <FileSpreadsheet size={16} />
-            Proofy
+          <Tab active={activeTab === 'proofs'} onClick={() => setActiveTab('proofs')} count={allProofList?.length}>
+            <FileSpreadsheet size={16} /> Proofy
           </Tab>
-          <Tab 
-            active={activeTab === 'invoices'} 
-            onClick={() => setActiveTab('invoices')}
-            count={invoiceList?.length}
-          >
-            <FileText size={16} />
-            Faktury
+          <Tab active={activeTab === 'invoices'} onClick={() => setActiveTab('invoices')} count={invoiceList?.length}>
+            <FileText size={16} /> Faktury
+          </Tab>
+          <Tab active={activeTab === 'contracts'} onClick={() => setActiveTab('contracts')} count={contractList?.length}>
+            <FileSignature size={16} /> Smlouvy
           </Tab>
         </div>
       )}
 
-      {/* Tab Content */}
+      {/* === PLÁNY === */}
       {selectedCarrier && activeTab === 'plans' && (
         <div className="card overflow-hidden">
           <div className="card-header flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <button 
-                onClick={toggleSelectAll}
-                className="text-gray-400 hover:text-white"
-              >
-                {planList?.length > 0 && selectedPlans.size === planList.length ? (
-                  <CheckSquare size={20} />
-                ) : selectedPlans.size > 0 ? (
-                  <MinusSquare size={20} />
-                ) : (
-                  <Square size={20} />
-                )}
+              <button onClick={toggleSelectAllPlans} className="text-gray-400 hover:text-white">
+                {planList?.length > 0 && selectedPlans.size === planList.length ? <CheckSquare size={20} /> : 
+                 selectedPlans.size > 0 ? <MinusSquare size={20} /> : <Square size={20} />}
               </button>
               <h2 className="font-semibold">Plánovací soubory</h2>
-              {selectedPlans.size > 0 && (
-                <span className="text-sm text-gray-400">({selectedPlans.size} vybráno)</span>
-              )}
+              {selectedPlans.size > 0 && <span className="text-sm text-gray-400">({selectedPlans.size} vybráno)</span>}
             </div>
             {selectedPlans.size > 0 && (
-              <button
-                onClick={handleDeleteSelected}
-                disabled={deleteBatchMutation.isPending}
-                className="btn btn-sm bg-red-500/20 text-red-400 hover:bg-red-500/30"
-              >
-                <Trash2 size={16} />
-                Smazat vybrané ({selectedPlans.size})
+              <button onClick={handleDeleteSelectedPlans} disabled={deletePlansBatchMutation.isPending}
+                className="btn btn-sm bg-red-500/20 text-red-400 hover:bg-red-500/30">
+                <Trash2 size={16} /> Smazat ({selectedPlans.size})
               </button>
             )}
           </div>
@@ -520,113 +599,33 @@ export default function Documents() {
             <div className="p-8 text-center text-gray-500">
               <Map className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>Žádné plánovací soubory</p>
-              <p className="text-sm mt-1">Nahrajte soubory Drivecool*.xlsx</p>
             </div>
           ) : (
             <div className="divide-y divide-white/5">
-              {Object.entries(plansByYear)
-                .sort(([a], [b]) => String(b).localeCompare(String(a)))
-                .map(([year, plans]) => (
-                  <div key={year}>
-                    <div className="px-4 py-2 bg-white/5 text-sm font-medium text-gray-400">
-                      {year} ({plans.length} plánů)
-                    </div>
-                    {plans.sort((a, b) => new Date(b.validFrom) - new Date(a.validFrom)).map(plan => (
-                      <div 
-                        key={plan.id} 
-                        className={`px-4 py-3 flex items-center gap-3 hover:bg-white/5 ${
-                          selectedPlans.has(plan.id) ? 'bg-purple-500/5' : ''
-                        }`}
-                      >
-                        <button onClick={() => togglePlanSelection(plan.id)} className="text-gray-400 hover:text-white">
-                          {selectedPlans.has(plan.id) ? (
-                            <CheckSquare size={18} className="text-purple-400" />
-                          ) : (
-                            <Square size={18} />
-                          )}
-                        </button>
-                        
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm truncate">{plan.fileName}</span>
-                            <PlanTypeBadge type={plan.planType} />
-                            <DepotBadge depot={plan.depot} />
-                          </div>
-                          <div className="text-xs text-gray-500 mt-0.5">
-                            Platný od {formatDate(plan.validFrom)}
-                            {plan.validTo && ` do ${formatDate(plan.validTo)}`}
-                            {' • '}{plan.totalRoutes} tras
-                          </div>
+              {Object.entries(plansByYear).sort(([a], [b]) => String(b).localeCompare(String(a))).map(([year, plans]) => (
+                <div key={year}>
+                  <div className="px-4 py-2 bg-white/5 text-sm font-medium text-gray-400">{year} ({plans.length})</div>
+                  {plans.sort((a, b) => new Date(b.validFrom) - new Date(a.validFrom)).map(plan => (
+                    <div key={plan.id} className={`px-4 py-3 flex items-center gap-3 hover:bg-white/5 ${selectedPlans.has(plan.id) ? 'bg-purple-500/5' : ''}`}>
+                      <button onClick={() => togglePlanSelection(plan.id)} className="text-gray-400 hover:text-white">
+                        {selectedPlans.has(plan.id) ? <CheckSquare size={18} className="text-purple-400" /> : <Square size={18} />}
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-sm truncate">{plan.fileName}</span>
+                          <PlanTypeBadge type={plan.planType} />
+                          <DepotBadge depot={plan.depot} />
                         </div>
-                        
-                        <button
-                          onClick={() => {
-                            if (confirm(`Smazat plán "${plan.fileName}"?`)) {
-                              deletePlanMutation.mutate(plan.id)
-                            }
-                          }}
-                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          Od {formatDate(plan.validFrom)} • {plan.totalRoutes} tras
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {selectedCarrier && activeTab === 'proofs' && (
-        <div className="card overflow-hidden">
-          <div className="card-header">
-            <h2 className="font-semibold">Proofy — {selectedPeriod}</h2>
-          </div>
-          
-          {!proofList?.length ? (
-            <div className="p-8 text-center text-gray-500">
-              <FileSpreadsheet className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p>Žádný proof pro toto období</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-white/5">
-              {proofList.map(proof => (
-                <div key={proof.id} className="p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <div className="font-medium">{proof.period}</div>
-                      <div className="text-xs text-gray-500">{proof.fileName}</div>
+                      <button onClick={() => { if (confirm(`Smazat "${plan.fileName}"?`)) deletePlanMutation.mutate(plan.id) }}
+                        className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded">
+                        <Trash2 size={16} />
+                      </button>
                     </div>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Smazat proof "${proof.period}"?`)) {
-                          deleteProofMutation.mutate(proof.id)
-                        }
-                      }}
-                      className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-                    <div className="bg-white/5 rounded p-2">
-                      <span className="text-gray-400 text-xs">FIX</span>
-                      <div className="font-medium">{formatCZK(proof.totalFix)}</div>
-                    </div>
-                    <div className="bg-white/5 rounded p-2">
-                      <span className="text-gray-400 text-xs">KM</span>
-                      <div className="font-medium">{formatCZK(proof.totalKm)}</div>
-                    </div>
-                    <div className="bg-white/5 rounded p-2">
-                      <span className="text-gray-400 text-xs">Linehaul</span>
-                      <div className="font-medium">{formatCZK(proof.totalLinehaul)}</div>
-                    </div>
-                    <div className="bg-white/5 rounded p-2">
-                      <span className="text-gray-400 text-xs">Celkem</span>
-                      <div className="font-medium text-alza-orange">{formatCZK(proof.grandTotal)}</div>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               ))}
             </div>
@@ -634,11 +633,86 @@ export default function Documents() {
         </div>
       )}
 
+      {/* === PROOFY === */}
+      {selectedCarrier && activeTab === 'proofs' && (
+        <div className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={toggleSelectAllProofs} className="text-gray-400 hover:text-white">
+                {allProofList?.length > 0 && selectedProofs.size === allProofList.length ? <CheckSquare size={20} /> : 
+                 selectedProofs.size > 0 ? <MinusSquare size={20} /> : <Square size={20} />}
+              </button>
+              <h2 className="font-semibold">Proofy</h2>
+              {selectedProofs.size > 0 && <span className="text-sm text-gray-400">({selectedProofs.size} vybráno)</span>}
+            </div>
+            {selectedProofs.size > 0 && (
+              <button onClick={handleDeleteSelectedProofs} disabled={deleteProofsBatchMutation.isPending}
+                className="btn btn-sm bg-red-500/20 text-red-400 hover:bg-red-500/30">
+                <Trash2 size={16} /> Smazat ({selectedProofs.size})
+              </button>
+            )}
+          </div>
+          
+          {loadingProofs ? (
+            <div className="p-8 text-center text-gray-500">Načítám...</div>
+          ) : !allProofList?.length ? (
+            <div className="p-8 text-center text-gray-500">
+              <FileSpreadsheet className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>Žádné proofy</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {Object.entries(proofsByYear).sort(([a], [b]) => String(b).localeCompare(String(a))).map(([year, proofItems]) => (
+                <div key={year}>
+                  <div className="px-4 py-2 bg-white/5 text-sm font-medium text-gray-400">{year} ({proofItems.length})</div>
+                  {proofItems.sort((a, b) => b.period.localeCompare(a.period)).map(proof => (
+                    <div key={proof.id} className={`px-4 py-3 hover:bg-white/5 ${selectedProofs.has(proof.id) ? 'bg-green-500/5' : ''}`}>
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => toggleProofSelection(proof.id)} className="text-gray-400 hover:text-white">
+                          {selectedProofs.has(proof.id) ? <CheckSquare size={18} className="text-green-400" /> : <Square size={18} />}
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Calendar size={14} className="text-gray-500" />
+                            <span className="font-medium text-sm">{proof.period}</span>
+                            <span className="text-xs text-gray-500 truncate">({proof.fileName})</span>
+                          </div>
+                        </div>
+                        <div className="text-sm font-medium text-alza-orange">{formatCZK(proof.grandTotal)}</div>
+                        <button onClick={() => { if (confirm(`Smazat proof "${proof.period}"?`)) deleteProofMutation.mutate(proof.id) }}
+                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded">
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                      <div className="ml-9 mt-2 grid grid-cols-4 gap-2 text-xs">
+                        <div className="bg-white/5 rounded px-2 py-1">
+                          <span className="text-gray-500">FIX:</span> <span className="font-medium">{formatCZK(proof.totalFix)}</span>
+                        </div>
+                        <div className="bg-white/5 rounded px-2 py-1">
+                          <span className="text-gray-500">KM:</span> <span className="font-medium">{formatCZK(proof.totalKm)}</span>
+                        </div>
+                        <div className="bg-white/5 rounded px-2 py-1">
+                          <span className="text-gray-500">LH:</span> <span className="font-medium">{formatCZK(proof.totalLinehaul)}</span>
+                        </div>
+                        <div className="bg-white/5 rounded px-2 py-1">
+                          <span className="text-gray-500">Tras:</span> <span className="font-medium">{(proof.totalDpo || 0) + (proof.totalSd || 0)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* === FAKTURY === */}
       {selectedCarrier && activeTab === 'invoices' && (
         <div className="card overflow-hidden">
           <div className="card-header flex items-center justify-between">
             <h2 className="font-semibold">Faktury — {selectedPeriod}</h2>
-            <span className="badge badge-info">{invoiceList?.length || 0} faktur</span>
+            <span className="text-sm text-gray-400">{invoiceList?.length || 0} faktur</span>
           </div>
           
           {loadingInvoices ? (
@@ -668,7 +742,7 @@ export default function Documents() {
                       <td>
                         <div className="flex flex-wrap gap-1">
                           {invoice.items?.map((item, idx) => (
-                            <span key={idx} className="badge badge-info text-xs">
+                            <span key={idx} className="text-xs px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
                               {(item.itemType || '').replace('ALZABOXY ', '').toUpperCase()}
                             </span>
                           ))}
@@ -677,25 +751,17 @@ export default function Documents() {
                       <td className="text-right">{formatCZK(invoice.totalWithoutVat)}</td>
                       <td className="text-right font-medium">{formatCZK(invoice.totalWithVat)}</td>
                       <td>
-                        <span className={`badge ${
-                          invoice.status === 'matched' ? 'badge-success' :
-                          invoice.status === 'disputed' ? 'badge-error' :
-                          'badge-warning'
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          invoice.status === 'matched' ? 'bg-green-500/20 text-green-400' :
+                          invoice.status === 'disputed' ? 'bg-red-500/20 text-red-400' :
+                          'bg-yellow-500/20 text-yellow-400'
                         }`}>
-                          {invoice.status === 'matched' ? 'OK' :
-                           invoice.status === 'disputed' ? 'Sporná' :
-                           'Kontrola'}
+                          {invoice.status === 'matched' ? 'OK' : invoice.status === 'disputed' ? 'Sporná' : 'Kontrola'}
                         </span>
                       </td>
                       <td>
-                        <button
-                          onClick={() => {
-                            if (confirm(`Smazat fakturu "${invoice.invoiceNumber}"?`)) {
-                              deleteInvoiceMutation.mutate(invoice.id)
-                            }
-                          }}
-                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded"
-                        >
+                        <button onClick={() => { if (confirm(`Smazat fakturu "${invoice.invoiceNumber}"?`)) deleteInvoiceMutation.mutate(invoice.id) }}
+                          className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded">
                           <Trash2 size={16} />
                         </button>
                       </td>
@@ -703,6 +769,60 @@ export default function Documents() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* === SMLOUVY === */}
+      {selectedCarrier && activeTab === 'contracts' && (
+        <div className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={toggleSelectAllContracts} className="text-gray-400 hover:text-white">
+                {contractList?.length > 0 && selectedContracts.size === contractList.length ? <CheckSquare size={20} /> : 
+                 selectedContracts.size > 0 ? <MinusSquare size={20} /> : <Square size={20} />}
+              </button>
+              <h2 className="font-semibold">Smlouvy</h2>
+              {selectedContracts.size > 0 && <span className="text-sm text-gray-400">({selectedContracts.size} vybráno)</span>}
+            </div>
+            {selectedContracts.size > 0 && (
+              <button onClick={handleDeleteSelectedContracts} disabled={deleteContractsBatchMutation.isPending}
+                className="btn btn-sm bg-red-500/20 text-red-400 hover:bg-red-500/30">
+                <Trash2 size={16} /> Smazat ({selectedContracts.size})
+              </button>
+            )}
+          </div>
+          
+          {loadingContracts ? (
+            <div className="p-8 text-center text-gray-500">Načítám...</div>
+          ) : !contractList?.length ? (
+            <div className="p-8 text-center text-gray-500">
+              <FileSignature className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>Žádné smlouvy</p>
+              <p className="text-sm mt-1">Nahrajte PDF soubory obsahující "smlouva" v názvu</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {contractList.map(contract => (
+                <div key={contract.id} className={`px-4 py-3 flex items-center gap-3 hover:bg-white/5 ${selectedContracts.has(contract.id) ? 'bg-blue-500/5' : ''}`}>
+                  <button onClick={() => toggleContractSelection(contract.id)} className="text-gray-400 hover:text-white">
+                    {selectedContracts.has(contract.id) ? <CheckSquare size={18} className="text-blue-400" /> : <Square size={18} />}
+                  </button>
+                  <FileSignature size={20} className="text-blue-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm truncate">{contract.name || contract.fileName || `Smlouva #${contract.id}`}</div>
+                    <div className="text-xs text-gray-500">
+                      {contract.validFrom && `Od ${formatDate(contract.validFrom)}`}
+                      {contract.validTo && ` do ${formatDate(contract.validTo)}`}
+                    </div>
+                  </div>
+                  <button onClick={() => { if (confirm(`Smazat smlouvu?`)) deleteContractMutation.mutate(contract.id) }}
+                    className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded">
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>

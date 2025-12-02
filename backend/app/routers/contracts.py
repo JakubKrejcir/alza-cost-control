@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -67,13 +67,17 @@ def extract_carrier_info(text: str) -> dict:
     return carrier
 
 
-def extract_contract_info(text: str) -> dict:
+def extract_contract_info(text: str, filename: str = None) -> dict:
     """Extract contract info from PDF text"""
     contract = {'number': None, 'type': None, 'valid_from': None, 'service_type': None}
     
     dodatek_match = re.search(r'Dodatek\s*č\.\s*(\d+)', text, re.IGNORECASE)
     if dodatek_match:
         contract['number'] = f"Dodatek č. {dodatek_match.group(1)}"
+    
+    # Try to extract number from filename if not found in text
+    if not contract['number'] and filename:
+        contract['number'] = filename.replace('.pdf', '').replace('.PDF', '')
     
     date_match = re.search(
         r'(?:účinnosti\s*dnem|platn[ýé]\s*od)[:\s]*(\d{1,2})\.(\d{1,2})\.(\d{4})',
@@ -164,12 +168,83 @@ async def create_contract(
     return contract
 
 
+@router.post("/upload")
+async def upload_contract(
+    file: UploadFile = File(...),
+    carrier_id: int = Form(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Simple contract upload - saves PDF to existing carrier.
+    Tries to extract basic info from PDF, but doesn't require parsing success.
+    """
+    # Verify carrier exists
+    carrier_result = await db.execute(
+        select(Carrier).where(Carrier.id == carrier_id)
+    )
+    carrier = carrier_result.scalar_one_or_none()
+    if not carrier:
+        raise HTTPException(status_code=400, detail="Dopravce nenalezen")
+    
+    content = await file.read()
+    
+    # Try to extract info from PDF (optional - don't fail if parsing fails)
+    contract_info = {
+        'number': file.filename.replace('.pdf', '').replace('.PDF', ''),
+        'type': None,
+        'valid_from': datetime.now(),
+        'service_type': None
+    }
+    
+    try:
+        with pdfplumber.open(BytesIO(content)) as pdf:
+            text = ""
+            for page in pdf.pages[:3]:  # Only first 3 pages for speed
+                text += page.extract_text() or ""
+        
+        extracted = extract_contract_info(text, file.filename)
+        if extracted['number']:
+            contract_info['number'] = extracted['number']
+        if extracted['valid_from']:
+            contract_info['valid_from'] = extracted['valid_from']
+        if extracted['type']:
+            contract_info['type'] = extracted['type']
+        if extracted['service_type']:
+            contract_info['service_type'] = extracted['service_type']
+    except Exception as e:
+        # Parsing failed, but we'll still save the contract with basic info
+        print(f"PDF parsing failed (continuing anyway): {e}")
+    
+    # Create contract
+    contract = Contract(
+        carrier_id=carrier_id,
+        number=contract_info['number'],
+        type=contract_info['service_type'] or contract_info['type'],
+        valid_from=contract_info['valid_from'],
+        document_url=file.filename,
+        notes=f"Nahráno: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+    )
+    db.add(contract)
+    await db.commit()
+    await db.refresh(contract)
+    
+    return {
+        'success': True,
+        'message': 'Smlouva nahrána',
+        'id': contract.id,
+        'number': contract.number,
+        'type': contract.type,
+        'validFrom': contract.valid_from.isoformat() if contract.valid_from else None,
+        'fileName': file.filename
+    }
+
+
 @router.post("/upload-pdf")
 async def upload_contract_pdf(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
-    """Upload and parse contract PDF"""
+    """Upload and parse contract PDF - creates carrier if not exists"""
     content = await file.read()
     
     try:
@@ -181,7 +256,7 @@ async def upload_contract_pdf(
         raise HTTPException(status_code=400, detail=f"Chyba při čtení PDF: {str(e)}")
     
     carrier_info = extract_carrier_info(text)
-    contract_info = extract_contract_info(text)
+    contract_info = extract_contract_info(text, file.filename)
     price_rates = extract_price_rates(text)
     
     if not carrier_info['ico']:
@@ -305,7 +380,7 @@ async def parse_preview(
         raise HTTPException(status_code=400, detail=f"Chyba při čtení PDF: {str(e)}")
     
     carrier_info = extract_carrier_info(text)
-    contract_info = extract_contract_info(text)
+    contract_info = extract_contract_info(text, file.filename)
     price_rates = extract_price_rates(text)
     
     existing_carrier = None
