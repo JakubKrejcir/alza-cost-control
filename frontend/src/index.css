@@ -484,3 +484,7 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-light);
 }
+body {
+  background-color: var(--color-bg) !important;
+  color: var(--color-text) !important;
+}
