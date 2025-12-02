@@ -1,9 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
-import { format, subMonths } from 'date-fns'
+import { format } from 'date-fns'
 import { cs } from 'date-fns/locale'
-import { CheckCircle, AlertTriangle, AlertCircle, FileText } from 'lucide-react'
-import { proofs, invoices } from '../lib/api'
+import { 
+  Calendar,
+  FileText,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle
+} from 'lucide-react'
+import { proofs } from '../lib/api'
+import { useCarrier } from '../lib/CarrierContext'
 
 function formatCZK(amount) {
   if (amount == null) return '—'
@@ -14,135 +20,175 @@ function formatCZK(amount) {
   }).format(amount)
 }
 
-function getPeriodOptions() {
-  const options = []
-  const now = new Date()
-  for (let i = 0; i < 12; i++) {
-    const date = subMonths(now, i)
-    options.push(format(date, 'MM/yyyy'))
+function Badge({ type, children }) {
+  const classes = {
+    purple: 'badge-purple',
+    blue: 'badge-blue',
+    green: 'badge-green',
+    orange: 'badge-orange',
+    red: 'badge-red',
   }
-  return options
+  return <span className={`badge ${classes[type] || 'badge-blue'}`}>{children}</span>
 }
 
 export default function History() {
-  const navigate = useNavigate()
-  const periods = getPeriodOptions()
+  const { selectedCarrierId, selectedCarrier } = useCarrier()
 
-  const { data: allProofs } = useQuery({
-    queryKey: ['proofs'],
-    queryFn: () => proofs.getAll()
+  // Get all proofs for selected carrier
+  const { data: proofList, isLoading } = useQuery({
+    queryKey: ['proofs-history', selectedCarrierId],
+    queryFn: () => proofs.getAll({ carrier_id: selectedCarrierId }),
+    enabled: !!selectedCarrierId
   })
 
-  const { data: allInvoices } = useQuery({
-    queryKey: ['invoices'],
-    queryFn: () => invoices.getAll()
-  })
+  // Group by year
+  const proofsByYear = proofList?.reduce((acc, proof) => {
+    const year = proof.period ? '20' + proof.period.split('/')[1] : 'Bez data'
+    if (!acc[year]) acc[year] = []
+    acc[year].push(proof)
+    return acc
+  }, {}) || {}
 
-  const getDataForPeriod = (period) => {
-    const proof = allProofs?.find(p => p.period === period)
-    const periodInvoices = allInvoices?.filter(i => i.period === period) || []
-    
-    const proofTotal = proof ? parseFloat(proof.grandTotal || 0) : 0
-    const invoicedTotal = periodInvoices.reduce((sum, inv) => 
-      sum + parseFloat(inv.totalWithoutVat || 0), 0
+  // Calculate totals per year
+  const yearTotals = Object.entries(proofsByYear).reduce((acc, [year, items]) => {
+    acc[year] = items.reduce((sum, p) => sum + (p.grandTotal || 0), 0)
+    return acc
+  }, {})
+
+  if (!selectedCarrierId) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div>
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>Historie</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>Přehled historických dat</p>
+        </div>
+        <div className="card p-6" style={{ borderColor: 'var(--color-orange)', backgroundColor: 'var(--color-orange-light)' }}>
+          <div className="flex items-center gap-3" style={{ color: '#e67e22' }}>
+            <AlertTriangle size={24} />
+            <div>
+              <div className="font-medium">Vyberte dopravce</div>
+              <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                Pro zobrazení historie vyberte dopravce v horním menu
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     )
-    
-    let status = 'pending'
-    if (proof && periodInvoices.length > 0) {
-      const diff = Math.abs(proofTotal - invoicedTotal)
-      if (diff < 1000) status = 'ok'
-      else if (invoicedTotal < proofTotal * 0.5) status = 'warning'
-      else status = 'partial'
-    } else if (proof && periodInvoices.length === 0) {
-      status = 'warning'
-    }
-
-    return { proof, periodInvoices, proofTotal, invoicedTotal, status }
   }
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold">Historie</h1>
-        <p className="text-gray-400 text-sm mt-1">Posledních 12 měsíců</p>
+        <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>Historie</h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+          {selectedCarrier?.name} — historický přehled proofů
+        </p>
       </div>
 
-      <div className="card overflow-hidden">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Období</th>
-              <th className="text-center">Proof</th>
-              <th className="text-center">Faktury</th>
-              <th className="text-right">Proof částka</th>
-              <th className="text-right">Fakturováno</th>
-              <th className="text-center">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {periods.map(period => {
-              const { proof, periodInvoices, proofTotal, invoicedTotal, status } = getDataForPeriod(period)
-              const hasData = proof || periodInvoices.length > 0
-              
-              return (
-                <tr 
-                  key={period}
-                  className="cursor-pointer hover:bg-white/[0.03]"
-                  onClick={() => navigate(`/dashboard?period=${period}`)}
-                >
-                  <td className="font-medium">
-                    {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
-                  </td>
-                  <td className="text-center">
-                    {proof ? (
-                      <CheckCircle className="w-5 h-5 text-green-400 inline" />
-                    ) : (
-                      <span className="text-gray-600">—</span>
-                    )}
-                  </td>
-                  <td className="text-center">
-                    {periodInvoices.length > 0 ? (
-                      <span className="text-green-400">{periodInvoices.length}</span>
-                    ) : (
-                      <span className="text-gray-600">—</span>
-                    )}
-                  </td>
-                  <td className="text-right">
-                    {proof ? formatCZK(proofTotal) : '—'}
-                  </td>
-                  <td className="text-right">
-                    {periodInvoices.length > 0 ? formatCZK(invoicedTotal) : '—'}
-                  </td>
-                  <td className="text-center">
-                    {!hasData ? (
-                      <span className="badge bg-gray-500/20 text-gray-400">Žádná data</span>
-                    ) : status === 'ok' ? (
-                      <span className="badge badge-success">
-                        <CheckCircle className="w-3 h-3 mr-1" />
-                        OK
-                      </span>
-                    ) : status === 'warning' ? (
-                      <span className="badge badge-warning">
-                        <AlertTriangle className="w-3 h-3 mr-1" />
-                        Chybí faktury
-                      </span>
-                    ) : status === 'partial' ? (
-                      <span className="badge badge-info">
-                        <FileText className="w-3 h-3 mr-1" />
-                        Částečně
-                      </span>
-                    ) : (
-                      <span className="badge badge-error">
-                        <AlertCircle className="w-3 h-3 mr-1" />
-                        Rozdíl
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+      {/* Summary Cards */}
+      {proofList?.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="stat-card">
+            <div className="stat-card-label">Celkem období</div>
+            <div className="stat-card-value">{proofList.length}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Celková suma</div>
+            <div className="stat-card-value" style={{ color: 'var(--color-primary)' }}>
+              {formatCZK(proofList.reduce((sum, p) => sum + (p.grandTotal || 0), 0))}
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-label">Průměr/měsíc</div>
+            <div className="stat-card-value" style={{ color: 'var(--color-purple)' }}>
+              {formatCZK(proofList.reduce((sum, p) => sum + (p.grandTotal || 0), 0) / proofList.length)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Proof History */}
+      <div className="card">
+        <div className="card-header flex items-center justify-between">
+          <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>Měsíční přehled</span>
+          <Badge type="purple">{proofList?.length || 0}</Badge>
+        </div>
+        
+        {isLoading ? (
+          <div className="p-8 text-center" style={{ color: 'var(--color-text-light)' }}>Načítám...</div>
+        ) : !proofList?.length ? (
+          <div className="p-8 text-center" style={{ color: 'var(--color-text-light)' }}>
+            <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>Žádná historická data</p>
+          </div>
+        ) : (
+          Object.entries(proofsByYear)
+            .sort(([a], [b]) => String(b).localeCompare(String(a)))
+            .map(([year, items]) => (
+              <div key={year}>
+                <div className="list-group-header flex items-center justify-between">
+                  <span>{year}</span>
+                  <span style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
+                    {formatCZK(yearTotals[year])}
+                  </span>
+                </div>
+                {items
+                  .sort((a, b) => b.period.localeCompare(a.period))
+                  .map((proof, idx) => {
+                    // Calculate month-over-month change
+                    const prevProof = items[idx + 1]
+                    const change = prevProof 
+                      ? ((proof.grandTotal - prevProof.grandTotal) / prevProof.grandTotal * 100)
+                      : null
+
+                    return (
+                      <div key={proof.id} className="list-item">
+                        <div 
+                          className="w-10 h-10 rounded-xl flex items-center justify-center"
+                          style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}
+                        >
+                          <Calendar size={20} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                              {proof.period}
+                            </span>
+                            <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                              ({proof.fileName})
+                            </span>
+                          </div>
+                          <div className="flex gap-4 mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                            <span>FIX: {formatCZK(proof.totalFix)}</span>
+                            <span>KM: {formatCZK(proof.totalKm)}</span>
+                            <span>LH: {formatCZK(proof.totalLinehaul)}</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                            {formatCZK(proof.grandTotal)}
+                          </div>
+                          {change !== null && (
+                            <div className="flex items-center justify-end gap-1 text-sm">
+                              {change >= 0 ? (
+                                <TrendingUp size={14} style={{ color: 'var(--color-red)' }} />
+                              ) : (
+                                <TrendingDown size={14} style={{ color: 'var(--color-green)' }} />
+                              )}
+                              <span style={{ color: change >= 0 ? 'var(--color-red)' : 'var(--color-green)' }}>
+                                {change >= 0 ? '+' : ''}{change.toFixed(1)}%
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+            ))
+        )}
       </div>
     </div>
   )

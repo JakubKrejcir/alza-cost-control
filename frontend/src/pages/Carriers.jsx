@@ -1,263 +1,269 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Truck, Plus, Edit2, Trash2, Building, FileText, X } from 'lucide-react'
-import { carriers, depots } from '../lib/api'
+import { 
+  Plus, 
+  Trash2, 
+  Edit2, 
+  Save, 
+  X,
+  Truck,
+  Building2,
+  Phone,
+  Mail,
+  Check
+} from 'lucide-react'
+import { carriers as carriersApi } from '../lib/api'
+
+function Badge({ type, children }) {
+  const classes = {
+    purple: 'badge-purple',
+    blue: 'badge-blue',
+    green: 'badge-green',
+    orange: 'badge-orange',
+    red: 'badge-red',
+  }
+  return <span className={`badge ${classes[type] || 'badge-blue'}`}>{children}</span>
+}
 
 export default function Carriers() {
-  const [showModal, setShowModal] = useState(false)
-  const [editingCarrier, setEditingCarrier] = useState(null)
-  const [formData, setFormData] = useState({ name: '', ico: '', dic: '', address: '', contact: '' })
+  const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [formData, setFormData] = useState({
+    name: '',
+    ico: '',
+    contactEmail: '',
+    contactPhone: '',
+  })
   
   const queryClient = useQueryClient()
 
+  // Queries
   const { data: carrierList, isLoading } = useQuery({
     queryKey: ['carriers'],
-    queryFn: carriers.getAll
+    queryFn: carriersApi.getAll
   })
 
+  // Mutations
   const createMutation = useMutation({
-    mutationFn: carriers.create,
+    mutationFn: carriersApi.create,
     onSuccess: () => {
       queryClient.invalidateQueries(['carriers'])
-      closeModal()
+      resetForm()
     }
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => carriers.update(id, data),
+    mutationFn: ({ id, data }) => carriersApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries(['carriers'])
-      closeModal()
+      resetForm()
     }
   })
 
   const deleteMutation = useMutation({
-    mutationFn: carriers.delete,
-    onSuccess: () => {
-      queryClient.invalidateQueries(['carriers'])
-    }
+    mutationFn: carriersApi.delete,
+    onSuccess: () => queryClient.invalidateQueries(['carriers'])
   })
 
-  const openModal = (carrier = null) => {
-    if (carrier) {
-      setEditingCarrier(carrier)
-      setFormData({
-        name: carrier.name || '',
-        ico: carrier.ico || '',
-        dic: carrier.dic || '',
-        address: carrier.address || '',
-        contact: carrier.contact || ''
-      })
-    } else {
-      setEditingCarrier(null)
-      setFormData({ name: '', ico: '', dic: '', address: '', contact: '' })
-    }
-    setShowModal(true)
+  const resetForm = () => {
+    setShowForm(false)
+    setEditingId(null)
+    setFormData({
+      name: '',
+      ico: '',
+      contactEmail: '',
+      contactPhone: '',
+    })
   }
 
-  const closeModal = () => {
-    setShowModal(false)
-    setEditingCarrier(null)
-    setFormData({ name: '', ico: '', dic: '', address: '', contact: '' })
+  const handleEdit = (carrier) => {
+    setEditingId(carrier.id)
+    setFormData({
+      name: carrier.name || '',
+      ico: carrier.ico || '',
+      contactEmail: carrier.contactEmail || '',
+      contactPhone: carrier.contactPhone || '',
+    })
+    setShowForm(true)
   }
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    if (editingCarrier) {
-      updateMutation.mutate({ id: editingCarrier.id, data: formData })
+    if (editingId) {
+      updateMutation.mutate({ id: editingId, data: formData })
     } else {
       createMutation.mutate(formData)
     }
   }
 
-  const handleDelete = (carrier) => {
-    if (confirm(`Opravdu smazat dopravce "${carrier.name}"?`)) {
-      deleteMutation.mutate(carrier.id)
-    }
-  }
-
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">Dopravci</h1>
-          <p className="text-gray-400 text-sm mt-1">Správa dopravců a dep</p>
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>Dopravci</h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+            Správa dopravců a jejich kontaktních údajů
+          </p>
         </div>
-        <button onClick={() => openModal()} className="btn btn-primary flex items-center gap-2">
-          <Plus size={18} />
-          Přidat dopravce
+        <button 
+          onClick={() => setShowForm(true)} 
+          className="btn btn-primary"
+        >
+          <Plus size={18} /> Nový dopravce
         </button>
       </div>
 
-      {isLoading ? (
-        <div className="card p-8 text-center text-gray-500">
-          Načítám...
-        </div>
-      ) : carrierList?.length === 0 ? (
-        <div className="card p-8 text-center">
-          <Truck className="w-12 h-12 mx-auto mb-3 text-gray-600" />
-          <p className="text-gray-400">Žádní dopravci</p>
-          <button onClick={() => openModal()} className="btn btn-primary mt-4">
-            Přidat prvního dopravce
-          </button>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          {carrierList?.map(carrier => (
-            <div key={carrier.id} className="card p-6">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-alza-orange to-alza-orange-light flex items-center justify-center">
-                    <Truck className="w-6 h-6 text-black" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg">{carrier.name}</h3>
-                    <div className="text-sm text-gray-400 mt-1">
-                      {carrier.ico && <span>IČO: {carrier.ico}</span>}
-                      {carrier.ico && carrier.dic && <span className="mx-2">•</span>}
-                      {carrier.dic && <span>DIČ: {carrier.dic}</span>}
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openModal(carrier)}
-                    className="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white"
-                  >
-                    <Edit2 size={18} />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(carrier)}
-                    className="p-2 rounded-lg hover:bg-red-500/10 text-gray-400 hover:text-red-400"
-                  >
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              </div>
-              
-              {/* Stats - using camelCase from backend */}
-              <div className="flex gap-6 mt-4 pt-4 border-t border-white/5">
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <Building size={16} />
-                  {carrier.depots?.length || 0} dep
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <FileText size={16} />
-                  {carrier.proofsCount || 0} proofů
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <FileText size={16} />
-                  {carrier.invoicesCount || 0} faktur
-                </div>
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                  <FileText size={16} />
-                  {carrier.contractsCount || 0} smluv
-                </div>
-              </div>
-              
-              {/* Depots */}
-              {carrier.depots?.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-white/5">
-                  <div className="text-sm text-gray-400 mb-2">Depa:</div>
-                  <div className="flex flex-wrap gap-2">
-                    {carrier.depots.map(depot => (
-                      <span key={depot.id} className="badge badge-info">
-                        {depot.name}
-                        {depot.code && ` (${depot.code})`}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
-          <div className="card w-full max-w-md animate-slide-up">
-            <div className="card-header flex items-center justify-between">
-              <h2 className="font-semibold">
-                {editingCarrier ? 'Upravit dopravce' : 'Nový dopravce'}
-              </h2>
-              <button onClick={closeModal} className="text-gray-400 hover:text-white">
-                <X size={20} />
-              </button>
-            </div>
-            
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+      {/* Form */}
+      {showForm && (
+        <div className="card">
+          <div className="card-header flex items-center justify-between">
+            <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+              {editingId ? 'Upravit dopravce' : 'Nový dopravce'}
+            </span>
+            <button onClick={resetForm} style={{ color: 'var(--color-text-light)' }}>
+              <X size={20} />
+            </button>
+          </div>
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="label">Název *</label>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                  Název společnosti *
+                </label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="input"
+                  placeholder="např. Drive cool s.r.o."
                   required
                 />
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">IČO</label>
-                  <input
-                    type="text"
-                    value={formData.ico}
-                    onChange={(e) => setFormData({ ...formData, ico: e.target.value })}
-                    className="input"
-                  />
-                </div>
-                <div>
-                  <label className="label">DIČ</label>
-                  <input
-                    type="text"
-                    value={formData.dic}
-                    onChange={(e) => setFormData({ ...formData, dic: e.target.value })}
-                    className="input"
-                  />
-                </div>
-              </div>
-              
               <div>
-                <label className="label">Adresa</label>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                  IČO
+                </label>
                 <input
                   type="text"
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  value={formData.ico}
+                  onChange={(e) => setFormData({ ...formData, ico: e.target.value })}
                   className="input"
+                  placeholder="12345678"
                 />
               </div>
-              
               <div>
-                <label className="label">Kontakt</label>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                  E-mail
+                </label>
                 <input
-                  type="text"
-                  value={formData.contact}
-                  onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
+                  type="email"
+                  value={formData.contactEmail}
+                  onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
                   className="input"
-                  placeholder="Email nebo telefon"
+                  placeholder="kontakt@dopravce.cz"
                 />
               </div>
-              
-              <div className="flex gap-3 pt-4">
-                <button type="button" onClick={closeModal} className="btn btn-secondary flex-1">
-                  Zrušit
-                </button>
-                <button 
-                  type="submit" 
-                  className="btn btn-primary flex-1"
-                  disabled={createMutation.isPending || updateMutation.isPending}
-                >
-                  {createMutation.isPending || updateMutation.isPending ? 'Ukládám...' : 'Uložit'}
-                </button>
+              <div>
+                <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                  Telefon
+                </label>
+                <input
+                  type="tel"
+                  value={formData.contactPhone}
+                  onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
+                  className="input"
+                  placeholder="+420 XXX XXX XXX"
+                />
               </div>
-            </form>
-          </div>
+            </div>
+            <div className="flex gap-3">
+              <button type="submit" className="btn btn-primary">
+                <Save size={16} /> {editingId ? 'Uložit' : 'Vytvořit'}
+              </button>
+              <button type="button" onClick={resetForm} className="btn btn-ghost">
+                Zrušit
+              </button>
+            </div>
+          </form>
         </div>
       )}
+
+      {/* Carrier List */}
+      <div className="card">
+        <div className="card-header flex items-center justify-between">
+          <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>Seznam dopravců</span>
+          <Badge type="purple">{carrierList?.length || 0}</Badge>
+        </div>
+        
+        {isLoading ? (
+          <div className="p-8 text-center" style={{ color: 'var(--color-text-light)' }}>Načítám...</div>
+        ) : !carrierList?.length ? (
+          <div className="p-8 text-center" style={{ color: 'var(--color-text-light)' }}>
+            <Truck className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>Žádní dopravci</p>
+            <p className="text-sm mt-1">Přidejte prvního dopravce</p>
+          </div>
+        ) : (
+          carrierList.map(carrier => (
+            <div key={carrier.id} className="list-item">
+              <div 
+                className="w-12 h-12 rounded-xl flex items-center justify-center"
+                style={{ 
+                  background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-cyan) 100%)',
+                  color: 'white'
+                }}
+              >
+                <Truck size={24} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                    {carrier.name}
+                  </span>
+                  <Badge type="green">Aktivní</Badge>
+                </div>
+                <div className="flex gap-4 mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                  {carrier.ico && (
+                    <span className="flex items-center gap-1">
+                      <Building2 size={14} /> IČO: {carrier.ico}
+                    </span>
+                  )}
+                  {carrier.contactEmail && (
+                    <span className="flex items-center gap-1">
+                      <Mail size={14} /> {carrier.contactEmail}
+                    </span>
+                  )}
+                  {carrier.contactPhone && (
+                    <span className="flex items-center gap-1">
+                      <Phone size={14} /> {carrier.contactPhone}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => handleEdit(carrier)}
+                  className="p-2 rounded-lg"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  <Edit2 size={16} />
+                </button>
+                <button 
+                  onClick={() => { 
+                    if (confirm(`Smazat dopravce "${carrier.name}"?\n\nToto smaže i všechny související dokumenty!`)) 
+                      deleteMutation.mutate(carrier.id) 
+                  }}
+                  className="p-2 rounded-lg"
+                  style={{ color: 'var(--color-text-light)' }}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   )
 }
