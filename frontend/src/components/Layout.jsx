@@ -1,13 +1,24 @@
 import { useState } from 'react'
 import { Outlet, NavLink, useLocation } from 'react-router-dom'
-import { Receipt, Upload, DollarSign, Calendar, Truck, Menu, X, ChevronLeft, ChevronRight, Building2 } from 'lucide-react'
+import { 
+  LayoutDashboard, 
+  FileText, 
+  DollarSign, 
+  Calendar, 
+  Truck, 
+  ChevronLeft, 
+  ChevronRight,
+  Menu,
+  X,
+  Building2
+} from 'lucide-react'
 import { format } from 'date-fns'
 import { cs } from 'date-fns/locale'
 import { useCarrier } from '../lib/CarrierContext'
 
 const navItems = [
-  { path: '/dashboard', label: 'Fakturace', icon: Receipt, needsCarrier: true, needsPeriod: true },
-  { path: '/upload', label: 'Dokumenty', icon: Upload, needsCarrier: true, needsPeriod: true },
+  { path: '/dashboard', label: 'Fakturace', icon: LayoutDashboard, needsCarrier: true, needsPeriod: true },
+  { path: '/upload', label: 'Dokumenty', icon: FileText, needsCarrier: true, needsPeriod: true },
   { path: '/prices', label: 'Ceníky', icon: DollarSign, needsCarrier: true, needsPeriod: false },
   { path: '/history', label: 'Historie', icon: Calendar, needsCarrier: true, needsPeriod: false },
   { path: '/carriers', label: 'Dopravci', icon: Truck, needsCarrier: false, needsPeriod: false },
@@ -21,49 +32,55 @@ export default function Layout() {
   const {
     selectedCarrierId,
     setSelectedCarrierId,
-    selectedCarrier,
     carrierList,
     selectedPeriod,
     setSelectedPeriod,
     periodOptions
   } = useCarrier()
 
-  // Determine what selectors to show based on current route
   const currentNav = navItems.find(item => location.pathname.startsWith(item.path))
   const showCarrierSelect = currentNav?.needsCarrier ?? false
   const showPeriodSelect = currentNav?.needsPeriod ?? false
 
   return (
-    <div className="min-h-screen bg-alza-dark text-white flex">
+    <div className="min-h-screen flex" style={{ backgroundColor: 'var(--color-bg)' }}>
       {/* Sidebar - Desktop */}
-      <aside className={`hidden md:flex flex-col fixed left-0 top-0 h-full bg-alza-dark border-r border-white/10 z-50 transition-all duration-300 ${
-        sidebarCollapsed ? 'w-16' : 'w-56'
-      }`}>
+      <aside 
+        className={`hidden md:flex flex-col fixed left-0 top-0 h-full z-50 transition-all duration-300 ${
+          sidebarCollapsed ? 'w-16' : 'w-60'
+        }`}
+        style={{ 
+          backgroundColor: 'var(--color-card)', 
+          borderRight: '1px solid var(--color-border)' 
+        }}
+      >
         {/* Logo */}
-        <div className="p-4 border-b border-white/10">
+        <div className="px-5 py-5">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-alza-orange to-alza-orange-light flex items-center justify-center font-bold text-black shrink-0">
+            <div 
+              className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-lg font-semibold shrink-0"
+              style={{ background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-cyan) 100%)' }}
+            >
               🚚
             </div>
             {!sidebarCollapsed && (
-              <h1 className="text-lg font-semibold whitespace-nowrap">Transport Tycoon</h1>
+              <div>
+                <div className="font-bold text-sm" style={{ color: 'var(--color-text-dark)' }}>Transport</div>
+                <div className="text-xs" style={{ color: 'var(--color-text-light)' }}>Tycoon</div>
+              </div>
             )}
           </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 p-3 space-y-1">
+        <nav className="flex-1 px-3 mt-2">
           {navItems.map(({ path, label, icon: Icon }) => (
             <NavLink
               key={path}
               to={path}
               title={sidebarCollapsed ? label : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                  isActive
-                    ? 'bg-gradient-to-r from-alza-orange to-alza-orange-light text-black'
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
-                }`
+                `nav-item mb-1 ${isActive ? 'active' : ''}`
               }
             >
               <Icon size={20} className="shrink-0" />
@@ -73,30 +90,40 @@ export default function Layout() {
         </nav>
 
         {/* Collapse button */}
-        <div className="p-3 border-t border-white/10">
+        <div className="px-3 py-4" style={{ borderTop: '1px solid var(--color-border-light)' }}>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+            className="nav-item w-full"
           >
             {sidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-            {!sidebarCollapsed && <span className="text-sm">Sbalit menu</span>}
+            {!sidebarCollapsed && <span>Sbalit menu</span>}
           </button>
         </div>
       </aside>
 
       {/* Mobile Header */}
-      <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-alza-dark/95 backdrop-blur border-b border-white/10">
+      <header 
+        className="md:hidden fixed top-0 left-0 right-0 z-50"
+        style={{ 
+          backgroundColor: 'var(--color-card)', 
+          borderBottom: '1px solid var(--color-border)' 
+        }}
+      >
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-alza-orange to-alza-orange-light flex items-center justify-center font-bold text-black">
+            <div 
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-semibold"
+              style={{ background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-cyan) 100%)' }}
+            >
               🚚
             </div>
-            <h1 className="text-lg font-semibold">Transport Tycoon</h1>
+            <span className="font-bold" style={{ color: 'var(--color-text-dark)' }}>Transport Tycoon</span>
           </div>
 
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 rounded-lg hover:bg-white/5"
+            className="p-2 rounded-lg"
+            style={{ color: 'var(--color-text-muted)' }}
           >
             {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
@@ -104,18 +131,17 @@ export default function Layout() {
 
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
-          <nav className="px-4 pb-4 space-y-1 bg-alza-dark border-b border-white/10">
+          <nav 
+            className="px-4 pb-4 space-y-1"
+            style={{ backgroundColor: 'var(--color-card)', borderBottom: '1px solid var(--color-border)' }}
+          >
             {navItems.map(({ path, label, icon: Icon }) => (
               <NavLink
                 key={path}
                 to={path}
                 onClick={() => setMobileMenuOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                    isActive
-                      ? 'bg-gradient-to-r from-alza-orange to-alza-orange-light text-black'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
-                  }`
+                  `nav-item ${isActive ? 'active' : ''}`
                 }
               >
                 <Icon size={20} />
@@ -128,61 +154,60 @@ export default function Layout() {
 
       {/* Main Content */}
       <main className={`flex-1 transition-all duration-300 ${
-        sidebarCollapsed ? 'md:ml-16' : 'md:ml-56'
+        sidebarCollapsed ? 'md:ml-16' : 'md:ml-60'
       } mt-14 md:mt-0`}>
         
-        {/* Global Carrier/Period Selector Bar */}
+        {/* Top Bar with Carrier/Period Selection */}
         {(showCarrierSelect || showPeriodSelect) && (
-          <div className="sticky top-0 z-40 bg-alza-dark/95 backdrop-blur border-b border-white/10">
-            <div className="max-w-7xl mx-auto px-4 py-3">
-              <div className="flex flex-wrap items-center gap-4">
-                {showCarrierSelect && (
-                  <div className="flex items-center gap-2">
-                    <Building2 size={18} className="text-gray-500" />
-                    <select
-                      value={selectedCarrierId}
-                      onChange={(e) => setSelectedCarrierId(e.target.value)}
-                      className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-alza-orange min-w-[180px]"
-                    >
-                      <option value="">Vyberte dopravce...</option>
-                      {carrierList.map(carrier => (
-                        <option key={carrier.id} value={carrier.id}>
-                          {carrier.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-                
-                {showPeriodSelect && (
-                  <div className="flex items-center gap-2">
-                    <Calendar size={18} className="text-gray-500" />
-                    <select
-                      value={selectedPeriod}
-                      onChange={(e) => setSelectedPeriod(e.target.value)}
-                      className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-alza-orange min-w-[150px]"
-                    >
-                      {periodOptions.map(period => (
-                        <option key={period} value={period}>
-                          {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {selectedCarrier && (
-                  <div className="ml-auto text-sm text-gray-400">
-                    <span className="text-alza-orange font-medium">{selectedCarrier.name}</span>
-                    {selectedCarrier.ico && <span className="ml-2">IČO: {selectedCarrier.ico}</span>}
-                  </div>
-                )}
-              </div>
+          <div 
+            className="sticky top-0 z-40 px-6 py-3"
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderBottom: '1px solid var(--color-border)' 
+            }}
+          >
+            <div className="flex flex-wrap items-center gap-4">
+              {showCarrierSelect && (
+                <div className="flex items-center gap-2">
+                  <Building2 size={18} style={{ color: 'var(--color-text-muted)' }} />
+                  <select
+                    value={selectedCarrierId}
+                    onChange={(e) => setSelectedCarrierId(e.target.value)}
+                    className="select"
+                    style={{ minWidth: '200px' }}
+                  >
+                    <option value="">Vyberte dopravce...</option>
+                    {carrierList.map(carrier => (
+                      <option key={carrier.id} value={carrier.id}>
+                        {carrier.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              {showPeriodSelect && (
+                <div className="flex items-center gap-2">
+                  <Calendar size={18} style={{ color: 'var(--color-text-muted)' }} />
+                  <select
+                    value={selectedPeriod}
+                    onChange={(e) => setSelectedPeriod(e.target.value)}
+                    className="select"
+                    style={{ minWidth: '160px' }}
+                  >
+                    {periodOptions.map(period => (
+                      <option key={period} value={period}>
+                        {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="p-6">
           <Outlet />
         </div>
       </main>
