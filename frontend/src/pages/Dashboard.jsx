@@ -19,6 +19,13 @@ function formatCZK(amount) {
   }).format(amount)
 }
 
+function formatDuration(minutes) {
+  if (!minutes || minutes <= 0) return '—'
+  const h = Math.floor(minutes / 60)
+  const m = Math.round(minutes % 60)
+  return `${h}:${m.toString().padStart(2, '0')}`
+}
+
 function DiffBadge({ diff, size = 'normal' }) {
   if (diff === 0) {
     return (
@@ -183,7 +190,7 @@ function ComparisonSummary({ data }) {
             </div>
           </div>
           
-          <div className="grid grid-cols-4 gap-1 pt-3" style={{ borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+          <div className="grid grid-cols-5 gap-1 pt-3" style={{ borderTop: '1px solid rgba(0,0,0,0.1)' }}>
             <div className="text-center">
               <div className="text-sm font-semibold" style={{ color: 'var(--color-purple)' }}>
                 {(actual.vratimovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
@@ -205,6 +212,14 @@ function ComparisonSummary({ data }) {
                   : '—'}
               </div>
               <div className="text-xs" style={{ color: 'var(--color-text-light)' }}>Ø pl. km</div>
+            </div>
+            <div className="text-center">
+              <div className="text-sm font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+                {planned.vratimovTotal > 0 && planned.vratimovDurationMin > 0
+                  ? formatDuration((planned.vratimovDurationMin || 0) / planned.vratimovTotal)
+                  : '—'}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--color-text-light)' }}>Ø pl. čas</div>
             </div>
             <div className="text-center">
               <div className="text-sm font-semibold" style={{ color: 'var(--color-text-muted)' }}>
@@ -260,7 +275,7 @@ function ComparisonSummary({ data }) {
             </div>
           </div>
           
-          <div className="grid grid-cols-4 gap-1 pt-3" style={{ borderTop: '1px solid rgba(0,0,0,0.1)' }}>
+          <div className="grid grid-cols-5 gap-1 pt-3" style={{ borderTop: '1px solid rgba(0,0,0,0.1)' }}>
             <div className="text-center">
               <div className="text-sm font-semibold" style={{ color: '#0891b2' }}>
                 {(actual.bydzovKm || 0).toLocaleString('cs-CZ', { maximumFractionDigits: 0 })}
@@ -282,6 +297,14 @@ function ComparisonSummary({ data }) {
                   : '—'}
               </div>
               <div className="text-xs" style={{ color: 'var(--color-text-light)' }}>Ø pl. km</div>
+            </div>
+            <div className="text-center">
+              <div className="text-sm font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+                {planned.bydzovTotal > 0 && planned.bydzovDurationMin > 0
+                  ? formatDuration((planned.bydzovDurationMin || 0) / planned.bydzovTotal)
+                  : '—'}
+              </div>
+              <div className="text-xs" style={{ color: 'var(--color-text-light)' }}>Ø pl. čas</div>
             </div>
             <div className="text-center">
               <div className="text-sm font-semibold" style={{ color: 'var(--color-text-muted)' }}>
