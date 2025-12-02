@@ -78,10 +78,17 @@ function ProofDetailCard({ proof }) {
     { label: 'KM', value: proof?.totalKm },
     { label: 'Linehaul', value: proof?.totalLinehaul },
     { label: 'DEPO', value: proof?.totalDepo },
+    { label: 'Posily', value: proof?.totalPosily },
+    { label: 'Pokuty', value: proof?.totalPenalty },
   ]
   
-  // Součet dílčích hodnot
-  const calculatedTotal = items.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0)
+  // Součet dílčích hodnot (včetně pokut a posil)
+  const calculatedTotal = (parseFloat(proof?.totalFix) || 0) + 
+                          (parseFloat(proof?.totalKm) || 0) + 
+                          (parseFloat(proof?.totalLinehaul) || 0) + 
+                          (parseFloat(proof?.totalDepo) || 0) + 
+                          (parseFloat(proof?.totalPenalty) || 0) +
+                          (parseFloat(proof?.totalPosily) || 0)
   const grandTotal = parseFloat(proof?.grandTotal) || 0
   const totalsMatch = Math.abs(calculatedTotal - grandTotal) < 1 // tolerance 1 Kč
   
@@ -95,27 +102,26 @@ function ProofDetailCard({ proof }) {
         <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Proof</span>
       </div>
       {proof ? (
-        <div className="space-y-1">
-          {items.map(item => (
-            <div key={item.label} className="flex justify-between text-sm">
-              <span style={{ color: 'var(--color-text-muted)' }}>{item.label}</span>
-              <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
-                {item.value ? formatCZK(item.value) : '—'}
-              </span>
-            </div>
-          ))}
-          <div className="flex justify-between text-sm pt-1 mt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
-            <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>Celkem</span>
-            <span className="font-bold" style={{ color: totalsMatch ? 'var(--color-primary)' : 'var(--color-orange)' }}>
-              {formatCZK(grandTotal)}
-            </span>
-          </div>
+        <div className="space-y-2">
+          <div className="stat-card-value">{formatCZK(grandTotal)}</div>
           {!totalsMatch && (
-            <div className="text-xs mt-1 flex items-center gap-1" style={{ color: 'var(--color-orange)' }}>
+            <div className="text-xs flex items-center gap-1" style={{ color: 'var(--color-orange)' }}>
               <AlertTriangle size={12} />
               Součet nesedí ({formatCZK(calculatedTotal)})
             </div>
           )}
+          <div className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+            {items.map(item => (
+              item.value ? (
+                <div key={item.label} className="flex justify-between text-sm">
+                  <span style={{ color: 'var(--color-text-muted)' }}>{item.label}</span>
+                  <span className="font-medium" style={{ color: item.value < 0 ? 'var(--color-red)' : 'var(--color-text-dark)' }}>
+                    {formatCZK(item.value)}
+                  </span>
+                </div>
+              ) : null
+            ))}
+          </div>
         </div>
       ) : (
         <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Chybí proof</div>
@@ -138,8 +144,15 @@ function InvoicesDetailCard({ invoices, proofTotal }) {
         <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Faktury</span>
       </div>
       {invoices && invoices.length > 0 ? (
-        <div className="space-y-1">
-          <div className="max-h-24 overflow-y-auto space-y-1">
+        <div className="space-y-2">
+          <div className="stat-card-value">{formatCZK(invoiceTotal)}</div>
+          {!totalsMatch && proofTotal && (
+            <div className="text-xs flex items-center gap-1" style={{ color: 'var(--color-orange)' }}>
+              <AlertTriangle size={12} />
+              Nesedí s proofem
+            </div>
+          )}
+          <div className="space-y-1 pt-2 max-h-24 overflow-y-auto" style={{ borderTop: '1px solid var(--color-border)' }}>
             {invoices.map(inv => (
               <div key={inv.id} className="flex justify-between text-sm">
                 <span style={{ color: 'var(--color-text-muted)' }} title={inv.type}>
@@ -151,18 +164,6 @@ function InvoicesDetailCard({ invoices, proofTotal }) {
               </div>
             ))}
           </div>
-          <div className="flex justify-between text-sm pt-1 mt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
-            <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>Celkem</span>
-            <span className="font-bold" style={{ color: totalsMatch ? 'var(--color-green)' : 'var(--color-orange)' }}>
-              {formatCZK(invoiceTotal)}
-            </span>
-          </div>
-          {!totalsMatch && proofTotal && (
-            <div className="text-xs mt-1 flex items-center gap-1" style={{ color: 'var(--color-orange)' }}>
-              <AlertTriangle size={12} />
-              Nesedí s proofem
-            </div>
-          )}
         </div>
       ) : (
         <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Žádné faktury</div>
