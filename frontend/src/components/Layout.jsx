@@ -4,13 +4,13 @@ import {
   LayoutDashboard, 
   FileText, 
   DollarSign, 
-  Calendar, 
   Truck, 
   ChevronLeft, 
   ChevronRight,
   Menu,
   X,
-  Building2
+  Building2,
+  Calendar
 } from 'lucide-react'
 import { format } from 'date-fns'
 import { cs } from 'date-fns/locale'
@@ -18,9 +18,8 @@ import { useCarrier } from '../lib/CarrierContext'
 
 const navItems = [
   { path: '/dashboard', label: 'Fakturace', icon: LayoutDashboard, needsCarrier: true, needsPeriod: true },
-  { path: '/upload', label: 'Dokumenty', icon: FileText, needsCarrier: true, needsPeriod: true },
   { path: '/prices', label: 'Ceníky', icon: DollarSign, needsCarrier: true, needsPeriod: false },
-  { path: '/history', label: 'Historie', icon: Calendar, needsCarrier: true, needsPeriod: false },
+  { path: '/upload', label: 'Dokumenty', icon: FileText, needsCarrier: true, needsPeriod: true },
   { path: '/carriers', label: 'Dopravci', icon: Truck, needsCarrier: false, needsPeriod: false },
 ]
 

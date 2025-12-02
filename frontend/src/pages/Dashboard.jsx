@@ -1,14 +1,24 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { format } from 'date-fns'
+import { format, subMonths } from 'date-fns'
 import { cs } from 'date-fns/locale'
 import { 
   AlertCircle, CheckCircle, FileText, TrendingUp, 
   Map, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Minus,
-  AlertTriangle
+  AlertTriangle, Calendar
 } from 'lucide-react'
 import { analysis, proofs, invoices, routePlans } from '../lib/api'
 import { useCarrier } from '../lib/CarrierContext'
+
+function getPeriodOptions() {
+  const options = []
+  const now = new Date()
+  for (let i = 0; i < 12; i++) {
+    const date = subMonths(now, i)
+    options.push(format(date, 'MM/yyyy'))
+  }
+  return options
+}
 
 function formatCZK(amount) {
   if (amount == null) return '—'
@@ -764,6 +774,43 @@ export default function Dashboard() {
     enabled: !!proof?.id
   })
 
+  // Historie - všechny proofy a faktury pro tabulku
+  const historyPeriods = getPeriodOptions()
+  
+  const { data: allProofsHistory } = useQuery({
+    queryKey: ['proofsHistory', selectedCarrierId],
+    queryFn: () => proofs.getAll({ carrier_id: selectedCarrierId }),
+    enabled: !!selectedCarrierId
+  })
+
+  const { data: allInvoicesHistory } = useQuery({
+    queryKey: ['invoicesHistory', selectedCarrierId],
+    queryFn: () => invoices.getAll({ carrier_id: selectedCarrierId }),
+    enabled: !!selectedCarrierId
+  })
+
+  const getHistoryDataForPeriod = (period) => {
+    const periodProof = allProofsHistory?.find(p => p.period === period)
+    const periodInvs = allInvoicesHistory?.filter(i => i.period === period) || []
+    
+    const proofTotal = periodProof ? parseFloat(periodProof.grandTotal || 0) : 0
+    const invoicedTotal = periodInvs.reduce((sum, inv) => 
+      sum + parseFloat(inv.totalWithoutVat || 0), 0
+    )
+    
+    let status = 'pending'
+    if (periodProof && periodInvs.length > 0) {
+      const diff = Math.abs(proofTotal - invoicedTotal)
+      if (diff < 1000) status = 'ok'
+      else if (invoicedTotal < proofTotal * 0.5) status = 'warning'
+      else status = 'partial'
+    } else if (periodProof && periodInvs.length === 0) {
+      status = 'warning'
+    }
+
+    return { proof: periodProof, periodInvoices: periodInvs, proofTotal, invoicedTotal, status }
+  }
+
   const totalProof = proof?.grandTotal ? parseFloat(proof.grandTotal) : 0
   const totalInvoiced = invoiceList.reduce((sum, inv) => sum + parseFloat(inv.totalWithoutVat || 0), 0)
   const remaining = totalProof - totalInvoiced
@@ -950,6 +997,103 @@ export default function Dashboard() {
           </p>
         </div>
       )}
+
+      {/* Historie - posledních 12 měsíců */}
+      <div className="card overflow-hidden">
+        <div className="card-header">
+          <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+            <Calendar size={20} style={{ color: 'var(--color-primary)' }} />
+            Historie — posledních 12 měsíců
+          </h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                <th className="text-left p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Období</th>
+                <th className="text-center p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Proof</th>
+                <th className="text-center p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Faktury</th>
+                <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Proof částka</th>
+                <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Fakturováno</th>
+                <th className="text-center p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyPeriods.map(period => {
+                const { proof: histProof, periodInvoices: histInvs, proofTotal: histProofTotal, invoicedTotal: histInvoicedTotal, status } = getHistoryDataForPeriod(period)
+                const hasData = histProof || histInvs.length > 0
+                const isCurrentPeriod = period === selectedPeriod
+                
+                return (
+                  <tr 
+                    key={period}
+                    style={{ 
+                      borderBottom: '1px solid var(--color-border-light)',
+                      backgroundColor: isCurrentPeriod ? 'var(--color-primary-light)' : 'transparent'
+                    }}
+                  >
+                    <td className="p-3 font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                      {format(new Date(period.split('/')[1], parseInt(period.split('/')[0]) - 1), 'LLLL yyyy', { locale: cs })}
+                      {isCurrentPeriod && (
+                        <span className="ml-2 text-xs px-2 py-0.5 rounded" style={{ backgroundColor: 'var(--color-primary)', color: 'white' }}>
+                          aktuální
+                        </span>
+                      )}
+                    </td>
+                    <td className="text-center p-3">
+                      {histProof ? (
+                        <CheckCircle className="w-5 h-5 inline" style={{ color: 'var(--color-green)' }} />
+                      ) : (
+                        <span style={{ color: 'var(--color-text-light)' }}>—</span>
+                      )}
+                    </td>
+                    <td className="text-center p-3">
+                      {histInvs.length > 0 ? (
+                        <span style={{ color: 'var(--color-green)' }}>{histInvs.length}</span>
+                      ) : (
+                        <span style={{ color: 'var(--color-text-light)' }}>—</span>
+                      )}
+                    </td>
+                    <td className="text-right p-3" style={{ color: 'var(--color-text-dark)' }}>
+                      {histProof ? formatCZK(histProofTotal) : '—'}
+                    </td>
+                    <td className="text-right p-3" style={{ color: 'var(--color-text-dark)' }}>
+                      {histInvs.length > 0 ? formatCZK(histInvoicedTotal) : '—'}
+                    </td>
+                    <td className="text-center p-3">
+                      {!hasData ? (
+                        <span className="badge" style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-light)' }}>
+                          Žádná data
+                        </span>
+                      ) : status === 'ok' ? (
+                        <span className="badge" style={{ backgroundColor: 'var(--color-green-light)', color: 'var(--color-green)' }}>
+                          <CheckCircle className="w-3 h-3 mr-1 inline" />
+                          OK
+                        </span>
+                      ) : status === 'warning' ? (
+                        <span className="badge" style={{ backgroundColor: 'var(--color-orange-light)', color: '#e67e22' }}>
+                          <AlertTriangle className="w-3 h-3 mr-1 inline" />
+                          Chybí faktury
+                        </span>
+                      ) : status === 'partial' ? (
+                        <span className="badge" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
+                          <FileText className="w-3 h-3 mr-1 inline" />
+                          Částečně
+                        </span>
+                      ) : (
+                        <span className="badge" style={{ backgroundColor: 'var(--color-red-light)', color: 'var(--color-red)' }}>
+                          <AlertCircle className="w-3 h-3 mr-1 inline" />
+                          Rozdíl
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }
