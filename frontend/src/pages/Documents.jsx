@@ -593,7 +593,7 @@ export default function Documents() {
                         <span className="text-xs truncate" style={{ color: 'var(--color-text-light)' }}>({proof.fileName})</span>
                       </div>
                       {/* Detail breakdown */}
-                      <div className="mt-2 grid grid-cols-4 gap-2 text-xs">
+                      <div className="mt-2 grid grid-cols-5 gap-2 text-xs">
                         <div className="px-2 py-1 rounded" style={{ backgroundColor: 'var(--color-bg)' }}>
                           <span style={{ color: 'var(--color-text-light)' }}>FIX:</span>{' '}
                           <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>{formatCZK(proof.totalFix)}</span>
@@ -605,6 +605,10 @@ export default function Documents() {
                         <div className="px-2 py-1 rounded" style={{ backgroundColor: 'var(--color-bg)' }}>
                           <span style={{ color: 'var(--color-text-light)' }}>LH:</span>{' '}
                           <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>{formatCZK(proof.totalLinehaul)}</span>
+                        </div>
+                        <div className="px-2 py-1 rounded" style={{ backgroundColor: 'var(--color-bg)' }}>
+                          <span style={{ color: 'var(--color-text-light)' }}>DEPO:</span>{' '}
+                          <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>{formatCZK(proof.totalDepo)}</span>
                         </div>
                         <div className="px-2 py-1 rounded" style={{ backgroundColor: 'var(--color-bg)' }}>
                           <span style={{ color: 'var(--color-text-light)' }}>Tras:</span>{' '}
