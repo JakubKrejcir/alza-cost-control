@@ -266,6 +266,7 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
             'total_linehaul': None,
             'total_depo': None,
             'total_penalty': None,
+            'total_posily': None,
             'grand_total': None,
         },
         'route_details': [],
@@ -285,7 +286,8 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
         row = find_row_by_label(label)
         if row is None:
             return None
-        val = sheet.cell(row=row, column=4).value
+        # Hodnoty jsou ve sloupci C (3), ne D (4)
+        val = sheet.cell(row=row, column=3).value
         if val is None:
             return None
         try:
@@ -299,6 +301,7 @@ def parse_proof_from_xlsx(file_content: bytes) -> dict:
     result['totals']['total_linehaul'] = get_value_by_label('Linehaul')
     result['totals']['total_depo'] = get_value_by_label('DEPO')
     result['totals']['total_penalty'] = get_value_by_label('Pokuty')
+    result['totals']['total_posily'] = get_value_by_label('Posily LINEHAUL')
     result['totals']['grand_total'] = get_value_by_label('Celková částka')
     
     if result['totals']['grand_total'] is None:
@@ -452,6 +455,7 @@ async def upload_proof(
         total_linehaul=proof_data['totals'].get('total_linehaul'),
         total_depo=proof_data['totals'].get('total_depo'),
         total_penalty=proof_data['totals'].get('total_penalty'),
+        total_posily=proof_data['totals'].get('total_posily'),
         grand_total=proof_data['totals'].get('grand_total'),
     )
     db.add(proof)

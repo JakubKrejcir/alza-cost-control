@@ -369,6 +369,7 @@ class ProofBase(BaseModel):
     total_depo: Optional[Decimal] = None
     total_bonus: Optional[Decimal] = None
     total_penalty: Optional[Decimal] = None
+    total_posily: Optional[Decimal] = None
     grand_total: Optional[Decimal] = None
 
 
@@ -394,6 +395,7 @@ class ProofResponse(CamelModel):
     total_depo: Optional[Decimal] = None
     total_bonus: Optional[Decimal] = None
     total_penalty: Optional[Decimal] = None
+    total_posily: Optional[Decimal] = None
     grand_total: Optional[Decimal] = None
     file_name: Optional[str] = None
     file_url: Optional[str] = None

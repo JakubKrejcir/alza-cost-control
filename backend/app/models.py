@@ -180,6 +180,7 @@ class Proof(Base):
     total_depo: Mapped[Optional[Decimal]] = mapped_column("totalDepo", Numeric(12, 2))
     total_bonus: Mapped[Optional[Decimal]] = mapped_column("totalBonus", Numeric(12, 2))
     total_penalty: Mapped[Optional[Decimal]] = mapped_column("totalPenalty", Numeric(12, 2))
+    total_posily: Mapped[Optional[Decimal]] = mapped_column("totalPosily", Numeric(12, 2))
     grand_total: Mapped[Optional[Decimal]] = mapped_column("grandTotal", Numeric(12, 2))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
