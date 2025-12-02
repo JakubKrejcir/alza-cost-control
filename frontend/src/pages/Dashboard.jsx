@@ -132,7 +132,6 @@ function ProofDetailCard({ proof }) {
 
 function InvoicesDetailCard({ invoices, proofTotal }) {
   const invoiceTotal = invoices?.reduce((sum, inv) => sum + (parseFloat(inv.totalWithoutVat) || 0), 0) || 0
-  const totalsMatch = proofTotal ? Math.abs(invoiceTotal - proofTotal) < 1 : true
   
   return (
     <div className="stat-card">
@@ -146,12 +145,6 @@ function InvoicesDetailCard({ invoices, proofTotal }) {
       {invoices && invoices.length > 0 ? (
         <div className="space-y-2">
           <div className="stat-card-value">{formatCZK(invoiceTotal)}</div>
-          {!totalsMatch && proofTotal && (
-            <div className="text-xs flex items-center gap-1" style={{ color: 'var(--color-orange)' }}>
-              <AlertTriangle size={12} />
-              Nesedí s proofem
-            </div>
-          )}
           <div className="space-y-1 pt-2 max-h-24 overflow-y-auto" style={{ borderTop: '1px solid var(--color-border)' }}>
             {invoices.map(inv => (
               <div key={inv.id} className="flex justify-between text-sm">
@@ -809,13 +802,28 @@ export default function Dashboard() {
         
         <InvoicesDetailCard invoices={invoiceList} proofTotal={totalProof} />
         
-        <SummaryCard 
-          icon={TrendingUp}
-          label="Faktury vs. Proof"
-          value={formatCZK(Math.abs(remaining))}
-          subtext={remaining === 0 ? 'Vše sedí' : remaining > 0 ? 'Chybí faktury' : 'Přebytek faktur'}
-          color={remaining === 0 ? 'green' : 'orange'}
-        />
+        <div className="stat-card">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" 
+              style={{ backgroundColor: remaining === 0 ? 'var(--color-green-light)' : 'var(--color-orange-light)', 
+                       color: remaining === 0 ? 'var(--color-green)' : '#e67e22' }}>
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Faktury vs. Proof</span>
+          </div>
+          <div className="stat-card-value">
+            {remaining === 0 ? (
+              <span style={{ color: 'var(--color-green)' }}>✓ Vše sedí</span>
+            ) : (
+              <>
+                {formatCZK(Math.abs(remaining))}
+                <span className="text-sm font-normal ml-2" style={{ color: 'var(--color-text-muted)' }}>
+                  {remaining > 0 ? 'vyfakturováno méně, než v proofu' : 'vyfakturováno více, než v proofu'}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
         
         <SummaryCard 
           icon={Map}
