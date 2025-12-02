@@ -155,7 +155,7 @@ function InvoicesDetailCard({ invoices, proofTotal }) {
       {invoices && invoices.length > 0 ? (
         <div className="space-y-2">
           <div className="stat-card-value">{formatCZK(invoiceTotal)}</div>
-          <div className="space-y-1 pt-2 max-h-24 overflow-y-auto" style={{ borderTop: '1px solid var(--color-border)' }}>
+          <div className="space-y-1 pt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
             {invoices.map(inv => (
               <div key={inv.id} className="flex justify-between text-sm">
                 <span style={{ color: 'var(--color-text-muted)' }} title={inv.type}>
@@ -845,9 +845,9 @@ export default function Dashboard() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <ProofDetailCard proof={proof} />
-        
         <InvoicesDetailCard invoices={invoiceList} proofTotal={totalProof} />
+        
+        <ProofDetailCard proof={proof} />
         
         <div className="stat-card">
           <div className="flex items-center gap-3 mb-3">
