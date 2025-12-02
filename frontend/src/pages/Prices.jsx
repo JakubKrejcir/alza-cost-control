@@ -19,6 +19,7 @@ function PriceRow({ label, value, color = 'var(--color-primary)', dodatek }) {
     <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
       <span style={{ color: 'var(--color-text-muted)' }}>{label}</span>
       <div className="flex items-center gap-2">
+        <span className="font-semibold" style={{ color }}>{value}</span>
         {dodatek && (
           <span 
             className="text-xs px-1.5 py-0.5 rounded" 
@@ -31,7 +32,6 @@ function PriceRow({ label, value, color = 'var(--color-primary)', dodatek }) {
             {isMissing ? '?' : `D${dodatek}`}
           </span>
         )}
-        <span className="font-semibold" style={{ color }}>{value}</span>
       </div>
     </div>
   )
