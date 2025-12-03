@@ -706,7 +706,7 @@ async def get_box_detail(
                     "date": str(row[0].date()) if row[0] else None,
                     "deliveryType": row[1],
                     "routeName": row[2],
-                    "plannedTime": row[3].strftime("%H:%M") if row[3] else None,
+                    "plannedTime": row[3],  # String "HH:MM"
                     "actualTime": row[4].strftime("%H:%M") if row[4] else None,
                     "delayMinutes": row[5],
                     "onTime": row[6]

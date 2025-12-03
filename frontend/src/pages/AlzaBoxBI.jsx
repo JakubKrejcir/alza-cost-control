@@ -125,20 +125,48 @@ function TimeDiff({ planned, actual }) {
 // =============================================================================
 
 function BoxDetailModal({ boxId, filters, onClose }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['box-detail', boxId, filters],
     queryFn: () => alzaboxApi.getBoxDetail(boxId, {
       start_date: filters.startDate,
       end_date: filters.endDate,
       delivery_type: filters.deliveryType
     }),
-    enabled: !!boxId
+    enabled: !!boxId,
+    retry: false
   })
 
   if (isLoading) {
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
         <div className="card p-8">Načítání...</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="card p-6 max-w-md">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center"
+              style={{ backgroundColor: 'var(--color-red-light)', color: 'var(--color-red)' }}>
+              <AlertTriangle size={20} />
+            </div>
+            <h3 className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+              Chyba při načítání detailu
+            </h3>
+          </div>
+          <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
+            {error.response?.data?.detail || error.message || 'Neznámá chyba'}
+          </p>
+          <p className="text-xs mb-4 font-mono p-2 rounded" style={{ backgroundColor: 'var(--color-bg)' }}>
+            Box ID: {boxId}
+          </p>
+          <button onClick={onClose} className="btn btn-primary w-full">
+            Zavřít
+          </button>
+        </div>
       </div>
     )
   }
