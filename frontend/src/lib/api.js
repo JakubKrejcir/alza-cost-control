@@ -39,6 +39,20 @@ export const contracts = {
       headers: { 'Content-Type': 'multipart/form-data' }
     }).then(r => r.data)
   },
+  parsePreview: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/contracts/parse-preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(r => r.data)
+  },
+  uploadPdf: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/contracts/upload-pdf', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(r => r.data)
+  },
   update: (id, data) => api.put(`/contracts/${id}`, data).then(r => r.data),
   delete: (id) => api.delete(`/contracts/${id}`)
 }
