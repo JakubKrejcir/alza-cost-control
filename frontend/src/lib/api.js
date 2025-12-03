@@ -162,7 +162,7 @@ export const alzabox = {
     return api.delete(url).then(r => r.data)
   },
   
-  // Stats
+  // Stats (s carrier_id filtrem)
   getSummary: (params = {}) => 
     api.get('/alzabox/stats/summary', { params }).then(r => r.data),
   
@@ -172,14 +172,25 @@ export const alzabox = {
   getByDay: (params = {}) => 
     api.get('/alzabox/stats/by-day', { params }).then(r => r.data),
   
+  // Drill-down
+  getByBox: (params = {}) =>
+    api.get('/alzabox/stats/by-box', { params }).then(r => r.data),
+  
+  getBoxDetail: (boxId, params = {}) =>
+    api.get(`/alzabox/box/${boxId}/detail`, { params }).then(r => r.data),
+  
+  // Metadata
+  getCarriers: () =>
+    api.get('/alzabox/carriers').then(r => r.data),
+  
   getCountries: () => 
     api.get('/alzabox/countries').then(r => r.data),
     
   getBoxes: (params = {}) =>
     api.get('/alzabox/boxes', { params }).then(r => r.data),
     
-  getRoutes: () =>
-    api.get('/alzabox/routes').then(r => r.data)
+  getRoutes: (params = {}) =>
+    api.get('/alzabox/routes', { params }).then(r => r.data)
 }
 
 export default api

@@ -1,5 +1,6 @@
 """
 AlzaBox Router - Import dat a BI API (ASYNC verze)
+Rozšířeno o drill-down: Dopravce → Trasa → Box → Detail
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -180,6 +181,15 @@ async def import_alzabox_deliveries(
         result = await db.execute(select(AlzaBox))
         boxes = {b.code: b.id for b in result.scalars().all()}
         
+        # Načti assignments pro carrier_id
+        result = await db.execute(
+            select(AlzaBoxAssignment).order_by(AlzaBoxAssignment.valid_from.desc())
+        )
+        assignments = {}
+        for a in result.scalars().all():
+            if a.box_id not in assignments:
+                assignments[a.box_id] = a.carrier_id
+        
         # Načti plánované časy z Plan sheetu
         plan_data = {}
         for row in range(3, plan_sheet.max_row + 1):
@@ -221,46 +231,48 @@ async def import_alzabox_deliveries(
         
         # Vytvoř delivery záznamy
         created = 0
-        skipped = 0
+        unique_days = set()
         
         for box_code, plan_info in plan_data.items():
             if box_code not in boxes:
-                skipped += 1
                 continue
             
             box_id = boxes[box_code]
+            carrier_id = assignments.get(box_id)
             route_name = plan_info['route_name']
-            planned_time = plan_info['planned_time']
+            planned_time_str = plan_info['planned_time']
             
-            if box_code not in actual_data:
-                continue
-            
-            for col, dt in dates:
-                if col not in actual_data[box_code]:
+            for col, delivery_date in dates:
+                actual_time = actual_data.get(box_code, {}).get(col)
+                
+                if not actual_time:
                     continue
                 
-                actual_time = actual_data[box_code][col]
-                
-                delay_minutes = None
-                on_time = None
-                if planned_time:
+                # Spočítej plánovaný čas
+                planned_datetime = None
+                if planned_time_str:
                     try:
-                        plan_parts = planned_time.split(':')
-                        plan_minutes = int(plan_parts[0]) * 60 + int(plan_parts[1])
-                        actual_minutes = actual_time.hour * 60 + actual_time.minute
-                        delay_minutes = actual_minutes - plan_minutes
-                        on_time = delay_minutes <= 0
+                        parts = planned_time_str.split(':')
+                        h, m = int(parts[0]), int(parts[1])
+                        planned_datetime = datetime.combine(delivery_date, datetime.min.time().replace(hour=h, minute=m))
                     except:
                         pass
                 
-                delivery_datetime = datetime.combine(dt, actual_time.time())
+                # Spočítej zpoždění
+                delay_minutes = None
+                on_time = None
+                if planned_datetime and actual_time:
+                    diff = (actual_time - planned_datetime).total_seconds() / 60
+                    delay_minutes = int(diff)
+                    on_time = diff <= 0
                 
                 delivery = AlzaBoxDelivery(
                     box_id=box_id,
-                    delivery_date=delivery_datetime,
+                    carrier_id=carrier_id,
+                    delivery_date=datetime.combine(delivery_date, datetime.min.time()),
                     delivery_type=delivery_type,
                     route_name=route_name,
-                    planned_time=planned_time,
+                    planned_time=planned_datetime,
                     actual_time=actual_time,
                     delay_minutes=delay_minutes,
                     on_time=on_time,
@@ -268,6 +280,7 @@ async def import_alzabox_deliveries(
                 )
                 db.add(delivery)
                 created += 1
+                unique_days.add(delivery_date)
         
         await db.commit()
         wb.close()
@@ -276,8 +289,7 @@ async def import_alzabox_deliveries(
             "success": True,
             "deliveries_created": created,
             "deliveries_updated": 0,
-            "skipped": skipped,
-            "dates_processed": len(dates)
+            "days_processed": len(unique_days)
         }
         
     except Exception as e:
@@ -292,15 +304,13 @@ async def import_alzabox_deliveries(
 
 @router.delete("/data/locations")
 async def delete_all_locations(db: AsyncSession = Depends(get_db)):
-    """Smaže všechny AlzaBoxy a jejich assignments"""
+    """Smaže všechny AlzaBoxy, assignments a deliveries"""
     try:
-        await db.execute(delete(AlzaBoxDelivery))
-        await db.execute(delete(AlzaBoxAssignment))
-        result = await db.execute(delete(AlzaBox))
-        deleted_count = result.rowcount
+        await db.execute(text('DELETE FROM "AlzaBoxDelivery"'))
+        await db.execute(text('DELETE FROM "AlzaBoxAssignment"'))
+        await db.execute(text('DELETE FROM "AlzaBox"'))
         await db.commit()
-        
-        return {"success": True, "message": f"Smazáno {deleted_count} AlzaBoxů"}
+        return {"success": True, "message": "Všechna data smazána"}
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -311,36 +321,36 @@ async def delete_deliveries(
     delivery_type: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Smaže záznamy o doručení."""
+    """Smaže dojezdy (volitelně jen určitý typ)"""
     try:
         if delivery_type:
             result = await db.execute(
-                delete(AlzaBoxDelivery).where(AlzaBoxDelivery.delivery_type == delivery_type)
+                text('DELETE FROM "AlzaBoxDelivery" WHERE "deliveryType" = :dt'),
+                {"dt": delivery_type}
             )
         else:
-            result = await db.execute(delete(AlzaBoxDelivery))
-        
+            result = await db.execute(text('DELETE FROM "AlzaBoxDelivery"'))
         await db.commit()
-        return {"success": True, "message": f"Smazáno {result.rowcount} záznamů"}
+        return {"success": True, "deleted": result.rowcount}
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
 # =============================================================================
-# BI API ENDPOINTS
+# STATS ENDPOINTS (s carrier_id filtrem)
 # =============================================================================
 
 @router.get("/stats/summary")
-async def get_delivery_summary(
+async def get_stats_summary(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     delivery_type: Optional[str] = Query(None),
+    carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Celkové statistiky doručení"""
+    """Souhrnné statistiky"""
     try:
-        # Použijeme raw SQL pro jistotu
         sql = """
         SELECT 
             COUNT(*) as total,
@@ -362,6 +372,9 @@ async def get_delivery_summary(
         if delivery_type:
             sql += ' AND "deliveryType" = :delivery_type'
             params['delivery_type'] = delivery_type
+        if carrier_id:
+            sql += ' AND "carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
         
         result = await db.execute(text(sql), params)
         row = result.fetchone()
@@ -390,6 +403,7 @@ async def get_stats_by_route(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     delivery_type: Optional[str] = Query(None),
+    carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """Statistiky per trasa"""
@@ -414,6 +428,9 @@ async def get_stats_by_route(
         if delivery_type:
             sql += ' AND "deliveryType" = :delivery_type'
             params['delivery_type'] = delivery_type
+        if carrier_id:
+            sql += ' AND "carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
         
         sql += ' GROUP BY "routeName" ORDER BY "routeName"'
         
@@ -440,6 +457,7 @@ async def get_stats_by_day(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     delivery_type: Optional[str] = Query(None),
+    carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
     """Statistiky per den"""
@@ -464,6 +482,9 @@ async def get_stats_by_day(
         if delivery_type:
             sql += ' AND "deliveryType" = :delivery_type'
             params['delivery_type'] = delivery_type
+        if carrier_id:
+            sql += ' AND "carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
         
         sql += ' GROUP BY DATE("deliveryDate") ORDER BY DATE("deliveryDate")'
         
@@ -485,35 +506,308 @@ async def get_stats_by_day(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =============================================================================
+# DRILL-DOWN ENDPOINTS
+# =============================================================================
+
+@router.get("/stats/by-box")
+async def get_stats_by_box(
+    route_name: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    delivery_type: Optional[str] = Query(None),
+    carrier_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Statistiky per box (pro drill-down z trasy)"""
+    try:
+        sql = """
+        SELECT 
+            d."boxId",
+            b.code,
+            b.name,
+            b.city,
+            COUNT(*) as total,
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time,
+            AVG(d."delayMinutes") as avg_delay,
+            MAX(d."delayMinutes") as max_delay
+        FROM "AlzaBoxDelivery" d
+        JOIN "AlzaBox" b ON b.id = d."boxId"
+        WHERE 1=1
+        """
+        params = {}
+        
+        if route_name:
+            sql += ' AND d."routeName" = :route_name'
+            params['route_name'] = route_name
+        if start_date:
+            sql += ' AND d."deliveryDate" >= :start_date'
+            params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
+        if end_date:
+            sql += ' AND d."deliveryDate" <= :end_date'
+            params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        if delivery_type:
+            sql += ' AND d."deliveryType" = :delivery_type'
+            params['delivery_type'] = delivery_type
+        if carrier_id:
+            sql += ' AND d."carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
+        
+        sql += ' GROUP BY d."boxId", b.code, b.name, b.city ORDER BY on_time ASC, total DESC'
+        
+        result = await db.execute(text(sql), params)
+        rows = result.fetchall()
+        
+        return [
+            {
+                "boxId": row[0],
+                "boxCode": row[1],
+                "boxName": row[2],
+                "city": row[3],
+                "totalDeliveries": row[4],
+                "onTimeDeliveries": row[5] or 0,
+                "onTimePct": round((row[5] or 0) / row[4] * 100, 1) if row[4] > 0 else 0,
+                "avgDelayMinutes": round(float(row[6]), 1) if row[6] else 0,
+                "maxDelayMinutes": row[7] or 0
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error in stats/by-box: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/box/{box_id}/detail")
+async def get_box_detail(
+    box_id: int,
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    delivery_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Detail boxu s historií doručení"""
+    try:
+        # Info o boxu
+        box_sql = """
+        SELECT 
+            b.id, b.code, b.name, b.city, b.region, b.country,
+            b."gpsLat", b."gpsLon", b."sourceWarehouse",
+            a."carrierId", c.name as carrier_name, a."routeGroup", a."depotName"
+        FROM "AlzaBox" b
+        LEFT JOIN "AlzaBoxAssignment" a ON a."boxId" = b.id
+        LEFT JOIN "Carrier" c ON c.id = a."carrierId"
+        WHERE b.id = :box_id
+        ORDER BY a."validFrom" DESC
+        LIMIT 1
+        """
+        result = await db.execute(text(box_sql), {"box_id": box_id})
+        box_row = result.fetchone()
+        
+        if not box_row:
+            raise HTTPException(status_code=404, detail="Box nenalezen")
+        
+        # Statistiky
+        stats_sql = """
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN "onTime" = true THEN 1 ELSE 0 END) as on_time,
+            AVG("delayMinutes") as avg_delay
+        FROM "AlzaBoxDelivery"
+        WHERE "boxId" = :box_id
+        """
+        params = {"box_id": box_id}
+        
+        if start_date:
+            stats_sql += ' AND "deliveryDate" >= :start_date'
+            params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
+        if end_date:
+            stats_sql += ' AND "deliveryDate" <= :end_date'
+            params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        if delivery_type:
+            stats_sql += ' AND "deliveryType" = :delivery_type'
+            params['delivery_type'] = delivery_type
+        
+        result = await db.execute(text(stats_sql), params)
+        stats_row = result.fetchone()
+        
+        # Historie doručení
+        history_sql = """
+        SELECT 
+            "deliveryDate", "deliveryType", "routeName",
+            "plannedTime", "actualTime", "delayMinutes", "onTime"
+        FROM "AlzaBoxDelivery"
+        WHERE "boxId" = :box_id
+        """
+        
+        if start_date:
+            history_sql += ' AND "deliveryDate" >= :start_date'
+        if end_date:
+            history_sql += ' AND "deliveryDate" <= :end_date'
+        if delivery_type:
+            history_sql += ' AND "deliveryType" = :delivery_type'
+        
+        history_sql += ' ORDER BY "deliveryDate" DESC LIMIT 100'
+        
+        result = await db.execute(text(history_sql), params)
+        history_rows = result.fetchall()
+        
+        # Trend per den (pro graf)
+        trend_sql = """
+        SELECT 
+            DATE("deliveryDate") as date,
+            AVG("delayMinutes") as avg_delay,
+            COUNT(*) as total,
+            SUM(CASE WHEN "onTime" = true THEN 1 ELSE 0 END) as on_time
+        FROM "AlzaBoxDelivery"
+        WHERE "boxId" = :box_id
+        """
+        
+        if start_date:
+            trend_sql += ' AND "deliveryDate" >= :start_date'
+        if end_date:
+            trend_sql += ' AND "deliveryDate" <= :end_date'
+        if delivery_type:
+            trend_sql += ' AND "deliveryType" = :delivery_type'
+        
+        trend_sql += ' GROUP BY DATE("deliveryDate") ORDER BY DATE("deliveryDate")'
+        
+        result = await db.execute(text(trend_sql), params)
+        trend_rows = result.fetchall()
+        
+        total = stats_row[0] or 0
+        on_time = stats_row[1] or 0
+        
+        return {
+            "box": {
+                "id": box_row[0],
+                "code": box_row[1],
+                "name": box_row[2],
+                "city": box_row[3],
+                "region": box_row[4],
+                "country": box_row[5],
+                "gpsLat": float(box_row[6]) if box_row[6] else None,
+                "gpsLon": float(box_row[7]) if box_row[7] else None,
+                "sourceWarehouse": box_row[8],
+                "carrierId": box_row[9],
+                "carrierName": box_row[10],
+                "routeGroup": box_row[11],
+                "depotName": box_row[12]
+            },
+            "stats": {
+                "totalDeliveries": total,
+                "onTimeDeliveries": on_time,
+                "onTimePct": round(on_time / total * 100, 1) if total > 0 else 0,
+                "avgDelayMinutes": round(float(stats_row[2]), 1) if stats_row[2] else 0
+            },
+            "history": [
+                {
+                    "date": str(row[0].date()) if row[0] else None,
+                    "deliveryType": row[1],
+                    "routeName": row[2],
+                    "plannedTime": row[3].strftime("%H:%M") if row[3] else None,
+                    "actualTime": row[4].strftime("%H:%M") if row[4] else None,
+                    "delayMinutes": row[5],
+                    "onTime": row[6]
+                }
+                for row in history_rows
+            ],
+            "trend": [
+                {
+                    "date": str(row[0]),
+                    "avgDelayMinutes": round(float(row[1]), 1) if row[1] else 0,
+                    "totalDeliveries": row[2],
+                    "onTimePct": round((row[3] or 0) / row[2] * 100, 1) if row[2] > 0 else 0
+                }
+                for row in trend_rows
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in box detail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/carriers")
+async def get_alzabox_carriers(db: AsyncSession = Depends(get_db)):
+    """Seznam dopravců s AlzaBoxy a jejich statistikami"""
+    try:
+        sql = """
+        SELECT 
+            c.id,
+            c.name,
+            COUNT(DISTINCT d."boxId") as box_count,
+            COUNT(d.id) as delivery_count,
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time_count
+        FROM "Carrier" c
+        JOIN "AlzaBoxDelivery" d ON d."carrierId" = c.id
+        GROUP BY c.id, c.name
+        ORDER BY delivery_count DESC
+        """
+        result = await db.execute(text(sql))
+        rows = result.fetchall()
+        
+        return [
+            {
+                "id": row[0],
+                "name": row[1],
+                "boxCount": row[2],
+                "deliveryCount": row[3],
+                "onTimePct": round((row[4] or 0) / row[3] * 100, 1) if row[3] > 0 else 0
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error in carriers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# METADATA ENDPOINTS
+# =============================================================================
+
 @router.get("/boxes")
 async def get_alzaboxes(
     country: Optional[str] = None,
     region: Optional[str] = None,
+    carrier_id: Optional[int] = None,
     limit: int = Query(100, le=5000),
     offset: int = 0,
     db: AsyncSession = Depends(get_db)
 ):
     """Seznam AlzaBoxů"""
     try:
-        sql = 'SELECT COUNT(*) FROM "AlzaBox" WHERE "isActive" = true'
+        base_where = 'WHERE b."isActive" = true'
         params = {}
         
         if country:
-            sql += ' AND country = :country'
+            base_where += ' AND b.country = :country'
             params['country'] = country
         if region:
-            sql += ' AND region = :region'
+            base_where += ' AND b.region = :region'
             params['region'] = region
+        if carrier_id:
+            base_where += ' AND a."carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
         
-        result = await db.execute(text(sql), params)
+        # Count
+        count_sql = f"""
+        SELECT COUNT(DISTINCT b.id) 
+        FROM "AlzaBox" b
+        LEFT JOIN "AlzaBoxAssignment" a ON a."boxId" = b.id
+        {base_where}
+        """
+        result = await db.execute(text(count_sql), params)
         total = result.scalar()
         
-        sql = 'SELECT id, code, name, country, city, region, "gpsLat", "gpsLon" FROM "AlzaBox" WHERE "isActive" = true'
-        if country:
-            sql += ' AND country = :country'
-        if region:
-            sql += ' AND region = :region'
-        sql += ' LIMIT :limit OFFSET :offset'
+        # Data
+        sql = f"""
+        SELECT DISTINCT b.id, b.code, b.name, b.country, b.city, b.region, b."gpsLat", b."gpsLon"
+        FROM "AlzaBox" b
+        LEFT JOIN "AlzaBoxAssignment" a ON a."boxId" = b.id
+        {base_where}
+        LIMIT :limit OFFSET :offset
+        """
         params['limit'] = limit
         params['offset'] = offset
         
@@ -562,17 +856,26 @@ async def get_countries(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/routes")
-async def get_routes(db: AsyncSession = Depends(get_db)):
+async def get_routes(
+    carrier_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
     """Seznam tras"""
     try:
         sql = """
         SELECT "routeName", COUNT(DISTINCT "boxId") as box_count
         FROM "AlzaBoxDelivery"
         WHERE "routeName" IS NOT NULL
-        GROUP BY "routeName"
-        ORDER BY "routeName"
         """
-        result = await db.execute(text(sql))
+        params = {}
+        
+        if carrier_id:
+            sql += ' AND "carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
+        
+        sql += ' GROUP BY "routeName" ORDER BY "routeName"'
+        
+        result = await db.execute(text(sql), params)
         rows = result.fetchall()
         
         return [{"routeName": row[0], "boxCount": row[1]} for row in rows]
