@@ -21,6 +21,48 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# HELPER: Normalizace názvů dopravců
+# =============================================================================
+
+def normalize_carrier_name(name: str) -> str:
+    """
+    Normalizuje název dopravce pro porovnání.
+    Odstraní právní formy, mezery, převede na lowercase.
+    
+    Příklady:
+    - "Drive cool s.r.o." → "drivecool"
+    - "Drivecool" → "drivecool"
+    - "ABC Transport a.s." → "abctransport"
+    """
+    if not name:
+        return ""
+    
+    normalized = name.lower()
+    
+    # Odstraň právní formy
+    legal_forms = [
+        r'\s*s\.?\s*r\.?\s*o\.?\s*$',      # s.r.o., s. r. o.
+        r'\s*a\.?\s*s\.?\s*$',              # a.s., a. s.
+        r'\s*spol\.\s*s\s*r\.?\s*o\.?\s*$', # spol. s r.o.
+        r'\s*v\.?\s*o\.?\s*s\.?\s*$',       # v.o.s.
+        r'\s*k\.?\s*s\.?\s*$',              # k.s.
+        r'\s*s\.?\s*p\.?\s*$',              # s.p.
+        r'\s*z\.?\s*s\.?\s*$',              # z.s.
+    ]
+    
+    for pattern in legal_forms:
+        normalized = re.sub(pattern, '', normalized, flags=re.IGNORECASE)
+    
+    # Odstraň všechny mezery
+    normalized = re.sub(r'\s+', '', normalized)
+    
+    # Odstraň speciální znaky
+    normalized = re.sub(r'[^\w]', '', normalized)
+    
+    return normalized.strip()
+
+
+# =============================================================================
 # IMPORT ENDPOINTS
 # =============================================================================
 
@@ -215,12 +257,14 @@ async def _import_deliveries_new_format(wb, delivery_type: str, db: AsyncSession
     result = await db.execute(select(AlzaBox))
     boxes = {b.code: b.id for b in result.scalars().all()}
     
-    # Načti mapování dopravců
+    # Načti mapování dopravců - s normalizací názvů
     result = await db.execute(select(Carrier))
-    carriers_by_name = {c.name.lower(): c.id for c in result.scalars().all()}
+    carriers_list = result.scalars().all()
+    carriers_by_normalized = {normalize_carrier_name(c.name): c.id for c in carriers_list}
     
     # Načti mapování route_name → carrier_id z RoutePlanRoute
     route_to_carrier = {}
+    unmatched_carriers = set()
     route_plans_sql = """
     SELECT rpr."routeName", rpr."carrierName"
     FROM "RoutePlanRoute" rpr
@@ -236,9 +280,15 @@ async def _import_deliveries_new_format(wb, delivery_type: str, db: AsyncSession
     for row in result.fetchall():
         route_name, carrier_name = row[0], row[1]
         if route_name and route_name not in route_to_carrier and carrier_name:
-            carrier_id = carriers_by_name.get(carrier_name.lower())
+            normalized = normalize_carrier_name(carrier_name)
+            carrier_id = carriers_by_normalized.get(normalized)
             if carrier_id:
                 route_to_carrier[route_name] = carrier_id
+            else:
+                unmatched_carriers.add(carrier_name)
+    
+    if unmatched_carriers:
+        logger.warning(f"Nepodařilo se namapovat dopravce: {unmatched_carriers}")
     
     logger.info(f"Načteno {len(route_to_carrier)} mapování route→carrier")
     
@@ -347,7 +397,8 @@ async def _import_deliveries_new_format(wb, delivery_type: str, db: AsyncSession
         "deliveries_created": created,
         "days_processed": len(unique_days),
         "routes_with_carrier": len(route_to_carrier),
-        "skipped_no_box": skipped_no_box
+        "skipped_no_box": skipped_no_box,
+        "unmatched_carriers": list(unmatched_carriers) if unmatched_carriers else []
     }
 
 
@@ -388,12 +439,14 @@ async def _import_deliveries_old_format(wb, delivery_type: str, db: AsyncSession
     result = await db.execute(select(AlzaBox))
     boxes = {b.code: b.id for b in result.scalars().all()}
     
-    # Načti mapování dopravců
+    # Načti mapování dopravců - s normalizací názvů
     result = await db.execute(select(Carrier))
-    carriers_by_name = {c.name.lower(): c.id for c in result.scalars().all()}
+    carriers_list = result.scalars().all()
+    carriers_by_normalized = {normalize_carrier_name(c.name): c.id for c in carriers_list}
     
     # Načti mapování route_name → carrier_id z RoutePlanRoute
     route_to_carrier = {}
+    unmatched_carriers = set()
     route_plans_sql = """
     SELECT rpr."routeName", rpr."carrierName"
     FROM "RoutePlanRoute" rpr
@@ -409,9 +462,15 @@ async def _import_deliveries_old_format(wb, delivery_type: str, db: AsyncSession
     for row in result.fetchall():
         route_name, carrier_name = row[0], row[1]
         if route_name and route_name not in route_to_carrier and carrier_name:
-            carrier_id = carriers_by_name.get(carrier_name.lower())
+            normalized = normalize_carrier_name(carrier_name)
+            carrier_id = carriers_by_normalized.get(normalized)
             if carrier_id:
                 route_to_carrier[route_name] = carrier_id
+            else:
+                unmatched_carriers.add(carrier_name)
+    
+    if unmatched_carriers:
+        logger.warning(f"Nepodařilo se namapovat dopravce: {unmatched_carriers}")
     
     logger.info(f"Načteno {len(route_to_carrier)} mapování route→carrier")
     
@@ -527,7 +586,8 @@ async def _import_deliveries_old_format(wb, delivery_type: str, db: AsyncSession
         "format": "old",
         "deliveries_created": created,
         "days_processed": len(unique_days),
-        "routes_with_carrier": len(route_to_carrier)
+        "routes_with_carrier": len(route_to_carrier),
+        "unmatched_carriers": list(unmatched_carriers) if unmatched_carriers else []
     }
 
 
@@ -1046,6 +1106,54 @@ async def get_alzabox_carriers(db: AsyncSession = Depends(get_db)):
         ]
     except Exception as e:
         logger.error(f"Error in carriers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/diagnostics/carrier-mapping")
+async def get_carrier_mapping_diagnostics(db: AsyncSession = Depends(get_db)):
+    """
+    Diagnostika mapování názvů dopravců.
+    Porovnává názvy v tabulce Carrier s názvy v RoutePlanRoute.
+    """
+    try:
+        # Načti dopravce z Carrier tabulky
+        result = await db.execute(text('SELECT id, name FROM "Carrier"'))
+        carriers = {row[1]: row[0] for row in result.fetchall()}
+        carriers_normalized = {normalize_carrier_name(name): name for name in carriers.keys()}
+        
+        # Načti unikátní názvy dopravců z RoutePlanRoute
+        result = await db.execute(text('SELECT DISTINCT "carrierName" FROM "RoutePlanRoute" WHERE "carrierName" IS NOT NULL'))
+        route_plan_carriers = [row[0] for row in result.fetchall()]
+        
+        # Porovnej
+        matched = []
+        unmatched = []
+        
+        for rp_carrier in route_plan_carriers:
+            normalized = normalize_carrier_name(rp_carrier)
+            if normalized in carriers_normalized:
+                matched.append({
+                    "routePlanName": rp_carrier,
+                    "carrierName": carriers_normalized[normalized],
+                    "normalizedAs": normalized,
+                    "carrierId": carriers[carriers_normalized[normalized]]
+                })
+            else:
+                unmatched.append({
+                    "routePlanName": rp_carrier,
+                    "normalizedAs": normalized,
+                    "suggestion": "Přidej dopravce do Carrier tabulky nebo uprav název"
+                })
+        
+        return {
+            "totalCarriers": len(carriers),
+            "totalRoutePlanCarriers": len(route_plan_carriers),
+            "matched": matched,
+            "unmatched": unmatched,
+            "hasIssues": len(unmatched) > 0
+        }
+    except Exception as e:
+        logger.error(f"Error in carrier mapping diagnostics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

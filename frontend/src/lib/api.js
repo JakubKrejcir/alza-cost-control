@@ -193,7 +193,11 @@ export const alzabox = {
     api.get('/alzabox/boxes', { params }).then(r => r.data),
     
   getRoutes: (params = {}) =>
-    api.get('/alzabox/routes', { params }).then(r => r.data)
+    api.get('/alzabox/routes', { params }).then(r => r.data),
+  
+  // Diagnostika
+  getDiagnostics: () =>
+    api.get('/alzabox/diagnostics/carrier-mapping').then(r => r.data)
 }
 
 export default api
