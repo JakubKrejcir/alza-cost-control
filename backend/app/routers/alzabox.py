@@ -202,11 +202,22 @@ async def import_alzabox_deliveries(
             
             box_code = str(box_code).strip()
             
+            # Parsuj plánovaný čas ze sloupce 3
+            # Formát může být: "09:00 | popis" nebo "Liberecko I 12 | popis"
             planned_time = None
             if info and '|' in str(info):
                 time_part = str(info).split('|')[0].strip()
-                if ':' in time_part and len(time_part) <= 6:
-                    planned_time = time_part
+                # Kontrola, zda je to validní čas (HH:MM formát)
+                if ':' in time_part:
+                    try:
+                        parts = time_part.split(':')
+                        if len(parts) >= 2:
+                            h = int(parts[0])
+                            m = int(parts[1])
+                            if 0 <= h <= 23 and 0 <= m <= 59:
+                                planned_time = f"{h:02d}:{m:02d}"
+                    except (ValueError, IndexError):
+                        pass
             
             plan_data[box_code] = {
                 'route_name': route_name,
