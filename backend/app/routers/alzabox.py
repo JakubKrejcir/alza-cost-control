@@ -146,6 +146,7 @@ async def import_alzabox_deliveries(
 ):
     """
     Import dojezdových časů z XLSX souboru.
+    DŮLEŽITÉ: Plan a Skutecnost mají různé pořadí řádků, proto párujeme podle box_code!
     """
     try:
         content = await file.read()
@@ -170,52 +171,79 @@ async def import_alzabox_deliveries(
         result = await db.execute(select(AlzaBox))
         boxes = {b.code: b.id for b in result.scalars().all()}
         
-        created = 0
-        updated = 0
-        skipped = 0
-        
+        # 1. Načti plánované časy z Plan sheetu
+        # Struktura: {box_code: {route_name, planned_time}}
+        plan_data = {}
         for row in range(3, plan_sheet.max_row + 1):
             route_name = plan_sheet.cell(row=row, column=1).value
             box_code = plan_sheet.cell(row=row, column=2).value
             info = plan_sheet.cell(row=row, column=3).value
             
-            if not box_code or box_code not in boxes:
-                skipped += 1
+            if not box_code or not str(box_code).strip():
                 continue
             
-            box_id = boxes[box_code]
+            box_code = str(box_code).strip()
             
-            # Extrakce plánovaného času z info
+            # Extrakce plánovaného času z info (např. "09:00 | Brno - Bystrc")
             planned_time = None
             if info and '|' in str(info):
                 time_part = str(info).split('|')[0].strip()
                 if ':' in time_part and len(time_part) <= 6:
                     planned_time = time_part
             
-            # Pro každé datum
+            plan_data[box_code] = {
+                'route_name': route_name,
+                'planned_time': planned_time
+            }
+        
+        logger.info(f"Načteno {len(plan_data)} plánů")
+        
+        # 2. Načti skutečné časy ze Skutecnost sheetu a spáruj podle box_code
+        # Struktura: {box_code: {col: actual_datetime}}
+        actual_data = {}
+        for row in range(3, actual_sheet.max_row + 1):
+            box_code = actual_sheet.cell(row=row, column=2).value
+            
+            if not box_code or not str(box_code).strip():
+                continue
+            
+            box_code = str(box_code).strip()
+            actual_data[box_code] = {}
+            
             for col, date in dates:
                 actual_time_val = actual_sheet.cell(row=row, column=col).value
-                
-                if not actual_time_val:
+                if actual_time_val and isinstance(actual_time_val, datetime):
+                    actual_data[box_code][col] = actual_time_val
+        
+        logger.info(f"Načteno {len(actual_data)} skutečností")
+        
+        # 3. Vytvoř delivery záznamy
+        created = 0
+        skipped = 0
+        
+        for box_code, plan_info in plan_data.items():
+            if box_code not in boxes:
+                skipped += 1
+                continue
+            
+            box_id = boxes[box_code]
+            route_name = plan_info['route_name']
+            planned_time = plan_info['planned_time']
+            
+            # Najdi skutečné časy pro tento box
+            if box_code not in actual_data:
+                continue
+            
+            for col, date in dates:
+                if col not in actual_data[box_code]:
                     continue
                 
-                # Parse actual time
-                actual_time = None
-                if isinstance(actual_time_val, datetime):
-                    actual_time = actual_time_val
-                elif actual_time_val:
-                    try:
-                        actual_time = datetime.strptime(str(actual_time_val)[:19], "%Y-%m-%d %H:%M:%S")
-                    except:
-                        pass
-                
-                if not actual_time:
-                    continue
+                actual_time = actual_data[box_code][col]
                 
                 # Výpočet zpoždění
                 delay_minutes = None
                 on_time = None
-                if planned_time and actual_time:
+                if planned_time:
                     try:
                         plan_parts = planned_time.split(':')
                         plan_minutes = int(plan_parts[0]) * 60 + int(plan_parts[1])
@@ -225,7 +253,7 @@ async def import_alzabox_deliveries(
                     except:
                         pass
                 
-                # Delivery date
+                # Delivery datetime
                 delivery_datetime = datetime.combine(date, actual_time.time())
                 
                 # Vytvoř delivery záznam
@@ -249,7 +277,7 @@ async def import_alzabox_deliveries(
         return {
             "success": True,
             "deliveries_created": created,
-            "deliveries_updated": updated,
+            "deliveries_updated": 0,
             "skipped": skipped,
             "dates_processed": len(dates)
         }
