@@ -3,7 +3,7 @@ AlzaBox Router - Import dat a BI API (ASYNC verze)
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, cast, Integer, Date, delete
+from sqlalchemy import select, func, and_, cast, Integer, Date
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timedelta
 from typing import Optional, List
@@ -147,7 +147,6 @@ async def import_alzabox_deliveries(
     """
     Import dojezdových časů z XLSX souboru.
     DŮLEŽITÉ: Plan a Skutecnost mají různé pořadí řádků, proto párujeme podle box_code!
-    Při reimportu smaže existující záznamy pro dané období a delivery_type.
     """
     try:
         content = await file.read()
@@ -165,22 +164,6 @@ async def import_alzabox_deliveries(
             date_val = plan_sheet.cell(row=1, column=col).value
             if isinstance(date_val, datetime):
                 dates.append((col, date_val.date()))
-        
-        # Smaž existující záznamy pro dané období a delivery_type
-        if dates:
-            min_date = min(d for _, d in dates)
-            max_date = max(d for _, d in dates)
-            
-            delete_stmt = delete(AlzaBoxDelivery).where(
-                and_(
-                    AlzaBoxDelivery.delivery_type == delivery_type,
-                    func.date(AlzaBoxDelivery.delivery_date) >= min_date,
-                    func.date(AlzaBoxDelivery.delivery_date) <= max_date
-                )
-            )
-            result = await db.execute(delete_stmt)
-            deleted_count = result.rowcount
-            logger.info(f"Smazáno {deleted_count} existujících záznamů pro {delivery_type} ({min_date} - {max_date})")
         
         logger.info(f"Nalezeno {len(dates)} datumů")
         
