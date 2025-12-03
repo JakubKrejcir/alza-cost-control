@@ -1,6 +1,75 @@
 # Procesní diagramy - DOPRAVA / LOGISTIKA
 
-## 1. Hlavní tok zboží
+> **Verze:** 3.0.0  
+> **Aktualizace:** Rozšíření o typy doprav a země
+
+---
+
+## 0. Přehled typů doprav a zemí
+
+### Typy doprav Alza
+
+```mermaid
+flowchart TD
+    subgraph ALZABOX ["📦 ALZABOXY"]
+        A1[Samoobslužné boxy]
+        A2[24/7 vyzvednutí]
+        A3[Status: ✅ MVP]
+    end
+    
+    subgraph BRANCH ["🏪 POBOČKY"]
+        B1[Kamenné prodejny]
+        B2[Showroomy]
+        B3[Status: 🔜 Plánováno]
+    end
+    
+    subgraph PARCEL ["📬 BALÍKOVKA"]
+        C1[Doručení na adresu]
+        C2[Kurýr k zákazníkovi]
+        C3[Status: 🔜 Plánováno]
+    end
+    
+    subgraph TRANSFER ["🔄 MEZISKLADY"]
+        D1[Mezi sklady]
+        D2[Redistribuce]
+        D3[Status: 🔜 Plánováno]
+    end
+    
+    subgraph RETURN ["↩️ VRATKY"]
+        E1[Svoz vratek]
+        E2[Od zákazníků]
+        E3[Status: 🔜 Plánováno]
+    end
+    
+    style A3 fill:#c8e6c9
+    style B3 fill:#fff3e0
+    style C3 fill:#fff3e0
+    style D3 fill:#fff3e0
+    style E3 fill:#fff3e0
+```
+
+### Země operací
+
+```mermaid
+flowchart LR
+    subgraph EU ["🇪🇺 ALZA OPERACE"]
+        CZ["🇨🇿 Česko<br/>CZK<br/>✅ MVP"]
+        SK["🇸🇰 Slovensko<br/>EUR<br/>🔜"]
+        HU["🇭🇺 Maďarsko<br/>HUF<br/>🔜"]
+        AT["🇦🇹 Rakousko<br/>EUR<br/>🔜"]
+        DE["🇩🇪 Německo<br/>EUR<br/>🔜"]
+    end
+    
+    style CZ fill:#c8e6c9
+    style SK fill:#fff3e0
+    style HU fill:#fff3e0
+    style AT fill:#fff3e0
+    style DE fill:#fff3e0
+```
+
+---
+
+## 1. Hlavní tok zboží (Alzaboxy CZ)
 
 ```mermaid
 flowchart LR
@@ -24,7 +93,6 @@ flowchart LR
     
     subgraph DORUCENI ["📍 DORUČENÍ"]
         G[AlzaBoxy]
-        H[Zákazníci]
     end
     
     A --> C
@@ -34,16 +102,14 @@ flowchart LR
     D --> F
     E --> F
     F --> G
-    F --> H
     
     style A fill:#e3f2fd
     style B fill:#e3f2fd
     style C fill:#fff3e0
     style D fill:#f3e5f5
-    style E fill:#f3e5f5
+    style E fill:#e0f7fa
     style F fill:#e8f5e9
     style G fill:#c8e6c9
-    style H fill:#c8e6c9
 ```
 
 ---
@@ -87,7 +153,7 @@ flowchart TD
         A --> C[Kamion 2<br/>33 palet]
         B --> D[DEPO Vratimov]
         C --> D
-        D --> E[Rozdělení do 23 dodávek]
+        D --> E[Rozdělení do dodávek]
         E --> F[Rozvoz tras A-W]
     end
     
@@ -108,75 +174,45 @@ flowchart TD
 
 ---
 
-## 4. Spojené trasy (LH_SD_SPOJENE)
+## 4. Depa a regiony
 
 ```mermaid
 flowchart TD
-    subgraph PLAN ["📋 Původní plán"]
-        A[Trasa SD-A<br/>80 zastávek] 
-        B[Trasa SD-B<br/>75 zastávek]
+    subgraph VRATIMOV ["🟣 DEPO VRATIMOV"]
+        V1[Moravskoslezský kraj]
+        V2[Denní sazba: 5 950 Kč]
+        V3[Trasy: A-W]
     end
     
-    subgraph REALITA ["✨ Optimalizace"]
-        C[Spojená trasa<br/>SD-A + SD-B<br/>155 zastávek]
+    subgraph BYDZOV ["🔵 DEPO NOVÝ BYDŽOV"]
+        B1[Královéhradecký kraj]
+        B2[Měsíční paušál: 410 000 Kč]
+        B3[+ Bonusový systém]
     end
     
-    A --> C
-    B --> C
-    
-    subgraph VYSLEDEK ["💰 Výsledek"]
-        D[Úspora 1 vozidla]
-        E[Úspora řidiče]
-        F[Delší pracovní doba]
+    subgraph REGIONY ["Pokrytí regionů"]
+        R1[MSK - Ostravsko]
+        R2[OLK - Olomoucko]
+        R3[ZLK - Zlínsko]
+        R4[PAK - Pardubicko]
+        R5[HKK - Hradecko]
+        R6[LBK - Liberecko]
     end
     
-    C --> D
-    C --> E
-    C --> F
+    VRATIMOV --> R1
+    VRATIMOV --> R2
+    VRATIMOV --> R3
+    BYDZOV --> R4
+    BYDZOV --> R5
+    BYDZOV --> R6
     
-    style C fill:#c8e6c9
+    style VRATIMOV fill:#f3e5f5
+    style BYDZOV fill:#e0f7fa
 ```
 
 ---
 
-## 5. DEPO operace
-
-```mermaid
-flowchart TD
-    subgraph PRIJEZD ["🚛 Příjezd linehaulu"]
-        A[Kamion 1 přijíždí] --> B[Vyložení 33 palet]
-        C[Kamion 2 přijíždí] --> D[Vyložení 33 palet]
-    end
-    
-    subgraph TRIDENI ["📦 Třídění"]
-        B --> E[Třídění podle tras]
-        D --> E
-        E --> F[Trasa A]
-        E --> G[Trasa B]
-        E --> H[...]
-        E --> I[Trasa W]
-    end
-    
-    subgraph NAKLADKA ["🚐 Nakládka"]
-        F --> J[Dodávka A]
-        G --> K[Dodávka B]
-        H --> L[...]
-        I --> M[Dodávka W]
-    end
-    
-    subgraph ODJEZD ["🚀 Odjezd"]
-        J --> N[Rozvoz trasy A]
-        K --> O[Rozvoz trasy B]
-        L --> P[...]
-        M --> Q[Rozvoz trasy W]
-    end
-    
-    style E fill:#f3e5f5
-```
-
----
-
-## 6. Časová osa dne
+## 5. Časová osa dne
 
 ```mermaid
 gantt
@@ -206,6 +242,19 @@ gantt
     
     section SD Rozvoz
     Rozvoz SD tras         :f1, 16:00, 5h
+```
+
+---
+
+## 6. Struktura nákladů
+
+```mermaid
+pie showData
+    title Struktura měsíčních nákladů (příklad říjen 2025)
+    "FIX za trasy" : 3688000
+    "Kilometry" : 3864466
+    "Linehaul" : 4436120
+    "DEPO" : 785893
 ```
 
 ---
@@ -246,47 +295,18 @@ flowchart LR
 
 ---
 
-## 8. Struktura nákladů
+## 8. Typy vozidel
 
-```mermaid
-pie showData
-    title Struktura měsíčních nákladů (příklad Drivecool)
-    "FIX za trasy" : 2500000
-    "Kilometry" : 800000
-    "Linehaul" : 600000
-    "DEPO Vratimov" : 180000
-    "DEPO Nový Bydžov" : 590000
-    "Bonus/Malus" : 50000
-```
+| Typ | Kapacita | Použití | Cena (přibližně) |
+|-----|----------|---------|------------------|
+| 🚛 Kamion | 33 palet | Linehaul | 22 000 - 24 180 Kč |
+| 🚚 Sólo | 15-21 palet | Linehaul/Posily | 14 800 - 16 500 Kč |
+| 🚐 Dodávka | 8-10 palet | Last mile | 9 100 - 10 100 Kč |
+| 🚐 Dodávka 6300 | 6 palet | Last mile (menší) | 6 300 Kč |
 
 ---
 
-## 9. Typy vozidel
-
-```mermaid
-flowchart TD
-    subgraph KAMION ["🚛 Kamion"]
-        A[Kapacita: 33 palet]
-        B[Použití: Linehaul]
-        C[Cena: ~24 000 Kč/jízda]
-    end
-    
-    subgraph SOLO ["🚚 Sólo"]
-        D[Kapacita: 15-21 palet]
-        E[Použití: Linehaul/Posily]
-        F[Cena: ~16 500 Kč/jízda]
-    end
-    
-    subgraph DODAVKA ["🚐 Dodávka"]
-        G[Kapacita: 8-10 palet]
-        H[Použití: Last mile]
-        I[Cena: ~10 100 Kč/jízda]
-    end
-```
-
----
-
-## 10. Bonusový systém (Nový Bydžov)
+## 9. Bonusový systém (Nový Bydžov)
 
 ```mermaid
 flowchart TD
@@ -306,3 +326,42 @@ flowchart TD
     style G fill:#fff3e0
     style H fill:#ffcdd2
 ```
+
+---
+
+## 10. Budoucí rozšíření - další typy doprav
+
+```mermaid
+flowchart TD
+    subgraph CURRENT ["✅ Aktuálně"]
+        A[Alzaboxy CZ]
+    end
+    
+    subgraph NEXT ["🔜 Další fáze"]
+        B[Pobočky CZ]
+        C[Balíkovka CZ]
+        D[Mezisklady CZ]
+    end
+    
+    subgraph FUTURE ["🔮 Budoucnost"]
+        E[Alzaboxy SK/HU/AT/DE]
+        F[Multi-dopravci]
+        G[Srovnávací analýzy]
+    end
+    
+    A --> B
+    A --> C
+    A --> D
+    B & C & D --> E
+    E --> F
+    F --> G
+    
+    style A fill:#c8e6c9
+    style B fill:#fff3e0
+    style C fill:#fff3e0
+    style D fill:#fff3e0
+```
+
+---
+
+*Dokument aktualizován pro Transport Tycoon v3.0*

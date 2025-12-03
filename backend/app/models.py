@@ -180,7 +180,6 @@ class Proof(Base):
     total_depo: Mapped[Optional[Decimal]] = mapped_column("totalDepo", Numeric(12, 2))
     total_bonus: Mapped[Optional[Decimal]] = mapped_column("totalBonus", Numeric(12, 2))
     total_penalty: Mapped[Optional[Decimal]] = mapped_column("totalPenalty", Numeric(12, 2))
-    total_posily: Mapped[Optional[Decimal]] = mapped_column("totalPosily", Numeric(12, 2))
     grand_total: Mapped[Optional[Decimal]] = mapped_column("grandTotal", Numeric(12, 2))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -250,10 +249,10 @@ class ProofDailyDetail(Base):
     date: Mapped[datetime] = mapped_column(DateTime)
     
     # Počty tras (CNT) - CELKEM
-    dr_dpo_count: Mapped[int] = mapped_column("drDpoCount", Integer, default=0)  # Direct Route DPO
-    lh_dpo_count: Mapped[int] = mapped_column("lhDpoCount", Integer, default=0)  # Linehaul DPO
-    dr_sd_count: Mapped[int] = mapped_column("drSdCount", Integer, default=0)    # Direct Route SD
-    lh_sd_count: Mapped[int] = mapped_column("lhSdCount", Integer, default=0)    # Linehaul SD
+    dr_dpo_count: Mapped[int] = mapped_column("drDpoCount", Integer, default=0)
+    lh_dpo_count: Mapped[int] = mapped_column("lhDpoCount", Integer, default=0)
+    dr_sd_count: Mapped[int] = mapped_column("drSdCount", Integer, default=0)
+    lh_sd_count: Mapped[int] = mapped_column("lhSdCount", Integer, default=0)
     
     # Počty tras - VRATIMOV
     vratimov_dr_dpo: Mapped[int] = mapped_column("vratimovDrDpo", Integer, default=0)
@@ -388,14 +387,8 @@ class RoutePlan(Base):
     valid_from: Mapped[datetime] = mapped_column("validFrom", DateTime)
     valid_to: Mapped[Optional[datetime]] = mapped_column("validTo", DateTime, nullable=True)
     file_name: Mapped[Optional[str]] = mapped_column("fileName", String(255))
-    
-    # Typ plánu - BOTH (bez přípony), DPO (_DPO), SD (_SD)
     plan_type: Mapped[str] = mapped_column("planType", String(10), default="BOTH")
-    
-    # Depo - VRATIMOV, BYDZOV, nebo BOTH (obsahuje trasy pro obě depa)
     depot: Mapped[str] = mapped_column("depot", String(20), default="BOTH")
-    
-    # Souhrn z plánu - celkem
     total_routes: Mapped[int] = mapped_column("totalRoutes", Integer, default=0)
     dpo_routes_count: Mapped[int] = mapped_column("dpoRoutesCount", Integer, default=0)
     sd_routes_count: Mapped[int] = mapped_column("sdRoutesCount", Integer, default=0)
@@ -403,29 +396,22 @@ class RoutePlan(Base):
     sd_linehaul_count: Mapped[int] = mapped_column("sdLinehaulCount", Integer, default=0)
     total_distance_km: Mapped[Optional[Decimal]] = mapped_column("totalDistanceKm", Numeric(10, 2))
     total_stops: Mapped[int] = mapped_column("totalStops", Integer, default=0)
-    
-    # Souhrn per depo - Vratimov (Moravskoslezsko)
     vratimov_dpo_count: Mapped[int] = mapped_column("vratimovDpoCount", Integer, default=0)
     vratimov_sd_count: Mapped[int] = mapped_column("vratimovSdCount", Integer, default=0)
     vratimov_stops: Mapped[int] = mapped_column("vratimovStops", Integer, default=0)
     vratimov_km: Mapped[Optional[Decimal]] = mapped_column("vratimovKm", Numeric(10, 2), default=0)
-    vratimov_duration_min: Mapped[int] = mapped_column("vratimovDurationMin", Integer, default=0)  # celková doba v minutách
-    
-    # Souhrn per depo - Nový Bydžov (ostatní regiony)
+    vratimov_duration_min: Mapped[int] = mapped_column("vratimovDurationMin", Integer, default=0)
     bydzov_dpo_count: Mapped[int] = mapped_column("bydzovDpoCount", Integer, default=0)
     bydzov_sd_count: Mapped[int] = mapped_column("bydzovSdCount", Integer, default=0)
     bydzov_stops: Mapped[int] = mapped_column("bydzovStops", Integer, default=0)
     bydzov_km: Mapped[Optional[Decimal]] = mapped_column("bydzovKm", Numeric(10, 2), default=0)
-    bydzov_duration_min: Mapped[int] = mapped_column("bydzovDurationMin", Integer, default=0)  # celková doba v minutách
-    
+    bydzov_duration_min: Mapped[int] = mapped_column("bydzovDurationMin", Integer, default=0)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationships
     carrier: Mapped["Carrier"] = relationship(back_populates="route_plans")
     routes: Mapped[List["RoutePlanRoute"]] = relationship(back_populates="route_plan", cascade="all, delete-orphan")
 
-    # Unique constraint: carrier + valid_from + plan_type + depot
     __table_args__ = (
         UniqueConstraint('carrierId', 'validFrom', 'planType', 'depot', name='uq_carrier_date_plantype_depot'),
     )
@@ -437,14 +423,12 @@ class RoutePlanRoute(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     route_plan_id: Mapped[int] = mapped_column("routePlanId", ForeignKey("RoutePlan.id", ondelete="CASCADE"))
-    
     route_name: Mapped[str] = mapped_column("routeName", String(100))
     route_letter: Mapped[Optional[str]] = mapped_column("routeLetter", String(10))
     carrier_name: Mapped[Optional[str]] = mapped_column("carrierName", String(100))
-    
-    route_type: Mapped[str] = mapped_column("routeType", String(20))  # DPO, SD, nebo BOTH (DR-DR jede 2x denně)
-    delivery_type: Mapped[Optional[str]] = mapped_column("deliveryType", String(20))  # LH-LH, DR, DR-DR, etc.
-    depot: Mapped[Optional[str]] = mapped_column("depot", String(20))  # VRATIMOV nebo BYDZOV
+    route_type: Mapped[str] = mapped_column("routeType", String(20))
+    delivery_type: Mapped[Optional[str]] = mapped_column("deliveryType", String(20))
+    depot: Mapped[Optional[str]] = mapped_column("depot", String(20))
     start_location: Mapped[Optional[str]] = mapped_column("startLocation", String(255))
     stops_count: Mapped[int] = mapped_column("stopsCount", Integer, default=0)
     max_capacity: Mapped[int] = mapped_column("maxCapacity", Integer, default=0)
@@ -453,7 +437,6 @@ class RoutePlanRoute(Base):
     work_time: Mapped[Optional[str]] = mapped_column("workTime", String(10))
     distance_km: Mapped[Optional[Decimal]] = mapped_column("distanceKm", Numeric(10, 2))
 
-    # Relationships
     route_plan: Mapped["RoutePlan"] = relationship(back_populates="routes")
     details: Mapped[List["RoutePlanDetail"]] = relationship(back_populates="route", cascade="all, delete-orphan")
 
@@ -464,7 +447,6 @@ class RoutePlanDetail(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     route_id: Mapped[int] = mapped_column("routeId", ForeignKey("RoutePlanRoute.id", ondelete="CASCADE"))
-    
     sequence: Mapped[int] = mapped_column(Integer)
     eta: Mapped[Optional[str]] = mapped_column(String(10))
     order_id: Mapped[Optional[str]] = mapped_column("orderId", String(50))
@@ -472,8 +454,112 @@ class RoutePlanDetail(Base):
     address: Mapped[Optional[str]] = mapped_column(Text)
     distance_from_previous: Mapped[Optional[Decimal]] = mapped_column("distanceFromPrevious", Numeric(10, 2))
     unload_sequence: Mapped[Optional[int]] = mapped_column("unloadSequence", Integer)
-    
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
-    # Relationships
     route: Mapped["RoutePlanRoute"] = relationship(back_populates="details")
+
+
+# =============================================================================
+# ALZABOX MODELS - BI modul
+# =============================================================================
+
+class AlzaBox(Base):
+    """Master data Alzaboxu - fixní informace"""
+    __tablename__ = "AlzaBox"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    alza_id: Mapped[Optional[int]] = mapped_column("alzaId", Integer)
+    name: Mapped[str] = mapped_column(String(255))
+    country: Mapped[str] = mapped_column(String(5), index=True)
+    city: Mapped[Optional[str]] = mapped_column(String(100))
+    region: Mapped[Optional[str]] = mapped_column(String(100))
+    gps_lat: Mapped[Optional[Decimal]] = mapped_column("gpsLat", Numeric(10, 6))
+    gps_lon: Mapped[Optional[Decimal]] = mapped_column("gpsLon", Numeric(10, 6))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    first_launch: Mapped[Optional[datetime]] = mapped_column("firstLaunch", DateTime)
+    source_warehouse: Mapped[Optional[str]] = mapped_column("sourceWarehouse", String(20))
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    assignments: Mapped[List["AlzaBoxAssignment"]] = relationship(back_populates="box", cascade="all, delete-orphan")
+    deliveries: Mapped[List["AlzaBoxDelivery"]] = relationship(back_populates="box", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index('ix_alzabox_country_region', 'country', 'region'),
+    )
+
+
+class AlzaBoxAssignment(Base):
+    """Přiřazení boxu k trase/dopravci - mění se v čase"""
+    __tablename__ = "AlzaBoxAssignment"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    box_id: Mapped[int] = mapped_column("boxId", ForeignKey("AlzaBox.id", ondelete="CASCADE"), index=True)
+    carrier_id: Mapped[Optional[int]] = mapped_column("carrierId", ForeignKey("Carrier.id", ondelete="SET NULL"))
+    route_name: Mapped[Optional[str]] = mapped_column("routeName", String(100), index=True)
+    route_group: Mapped[Optional[str]] = mapped_column("routeGroup", String(100))
+    depot_name: Mapped[Optional[str]] = mapped_column("depotName", String(100))
+    planned_delivery_time: Mapped[Optional[str]] = mapped_column("plannedDeliveryTime", String(10))
+    valid_from: Mapped[datetime] = mapped_column("validFrom", DateTime, default=datetime.utcnow)
+    valid_to: Mapped[Optional[datetime]] = mapped_column("validTo", DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+
+    box: Mapped["AlzaBox"] = relationship(back_populates="assignments")
+    carrier: Mapped[Optional["Carrier"]] = relationship()
+
+    __table_args__ = (
+        Index('ix_assignment_route', 'routeName', 'validFrom'),
+    )
+
+
+class AlzaBoxDelivery(Base):
+    """Skutečné dojezdy k boxům - denní záznamy"""
+    __tablename__ = "AlzaBoxDelivery"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    box_id: Mapped[int] = mapped_column("boxId", ForeignKey("AlzaBox.id", ondelete="CASCADE"), index=True)
+    delivery_date: Mapped[datetime] = mapped_column("deliveryDate", DateTime, index=True)
+    delivery_type: Mapped[str] = mapped_column("deliveryType", String(10))
+    route_name: Mapped[Optional[str]] = mapped_column("routeName", String(100))
+    carrier_id: Mapped[Optional[int]] = mapped_column("carrierId", ForeignKey("Carrier.id", ondelete="SET NULL"))
+    planned_time: Mapped[Optional[str]] = mapped_column("plannedTime", String(10))
+    actual_time: Mapped[Optional[datetime]] = mapped_column("actualTime", DateTime)
+    delay_minutes: Mapped[Optional[int]] = mapped_column("delayMinutes", Integer)
+    on_time: Mapped[Optional[bool]] = mapped_column("onTime", Boolean)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+
+    box: Mapped["AlzaBox"] = relationship(back_populates="deliveries")
+    carrier: Mapped[Optional["Carrier"]] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint('boxId', 'deliveryDate', 'deliveryType', name='uq_box_date_type'),
+        Index('ix_delivery_date_route', 'deliveryDate', 'routeName'),
+        Index('ix_delivery_carrier_date', 'carrierId', 'deliveryDate'),
+    )
+
+
+class DeliveryStats(Base):
+    """Agregované statistiky doručení - per den/trasa/dopravce"""
+    __tablename__ = "DeliveryStats"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stats_date: Mapped[datetime] = mapped_column("statsDate", DateTime, index=True)
+    delivery_type: Mapped[str] = mapped_column("deliveryType", String(10))
+    route_name: Mapped[Optional[str]] = mapped_column("routeName", String(100))
+    carrier_id: Mapped[Optional[int]] = mapped_column("carrierId", ForeignKey("Carrier.id", ondelete="SET NULL"))
+    country: Mapped[Optional[str]] = mapped_column(String(5))
+    region: Mapped[Optional[str]] = mapped_column(String(100))
+    total_boxes: Mapped[int] = mapped_column("totalBoxes", Integer, default=0)
+    delivered_on_time: Mapped[int] = mapped_column("deliveredOnTime", Integer, default=0)
+    delivered_late: Mapped[int] = mapped_column("deliveredLate", Integer, default=0)
+    avg_delay_minutes: Mapped[Optional[Decimal]] = mapped_column("avgDelayMinutes", Numeric(8, 2))
+    max_delay_minutes: Mapped[Optional[int]] = mapped_column("maxDelayMinutes", Integer)
+    on_time_pct: Mapped[Optional[Decimal]] = mapped_column("onTimePct", Numeric(5, 2))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('statsDate', 'deliveryType', 'routeName', 'carrierId', name='uq_stats_day'),
+        Index('ix_stats_carrier_date', 'carrierId', 'statsDate'),
+    )

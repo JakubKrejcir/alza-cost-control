@@ -132,4 +132,16 @@ export const analysis = {
   getDashboard: (params) => api.get('/analysis/dashboard', { params }).then(r => r.data)
 }
 
+// Alzabox
+export const alzabox = {
+  getSummary: (params = {}) => 
+    api.get('/alzabox/stats/summary', { params }).then(r => r.data),
+  getByRoute: (params = {}) => 
+    api.get('/alzabox/stats/by-route', { params }).then(r => r.data),
+  getByDay: (params = {}) => 
+    api.get('/alzabox/stats/by-day', { params }).then(r => r.data),
+  getCountries: () => 
+    api.get('/alzabox/countries').then(r => r.data),
+}
+
 export default api

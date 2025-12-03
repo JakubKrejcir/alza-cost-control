@@ -11,6 +11,7 @@ from app.database import engine, Base
 from app.middleware import APIKeyMiddleware
 from app.routers import carriers, depots, contracts, prices, proofs, invoices, analysis
 from app.routers import route_plans
+from app.routers import alzabox
 
 
 async def run_migrations():
@@ -223,3 +224,4 @@ app.include_router(proofs.router, prefix="/api/proofs", tags=["Proofs"])
 app.include_router(invoices.router, prefix="/api/invoices", tags=["Invoices"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 app.include_router(route_plans.router, prefix="/api/route-plans", tags=["Route Plans"])
+app.include_router(alzabox.router, prefix="/api")

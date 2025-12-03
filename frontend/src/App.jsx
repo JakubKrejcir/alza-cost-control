@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard'
 import Documents from './pages/Documents'
 import Prices from './pages/Prices'
 import Carriers from './pages/Carriers'
+import AlzaBoxBI from './pages/AlzaBoxBI'
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="upload" element={<Documents />} />
           <Route path="prices" element={<Prices />} />
+          <Route path="alzabox" element={<AlzaBoxBI />} />
           <Route path="carriers" element={<Carriers />} />
           {/* Redirecty pro staré URL */}
           <Route path="route-plans" element={<Navigate to="/upload" replace />} />
