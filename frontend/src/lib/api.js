@@ -166,6 +166,9 @@ export const alzabox = {
   getSummary: (params = {}) => 
     api.get('/alzabox/stats/summary', { params }).then(r => r.data),
   
+  getByCarrier: (params = {}) =>
+    api.get('/alzabox/stats/by-carrier', { params }).then(r => r.data),
+  
   getByRoute: (params = {}) => 
     api.get('/alzabox/stats/by-route', { params }).then(r => r.data),
   

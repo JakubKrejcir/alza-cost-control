@@ -631,6 +631,60 @@ async def get_stats_summary(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/stats/by-carrier")
+async def get_stats_by_carrier(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    delivery_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Statistiky per dopravce (včetně nepřiřazených)"""
+    try:
+        sql = """
+        SELECT 
+            d."carrierId",
+            COALESCE(c.name, 'Nepřiřazeno') as carrier_name,
+            COUNT(*) as total,
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time,
+            AVG(d."delayMinutes") as avg_delay
+        FROM "AlzaBoxDelivery" d
+        LEFT JOIN "Carrier" c ON c.id = d."carrierId"
+        WHERE 1=1
+        """
+        params = {}
+        
+        if start_date:
+            sql += ' AND d."deliveryDate" >= :start_date'
+            params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
+        if end_date:
+            sql += ' AND d."deliveryDate" <= :end_date'
+            params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        if delivery_type:
+            sql += ' AND d."deliveryType" = :delivery_type'
+            params['delivery_type'] = delivery_type
+        
+        sql += ' GROUP BY d."carrierId", c.name ORDER BY total DESC'
+        
+        result = await db.execute(text(sql), params)
+        rows = result.fetchall()
+        
+        return [
+            {
+                "carrierId": row[0],
+                "carrierName": row[1],
+                "totalDeliveries": row[2],
+                "onTimeDeliveries": row[3] or 0,
+                "lateDeliveries": row[2] - (row[3] or 0),
+                "onTimePct": round((row[3] or 0) / row[2] * 100, 1) if row[2] > 0 else 0,
+                "avgDelayMinutes": round(float(row[4]), 1) if row[4] else 0
+            }
+            for row in rows
+        ]
+    except Exception as e:
+        logger.error(f"Error in stats/by-carrier: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/stats/by-route")
 async def get_stats_by_route(
     start_date: Optional[str] = Query(None),

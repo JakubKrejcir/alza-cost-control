@@ -8,6 +8,9 @@ import {
   ArrowLeft, MapPin, Truck, X, Calendar, AlertTriangle
 } from 'lucide-react'
 import { alzabox as alzaboxApi } from '../lib/api'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
+} from 'recharts'
 
 // =============================================================================
 // KONSTANTY
@@ -25,7 +28,7 @@ const getStatusColor = (pct) => {
 // HELPER COMPONENTS
 // =============================================================================
 
-function StatCard({ icon: Icon, label, value, subtext, target, color = 'primary' }) {
+function StatCard({ icon: Icon, label, value, subtext, target, color = 'primary', children }) {
   const colorMap = {
     primary: { bg: 'var(--color-primary-light)', fg: 'var(--color-primary)' },
     green: { bg: 'var(--color-green-light)', fg: 'var(--color-green)' },
@@ -55,6 +58,7 @@ function StatCard({ icon: Icon, label, value, subtext, target, color = 'primary'
       {subtext && (
         <div className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>{subtext}</div>
       )}
+      {children}
     </div>
   )
 }
@@ -117,6 +121,173 @@ function TimeDiff({ planned, actual }) {
     <span style={{ color: 'var(--color-red)' }}>
       +{diff} min
     </span>
+  )
+}
+
+// =============================================================================
+// CARRIER BREAKDOWN COMPONENT
+// =============================================================================
+
+function CarrierBreakdown({ data, isLoading }) {
+  if (isLoading) {
+    return <div className="text-sm mt-4" style={{ color: 'var(--color-text-muted)' }}>Načítání...</div>
+  }
+  
+  if (!data || data.length === 0) {
+    return <div className="text-sm mt-4" style={{ color: 'var(--color-text-muted)' }}>Žádná data</div>
+  }
+
+  return (
+    <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--color-border-light)' }}>
+      <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
+        Podle dopravce
+      </div>
+      <div className="space-y-2">
+        {data.map((carrier) => {
+          const colors = getStatusColor(carrier.onTimePct)
+          return (
+            <div key={carrier.carrierId || 'null'} className="flex items-center justify-between text-sm">
+              <span style={{ color: 'var(--color-text-dark)' }}>
+                {carrier.carrierName}
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium" style={{ color: colors.fg }}>
+                  {carrier.onTimePct}%
+                </span>
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  ({carrier.lateDeliveries} pozdě)
+                </span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// DAILY CHART COMPONENT
+// =============================================================================
+
+function DailyChart({ data, isLoading }) {
+  if (isLoading) {
+    return (
+      <div className="h-64 flex items-center justify-center">
+        <span style={{ color: 'var(--color-text-muted)' }}>Načítání grafu...</span>
+      </div>
+    )
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="h-64 flex items-center justify-center">
+        <span style={{ color: 'var(--color-text-muted)' }}>Žádná data pro graf</span>
+      </div>
+    )
+  }
+
+  // Připrav data pro graf
+  const chartData = data.map(day => ({
+    date: format(new Date(day.date), 'd.M.', { locale: cs }),
+    fullDate: format(new Date(day.date), 'EEEE d.M.yyyy', { locale: cs }),
+    onTimePct: day.onTimePct,
+    late: day.totalDeliveries - day.onTimeDeliveries,
+    total: day.totalDeliveries
+  }))
+
+  // Celkové statistiky
+  const totalDeliveries = data.reduce((sum, d) => sum + d.totalDeliveries, 0)
+  const totalOnTime = data.reduce((sum, d) => sum + d.onTimeDeliveries, 0)
+  const totalLate = totalDeliveries - totalOnTime
+  const avgPct = totalDeliveries > 0 ? (totalOnTime / totalDeliveries * 100).toFixed(1) : 0
+  const avgColors = getStatusColor(parseFloat(avgPct))
+
+  const CustomTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const d = payload[0].payload
+      const colors = getStatusColor(d.onTimePct)
+      return (
+        <div className="card p-3 shadow-lg" style={{ minWidth: '160px' }}>
+          <div className="text-xs mb-1" style={{ color: 'var(--color-text-muted)' }}>
+            {d.fullDate}
+          </div>
+          <div className="text-lg font-bold" style={{ color: colors.fg }}>
+            {d.onTimePct}%
+          </div>
+          <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+            {d.late > 0 ? (
+              <span style={{ color: 'var(--color-red)' }}>{d.late} pozdě</span>
+            ) : (
+              <span style={{ color: 'var(--color-green)' }}>Vše včas</span>
+            )}
+            {' '}z {d.total}
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
+
+  return (
+    <div>
+      {/* Summary nad grafem */}
+      <div className="flex items-center justify-between mb-4 px-2">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl font-bold" style={{ color: avgColors.fg }}>
+            {avgPct}%
+          </span>
+          <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            průměr za období
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium" style={{ color: 'var(--color-red)' }}>
+            {totalLate.toLocaleString('cs-CZ')}
+          </span>
+          <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            pozdě z {totalDeliveries.toLocaleString('cs-CZ')}
+          </span>
+        </div>
+      </div>
+
+      {/* Graf */}
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+            <XAxis 
+              dataKey="date" 
+              tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
+              tickLine={false}
+              axisLine={{ stroke: 'var(--color-border)' }}
+            />
+            <YAxis 
+              domain={[90, 100]}
+              tick={{ fontSize: 11, fill: 'var(--color-text-muted)' }}
+              tickLine={false}
+              axisLine={{ stroke: 'var(--color-border)' }}
+              tickFormatter={(v) => `${v}%`}
+            />
+            <Tooltip content={<CustomTooltip />} />
+            <ReferenceLine 
+              y={TARGET_PCT} 
+              stroke="var(--color-green)" 
+              strokeDasharray="5 5"
+              label={{ value: `Cíl ${TARGET_PCT}%`, position: 'right', fontSize: 10, fill: 'var(--color-green)' }}
+            />
+            <Line 
+              type="monotone" 
+              dataKey="onTimePct" 
+              stroke="var(--color-primary)" 
+              strokeWidth={2}
+              dot={{ fill: 'var(--color-primary)', strokeWidth: 0, r: 3 }}
+              activeDot={{ r: 5, fill: 'var(--color-primary)' }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   )
 }
 
@@ -299,12 +470,17 @@ export default function AlzaBoxBI() {
     queryFn: () => alzaboxApi.getSummary(filters)
   })
 
+  const { data: carrierStats, isLoading: carrierStatsLoading } = useQuery({
+    queryKey: ['alzabox-carrier-stats', filters],
+    queryFn: () => alzaboxApi.getByCarrier(filters)
+  })
+
   const { data: routeStats } = useQuery({
     queryKey: ['alzabox-routes', filters],
     queryFn: () => alzaboxApi.getByRoute(filters)
   })
 
-  const { data: dailyStats } = useQuery({
+  const { data: dailyStats, isLoading: dailyStatsLoading } = useQuery({
     queryKey: ['alzabox-daily', filters],
     queryFn: () => alzaboxApi.getByDay(filters)
   })
@@ -445,7 +621,9 @@ export default function AlzaBoxBI() {
               target={`${TARGET_PCT}%`}
               subtext={`${summary?.onTimeDeliveries?.toLocaleString('cs-CZ') || 0} včas z ${summary?.totalDeliveries?.toLocaleString('cs-CZ') || 0}`}
               color={summaryColors.status}
-            />
+            >
+              <CarrierBreakdown data={carrierStats} isLoading={carrierStatsLoading} />
+            </StatCard>
             <StatCard
               icon={CheckCircle}
               label="Včas (=1)"
@@ -469,56 +647,15 @@ export default function AlzaBoxBI() {
             />
           </div>
 
-          {/* Daily Breakdown */}
+          {/* Daily Chart */}
           <div className="card overflow-hidden">
             <div className="card-header">
               <h3 className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>
-                Denní přehled
+                Denní přehled včasnosti
               </h3>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ backgroundColor: 'var(--color-bg)' }}>
-                    <th className="text-left p-3 font-medium">Datum</th>
-                    <th className="text-center p-3 font-medium">Celkem</th>
-                    <th className="text-center p-3 font-medium">Včas (=1)</th>
-                    <th className="text-center p-3 font-medium">Pozdě (=0)</th>
-                    <th className="p-3 font-medium">Včasnost</th>
-                    <th className="text-center p-3 font-medium">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dailyStats?.map((day) => {
-                    const late = day.totalDeliveries - day.onTimeDeliveries
-                    const colors = getStatusColor(day.onTimePct)
-                    return (
-                      <tr key={day.date} style={{ borderTop: '1px solid var(--color-border-light)' }}>
-                        <td className="p-3 font-medium">
-                          {format(new Date(day.date), 'EEEE d.M.', { locale: cs })}
-                        </td>
-                        <td className="text-center p-3">{day.totalDeliveries}</td>
-                        <td className="text-center p-3" style={{ color: 'var(--color-green)' }}>
-                          {day.onTimeDeliveries}
-                        </td>
-                        <td className="text-center p-3" style={{ color: late > 0 ? 'var(--color-red)' : 'inherit' }}>
-                          {late}
-                        </td>
-                        <td className="p-3 w-48">
-                          <ProgressBar value={day.onTimePct} />
-                        </td>
-                        <td className="text-center p-3">
-                          {day.onTimePct >= TARGET_PCT ? (
-                            <CheckCircle size={18} style={{ color: 'var(--color-green)' }} />
-                          ) : (
-                            <XCircle size={18} style={{ color: 'var(--color-red)' }} />
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div className="p-4">
+              <DailyChart data={dailyStats} isLoading={dailyStatsLoading} />
             </div>
           </div>
 
