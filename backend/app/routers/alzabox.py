@@ -262,14 +262,26 @@ async def _import_deliveries_new_format(wb, delivery_type: str, db: AsyncSession
             current_route = col0_str
             continue
         
-        # Je to box? Parsuj "HH:MM | popis -- ABxxxx"
+        # Je to box? Parsuj "HH:MM | popis -- ABxxxx" nebo "Trasa ČÍSLO | popis -- ABxxxx"
         # Extrahuj planned_time
         planned_time = None
+        
+        # Formát 1: "09:00 | popis" - HH:MM na začátku
         time_match = re.match(r'^(\d{1,2}):(\d{2})', col0_str)
         if time_match:
             h, m = int(time_match.group(1)), int(time_match.group(2))
             if 0 <= h <= 23 and 0 <= m <= 59:
                 planned_time = f"{h:02d}:{m:02d}"
+        
+        # Formát 2: "Pardubicko E 12 | popis" - číslo před "|" = hodina
+        if not planned_time and '|' in col0_str:
+            first_part = col0_str.split('|')[0].strip()
+            # Hledej číslo na konci první části
+            num_match = re.search(r'(\d{1,2})\s*$', first_part)
+            if num_match:
+                h = int(num_match.group(1))
+                if 0 <= h <= 23:
+                    planned_time = f"{h:02d}:00"
         
         # Extrahuj box_code z "-- ABxxxx"
         box_code = None
