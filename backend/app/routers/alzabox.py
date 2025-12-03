@@ -11,6 +11,7 @@ from decimal import Decimal
 import openpyxl
 import io
 import logging
+import re
 
 from app.database import get_db
 from app.models import AlzaBox, AlzaBoxAssignment, AlzaBoxDelivery, Carrier
@@ -203,14 +204,16 @@ async def import_alzabox_deliveries(
             box_code = str(box_code).strip()
             
             # Parsuj plánovaný čas ze sloupce 3
-            # Formát může být: "09:00 | popis" nebo "Liberecko I 12 | popis"
+            # Formát 1: "09:00 | popis" → 09:00
+            # Formát 2: "Liberecko I 12 | popis" → 12:00 (číslo na konci = hodina)
             planned_time = None
             if info and '|' in str(info):
-                time_part = str(info).split('|')[0].strip()
-                # Kontrola, zda je to validní čas (HH:MM formát)
-                if ':' in time_part:
+                first_part = str(info).split('|')[0].strip()
+                
+                # Zkus formát HH:MM
+                if ':' in first_part:
                     try:
-                        parts = time_part.split(':')
+                        parts = first_part.split(':')
                         if len(parts) >= 2:
                             h = int(parts[0])
                             m = int(parts[1])
@@ -218,6 +221,14 @@ async def import_alzabox_deliveries(
                                 planned_time = f"{h:02d}:{m:02d}"
                     except (ValueError, IndexError):
                         pass
+                
+                # Pokud není HH:MM, zkus číslo na konci (např. "Liberecko I 12" → 12:00)
+                if not planned_time:
+                    match = re.search(r'(\d{1,2})\s*$', first_part)
+                    if match:
+                        h = int(match.group(1))
+                        if 0 <= h <= 23:
+                            planned_time = f"{h:02d}:00"
             
             plan_data[box_code] = {
                 'route_name': route_name,
