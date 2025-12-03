@@ -151,6 +151,17 @@ export const alzabox = {
     }).then(r => r.data)
   },
   
+  // Delete
+  deleteLocations: () => 
+    api.delete('/alzabox/data/locations').then(r => r.data),
+  
+  deleteDeliveries: (deliveryType = null) => {
+    const url = deliveryType 
+      ? `/alzabox/data/deliveries?delivery_type=${deliveryType}`
+      : '/alzabox/data/deliveries'
+    return api.delete(url).then(r => r.data)
+  },
+  
   // Stats
   getSummary: (params = {}) => 
     api.get('/alzabox/stats/summary', { params }).then(r => r.data),
@@ -163,6 +174,12 @@ export const alzabox = {
   
   getCountries: () => 
     api.get('/alzabox/countries').then(r => r.data),
+    
+  getBoxes: (params = {}) =>
+    api.get('/alzabox/boxes', { params }).then(r => r.data),
+    
+  getRoutes: () =>
+    api.get('/alzabox/routes').then(r => r.data)
 }
 
 export default api

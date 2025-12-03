@@ -311,6 +311,61 @@ async def import_alzabox_deliveries(
 
 
 # =============================================================================
+# DELETE ENDPOINTS
+# =============================================================================
+
+@router.delete("/data/locations")
+async def delete_all_locations(
+    db: AsyncSession = Depends(get_db)
+):
+    """Smaže všechny AlzaBoxy a jejich assignments"""
+    try:
+        # Nejdřív smazat závislé záznamy
+        await db.execute(delete(AlzaBoxDelivery))
+        await db.execute(delete(AlzaBoxAssignment))
+        result = await db.execute(delete(AlzaBox))
+        deleted_count = result.rowcount
+        await db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Smazáno {deleted_count} AlzaBoxů a všechny související záznamy"
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error deleting locations: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/data/deliveries")
+async def delete_deliveries(
+    delivery_type: Optional[str] = Query(None, description="Typ závozu: DPO, SD, THIRD. Pokud prázdné, smaže vše."),
+    db: AsyncSession = Depends(get_db)
+):
+    """Smaže záznamy o doručení. Volitelně filtrovat podle typu."""
+    try:
+        if delivery_type:
+            result = await db.execute(
+                delete(AlzaBoxDelivery).where(AlzaBoxDelivery.delivery_type == delivery_type)
+            )
+        else:
+            result = await db.execute(delete(AlzaBoxDelivery))
+        
+        deleted_count = result.rowcount
+        await db.commit()
+        
+        type_msg = f" typu {delivery_type}" if delivery_type else ""
+        return {
+            "success": True,
+            "message": f"Smazáno {deleted_count} záznamů o doručení{type_msg}"
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error deleting deliveries: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # BI API ENDPOINTS
 # =============================================================================
 
