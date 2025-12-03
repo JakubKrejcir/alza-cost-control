@@ -28,12 +28,8 @@ export default function Layout({ children }) {
       <div className={`fixed inset-y-0 left-0 z-50 ${collapsed ? 'w-16' : 'w-64'} bg-white shadow-lg transition-all duration-300`}>
         <div className="flex h-16 items-center justify-between px-4 border-b">
           {!collapsed && (
-            <div className="flex items-center gap-3">
-              <img 
-                src="/logo.png" 
-                alt="Transport Tycoon" 
-                className="w-10 h-10 rounded-lg"
-              />
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">🚚</span>
               <div className="flex flex-col">
                 <span className="font-bold text-gray-900 text-sm leading-tight">Transport</span>
                 <span className="text-xs text-gray-500 leading-tight">Tycoon</span>
@@ -41,11 +37,7 @@ export default function Layout({ children }) {
             </div>
           )}
           {collapsed && (
-            <img 
-              src="/logo.png" 
-              alt="Transport Tycoon" 
-              className="w-8 h-8 rounded-lg mx-auto"
-            />
+            <span className="text-2xl mx-auto">🚚</span>
           )}
         </div>
         
