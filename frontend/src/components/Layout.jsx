@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, Outlet } from 'react-router-dom'
 import { 
   LayoutDashboard, 
   FileText, 
@@ -11,14 +11,14 @@ import {
 } from 'lucide-react'
 
 const navigation = [
-  { name: 'Fakturace', href: '/', icon: LayoutDashboard },
+  { name: 'Fakturace', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Ceníky', href: '/prices', icon: Tag },
-  { name: 'Dokumenty', href: '/documents', icon: FileText },
+  { name: 'Dokumenty', href: '/upload', icon: FileText },
   { name: 'AlzaBox BI', href: '/alzabox', icon: Package },
   { name: 'Dopravci', href: '/carriers', icon: Truck },
 ]
 
-export default function Layout({ children }) {
+export default function Layout() {
   const location = useLocation()
   const [collapsed, setCollapsed] = useState(false)
 
@@ -85,7 +85,7 @@ export default function Layout({ children }) {
       {/* Main content */}
       <div className={`${collapsed ? 'pl-16' : 'pl-64'} transition-all duration-300`}>
         <main className="p-8">
-          {children}
+          <Outlet />
         </main>
       </div>
     </div>
