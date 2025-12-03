@@ -6,35 +6,28 @@ import Documents from './pages/Documents'
 import Prices from './pages/Prices'
 import Carriers from './pages/Carriers'
 import AlzaBoxBI from './pages/AlzaBoxBI'
-import LoginGate from './components/LoginGate';
+import LoginGate from './components/LoginGate'
 
 function App() {
   return (
     <LoginGate>
-      <Layout />
+      <CarrierProvider>
+        <Routes>
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Navigate to="/dashboard" replace />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="upload" element={<Documents />} />
+            <Route path="prices" element={<Prices />} />
+            <Route path="alzabox" element={<AlzaBoxBI />} />
+            <Route path="carriers" element={<Carriers />} />
+            {/* Redirecty pro staré URL */}
+            <Route path="route-plans" element={<Navigate to="/upload" replace />} />
+            <Route path="contracts" element={<Navigate to="/upload" replace />} />
+            <Route path="history" element={<Navigate to="/dashboard" replace />} />
+          </Route>
+        </Routes>
+      </CarrierProvider>
     </LoginGate>
-  );
-}
-
-
-function App() {
-  return (
-    <CarrierProvider>
-      <Routes>
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="upload" element={<Documents />} />
-          <Route path="prices" element={<Prices />} />
-          <Route path="alzabox" element={<AlzaBoxBI />} />
-          <Route path="carriers" element={<Carriers />} />
-          {/* Redirecty pro staré URL */}
-          <Route path="route-plans" element={<Navigate to="/upload" replace />} />
-          <Route path="contracts" element={<Navigate to="/upload" replace />} />
-          <Route path="history" element={<Navigate to="/dashboard" replace />} />
-        </Route>
-      </Routes>
-    </CarrierProvider>
   )
 }
 
