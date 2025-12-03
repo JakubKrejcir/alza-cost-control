@@ -6,6 +6,16 @@ import Documents from './pages/Documents'
 import Prices from './pages/Prices'
 import Carriers from './pages/Carriers'
 import AlzaBoxBI from './pages/AlzaBoxBI'
+import LoginGate from './components/LoginGate';
+
+function App() {
+  return (
+    <LoginGate>
+      <Layout />
+    </LoginGate>
+  );
+}
+
 
 function App() {
   return (

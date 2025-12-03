@@ -12,7 +12,8 @@ from app.middleware import APIKeyMiddleware
 from app.routers import carriers, depots, contracts, prices, proofs, invoices, analysis
 from app.routers import route_plans
 from app.routers import alzabox
-
+from app.routers import auth
+app.include_router(auth.router, prefix="/api")
 
 async def run_migrations():
     """Run database migrations on startup"""
