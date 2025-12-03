@@ -1,35 +1,49 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { cs } from 'date-fns/locale'
-import { DollarSign, FileText, AlertTriangle, Building2, Truck, Package, Warehouse } from 'lucide-react'
-import { prices, contracts } from '../lib/api'
+import { 
+  DollarSign, FileText, AlertTriangle, Building2, Truck, 
+  Package, Warehouse, ChevronDown, Loader2, Plus, Calendar
+} from 'lucide-react'
+import { prices, contracts, carriers } from '../lib/api'
 
 function formatCZK(amount) {
   if (amount == null) return '—'
   return new Intl.NumberFormat('cs-CZ', { 
     style: 'currency', 
     currency: 'CZK',
-    maximumFractionDigits: 0 
+    maximumFractionDigits: 2 
   }).format(amount)
 }
 
-function PriceRow({ label, value, color = 'var(--color-primary)', dodatek }) {
-  const isMissing = dodatek === '?'
+function formatDate(dateStr) {
+  if (!dateStr) return '—'
+  try {
+    return format(new Date(dateStr), 'd.M.yyyy', { locale: cs })
+  } catch {
+    return dateStr
+  }
+}
+
+function PriceRow({ label, value, color = 'var(--color-primary)', dodatek, contractNumber }) {
+  const displayDodatek = contractNumber || dodatek
+  const isMissing = displayDodatek === '?'
   return (
     <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
       <span style={{ color: 'var(--color-text-muted)' }}>{label}</span>
       <div className="flex items-center gap-2">
         <span className="font-semibold" style={{ color }}>{value}</span>
-        {dodatek && (
+        {displayDodatek && (
           <span 
             className="text-xs px-1.5 py-0.5 rounded" 
             style={{ 
               backgroundColor: isMissing ? 'var(--color-orange-light)' : 'var(--color-border)', 
               color: isMissing ? '#e67e22' : 'var(--color-text-light)' 
             }}
-            title={isMissing ? 'Chybí ve smlouvách' : `Dodatek č. ${dodatek}`}
+            title={isMissing ? 'Chybí ve smlouvách' : displayDodatek}
           >
-            {isMissing ? '?' : `D${dodatek}`}
+            {isMissing ? '?' : displayDodatek.replace('Dodatek č. ', 'D')}
           </span>
         )}
       </div>
@@ -48,263 +62,302 @@ function PriceSection({ title, children, color = 'var(--color-text-muted)' }) {
   )
 }
 
+function EmptyState({ message }) {
+  return (
+    <div className="text-center py-12">
+      <DollarSign className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--color-text-muted)' }} />
+      <p style={{ color: 'var(--color-text-muted)' }}>{message}</p>
+    </div>
+  )
+}
+
 export default function Prices() {
+  const [selectedCarrierId, setSelectedCarrierId] = useState(null)
+
+  // Načti seznam dopravců
+  const { data: carrierList, isLoading: carriersLoading } = useQuery({
+    queryKey: ['carriers'],
+    queryFn: carriers.getAll
+  })
+
+  // Načti ceníky pro vybraného dopravce
+  const { data: priceList, isLoading: pricesLoading } = useQuery({
+    queryKey: ['prices', selectedCarrierId],
+    queryFn: () => prices.getAll({ carrier_id: selectedCarrierId }),
+    enabled: !!selectedCarrierId
+  })
+
+  // Načti smlouvy pro vybraného dopravce
   const { data: contractList } = useQuery({
-    queryKey: ['contracts'],
-    queryFn: () => contracts.getAll()
+    queryKey: ['contracts', selectedCarrierId],
+    queryFn: () => contracts.getAll(selectedCarrierId),
+    enabled: !!selectedCarrierId
   })
 
-  const { data: priceList } = useQuery({
-    queryKey: ['prices'],
-    queryFn: () => prices.getAll({ active: 'true' })
-  })
+  // Auto-select první dopravce
+  if (carrierList?.length > 0 && !selectedCarrierId) {
+    setSelectedCarrierId(carrierList[0].id)
+  }
 
-  const missingRates = [
-    { name: 'FIX LH SD (druhý závoz)', value: '1 800 Kč' },
-    { name: 'Depo Vratimov / den', value: '5 950 Kč' },
-    { name: 'Dodávka 6 300 (Vratimov)', value: '6 300 Kč' },
-    { name: 'Vratky', value: '3 700 Kč' }
-  ]
+  const selectedCarrier = carrierList?.find(c => c.id === selectedCarrierId)
+  
+  // Seskup ceníky podle typu
+  const pricesByType = priceList?.reduce((acc, config) => {
+    const type = config.type || 'general'
+    if (!acc[type]) acc[type] = []
+    acc[type].push(config)
+    return acc
+  }, {}) || {}
 
-  const contractHistory = [
-    { id: 13, from: '1.11.2025', type: 'DROP 2.0', changes: 'Nový ceník DROP 2.0 (trasy A-I: 8 500 Kč)' },
-    { id: 12, from: '1.10.2025', type: 'AlzaBox + XL + NB', changes: 'Depo Nový Bydžov, Linehaul do NB, Bonusový systém' },
-    { id: 9, from: '1.7.2025', type: 'AlzaBox', changes: 'Přidány POSILY (Linehaul, Sólo, Dodávka)' },
-    { id: 8, from: '1.6.2025', type: 'Třídírna', changes: 'Svozy CZTC1/CZLC4 → Vratimov' },
-    { id: 7, from: '1.4.2025', type: 'AlzaBox', changes: 'FIX Direct Praha/Vratimov, Kč/km, Linehaul' }
-  ]
+  // Pomocná funkce pro získání smlouvy podle ID
+  const getContract = (contractId) => {
+    return contractList?.find(c => c.id === contractId)
+  }
+
+  const isLoading = carriersLoading || pricesLoading
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center justify-between">
+      {/* Header s výběrem dopravce */}
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>Správa ceníků</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>Drivecool – přehled sazeb ze smluv</p>
-        </div>
-      </div>
-
-      {/* Missing Rates - na vrchu */}
-      <div className="card" style={{ borderLeft: '4px solid var(--color-orange)' }}>
-        <div className="card-header" style={{ backgroundColor: 'var(--color-orange-light)' }}>
-          <h3 className="font-semibold flex items-center gap-2" style={{ color: '#e67e22' }}>
-            <AlertTriangle size={20} />
-            Položky z proofu CHYBĚJÍCÍ ve smlouvách
-          </h3>
-        </div>
-        <div className="p-6">
-          <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)' }}>
-            Tyto sazby jsou použity v proofech, ale nejsou definovány v dodatcích:
+          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+            Správa ceníků
+          </h1>
+          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+            Přehled sazeb ze smluv
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-            {missingRates.map((item, idx) => (
-              <PriceRow key={idx} label={item.name} value={item.value} color="#e67e22" dodatek="?" />
-            ))}
+        </div>
+        
+        {/* Dropdown pro výběr dopravce */}
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium" style={{ color: 'var(--color-text-muted)' }}>
+            Dopravce:
+          </label>
+          <div className="relative">
+            <select
+              value={selectedCarrierId || ''}
+              onChange={(e) => setSelectedCarrierId(Number(e.target.value))}
+              className="input pr-10 min-w-[200px] appearance-none"
+              disabled={carriersLoading}
+            >
+              {carriersLoading ? (
+                <option>Načítám...</option>
+              ) : carrierList?.length === 0 ? (
+                <option>Žádní dopravci</option>
+              ) : (
+                carrierList?.map(carrier => (
+                  <option key={carrier.id} value={carrier.id}>
+                    {carrier.name}
+                  </option>
+                ))
+              )}
+            </select>
+            <ChevronDown 
+              size={16} 
+              className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
+              style={{ color: 'var(--color-text-muted)' }}
+            />
           </div>
         </div>
       </div>
 
-      {/* ====== DEPO VRATIMOV ====== */}
-      <div className="card">
-        <div className="card-header" style={{ backgroundColor: 'var(--color-purple-light)' }}>
-          <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--color-purple)' }}>
-            <Building2 size={22} />
-            🏭 Depo Vratimov
-          </h2>
-          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>Moravskoslezský kraj</p>
+      {/* Loading state */}
+      {isLoading && (
+        <div className="card p-12 text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" style={{ color: 'var(--color-primary)' }} />
+          <p style={{ color: 'var(--color-text-muted)' }}>Načítám ceníky...</p>
         </div>
-        <div className="p-6 space-y-6">
-          
-          {/* Alzaboxy z depa - Direct trasy */}
-          <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-            <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
-              <Package size={18} style={{ color: 'var(--color-purple)' }} />
-              Alzaboxy z depa (Direct trasy)
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <PriceSection title="FIX za trasu" color="var(--color-purple)">
-                <PriceRow label="DIRECT Praha (DPO)" value="3 200 Kč" color="var(--color-purple)" dodatek={7} />
-                <PriceRow label="DIRECT Vratimov (DPO)" value="2 500 Kč" color="var(--color-purple)" dodatek={7} />
-                <PriceRow label="DIRECT SD (odpolední)" value="1 800 Kč" color="var(--color-purple)" dodatek={12} />
-              </PriceSection>
-              
-              <PriceSection title="Variabilní náklady" color="var(--color-purple)">
-                <PriceRow label="Kč/km" value="10,97 Kč" color="var(--color-purple)" dodatek={7} />
-                <PriceRow label="Hodinová sazba DEPO" value="850 Kč" color="var(--color-purple)" dodatek={7} />
-              </PriceSection>
-              
-              <PriceSection title="POSILY (příplatek)" color="var(--color-purple)">
-                <PriceRow label="Sólo (18-21 pal)" value="16 500 Kč" color="var(--color-purple)" dodatek={9} />
-                <PriceRow label="Dodávka (8-10 pal)" value="10 100 Kč" color="var(--color-purple)" dodatek={9} />
-              </PriceSection>
-            </div>
-          </div>
+      )}
 
-          {/* Alzaboxy z CZLC4 a CZTC1 (Linehauly do Vratimova) */}
-          <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-            <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
-              <Truck size={18} style={{ color: 'var(--color-purple)' }} />
-              Alzaboxy z CZLC4 a CZTC1 (svozy do Vratimova)
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <PriceSection title="CZLC4 (Log. centrum) → Vratimov" color="var(--color-purple)">
-                <PriceRow label="Kamion (33 pal)" value="24 180 Kč" color="var(--color-purple)" dodatek={8} />
-                <PriceRow label="Solo (18-21 pal)" value="16 500 Kč" color="var(--color-purple)" dodatek={8} />
-                <PriceRow label="Dodávka (8-10 pal)" value="10 100 Kč" color="var(--color-purple)" dodatek={8} />
-                <PriceRow label="Dodávka 6 300" value="6 300 Kč" color="var(--color-purple)" dodatek={12} />
-              </PriceSection>
-              
-              <PriceSection title="CZTC1 (Třídírna) → Vratimov" color="var(--color-purple)">
-                <PriceRow label="Kamion (33 pal)" value="22 000 Kč" color="var(--color-purple)" dodatek={8} />
-                <PriceRow label="Solo (15-18 pal)" value="14 800 Kč" color="var(--color-purple)" dodatek={8} />
-                <PriceRow label="Dodávka (8-10 pal)" value="9 100 Kč" color="var(--color-purple)" dodatek={8} />
-                <PriceRow label="Dodávka 6 300" value="6 300 Kč" color="var(--color-purple)" dodatek={12} />
-              </PriceSection>
-            </div>
-          </div>
-
-          {/* Nájem Depa Vratimov */}
-          <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-            <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
-              <Warehouse size={18} style={{ color: 'var(--color-purple)' }} />
-              Nájem Depa
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <PriceSection title="Provoz depa" color="var(--color-purple)">
-                <PriceRow label="Depo Vratimov / den" value="5 950 Kč" color="var(--color-purple)" dodatek="?" />
-              </PriceSection>
-            </div>
-          </div>
-
+      {/* Žádný dopravce */}
+      {!isLoading && !selectedCarrierId && (
+        <div className="card">
+          <EmptyState message="Vyberte dopravce pro zobrazení ceníků" />
         </div>
-      </div>
+      )}
 
-      {/* ====== DEPO NOVÝ BYDŽOV ====== */}
-      <div className="card">
-        <div className="card-header" style={{ backgroundColor: 'var(--color-cyan-light)' }}>
-          <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: '#0891b2' }}>
-            <Building2 size={22} />
-            🏭 Depo Nový Bydžov
-          </h2>
-          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>Královéhradecký kraj (od 1.10.2025)</p>
+      {/* Žádné ceníky */}
+      {!isLoading && selectedCarrierId && priceList?.length === 0 && (
+        <div className="card">
+          <EmptyState message={`Dopravce ${selectedCarrier?.name || ''} nemá žádné ceníky. Nahrajte smlouvu pro vytvoření ceníku.`} />
         </div>
-        <div className="p-6 space-y-6">
-          
-          {/* Alzaboxy z depa NB */}
-          <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-            <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
-              <Package size={18} style={{ color: '#0891b2' }} />
-              Alzaboxy z depa (Direct trasy)
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <PriceSection title="FIX za trasu" color="#0891b2">
-                <PriceRow label="DIRECT DPO" value="2 500 Kč" color="#0891b2" dodatek={12} />
-                <PriceRow label="DIRECT SD" value="1 800 Kč" color="#0891b2" dodatek={12} />
-              </PriceSection>
-              
-              <PriceSection title="Variabilní náklady" color="#0891b2">
-                <PriceRow label="Kč/km" value="10,97 Kč" color="#0891b2" dodatek={12} />
-              </PriceSection>
-            </div>
-          </div>
+      )}
 
-          {/* Linehauly do NB */}
-          <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-            <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
-              <Truck size={18} style={{ color: '#0891b2' }} />
-              Linehauly do Nového Bydžova
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <PriceSection title="Kamion (33 pal)" color="#0891b2">
-                <PriceRow label="CZLC4 → NB" value="9 950 Kč" color="#0891b2" dodatek={12} />
-                <PriceRow label="CZTC1 → NB" value="9 500 Kč" color="#0891b2" dodatek={12} />
-              </PriceSection>
+      {/* Ceníky podle typu */}
+      {!isLoading && priceList?.length > 0 && (
+        <>
+          {Object.entries(pricesByType).map(([type, configs]) => (
+            <div key={type} className="card">
+              <div className="card-header" style={{ backgroundColor: 'var(--color-primary-light)' }}>
+                <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                  <DollarSign size={22} />
+                  {type === 'general' ? 'Obecný ceník' : type}
+                </h2>
+                <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                  {configs.length} {configs.length === 1 ? 'ceník' : 'ceníky'}
+                </p>
+              </div>
               
-              <PriceSection title="Sólo (18-21 pal)" color="#0891b2">
-                <PriceRow label="CZLC4 → NB" value="7 750 Kč" color="#0891b2" dodatek={12} />
-                <PriceRow label="CZTC1 → NB" value="7 500 Kč" color="#0891b2" dodatek={12} />
-              </PriceSection>
-              
-              <PriceSection title="Dodávka (8-10 pal)" color="#0891b2">
-                <PriceRow label="CZLC4 → NB" value="5 250 Kč" color="#0891b2" dodatek={12} />
-                <PriceRow label="CZTC1 → NB" value="5 000 Kč" color="#0891b2" dodatek={12} />
-              </PriceSection>
-            </div>
-          </div>
+              <div className="p-6 space-y-6">
+                {configs.map(config => {
+                  const contract = getContract(config.contractId)
+                  return (
+                  <div 
+                    key={config.id} 
+                    className="p-4 rounded-xl"
+                    style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
+                  >
+                    {/* Hlavička ceníku */}
+                    <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+                      <div className="flex items-center gap-3">
+                        <Calendar size={18} style={{ color: 'var(--color-primary)' }} />
+                        <div>
+                          <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                            {contract?.number || `Ceník #${config.id}`}
+                          </span>
+                          <span className="text-sm ml-2" style={{ color: 'var(--color-text-muted)' }}>
+                            od {formatDate(config.validFrom)}
+                            {config.validTo && ` do ${formatDate(config.validTo)}`}
+                          </span>
+                        </div>
+                      </div>
+                      <span 
+                        className={`px-2 py-1 rounded text-xs font-medium ${config.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                      >
+                        {config.isActive ? 'Aktivní' : 'Neaktivní'}
+                      </span>
+                    </div>
 
-          {/* Nájem Depa NB */}
-          <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-            <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
-              <Warehouse size={18} style={{ color: '#0891b2' }} />
-              Nájem Depa
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <PriceSection title="Sklad ALL IN" color="#0891b2">
-                <PriceRow label="Základní cena" value="410 000 Kč/měs" color="#0891b2" dodatek={12} />
-                <PriceRow label="Po slevě (bonusy)" value="396 000 Kč/měs" color="#0891b2" dodatek={12} />
-              </PriceSection>
-              
-              <PriceSection title="Personál" color="#0891b2">
-                <PriceRow label="4× skladník" value="194 800 Kč/měs" color="#0891b2" dodatek={12} />
-              </PriceSection>
-            </div>
-            
-            {/* Bonus System */}
-            <div className="mt-4 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-green-light)', border: '1px solid var(--color-green)' }}>
-              <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--color-green)' }}>
-                💰 Bonusový systém (kvalita doručení)
-              </h4>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                {[
-                  { quality: '≥ 98%', total: '445 600' },
-                  { quality: '97,51-97,99%', total: '445 600' },
-                  { quality: '97,01-97,50%', total: '436 700' },
-                  { quality: '96,51-97,00%', total: '427 800' },
-                  { quality: '96,01-96,50%', total: '418 900' },
-                  { quality: '< 96%', total: '410 000' }
-                ].map((b, idx) => (
-                  <div key={idx} className="p-3 rounded-lg text-center" style={{ backgroundColor: 'white' }}>
-                    <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{b.quality}</div>
-                    <div className="font-semibold" style={{ color: 'var(--color-green)' }}>{b.total} Kč</div>
+                    {/* Sazby */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {/* FIX sazby */}
+                      {config.fixRates?.length > 0 && (
+                        <PriceSection title="FIX sazby" color="var(--color-purple)">
+                          {config.fixRates.map((rate, idx) => (
+                            <PriceRow 
+                              key={idx}
+                              label={rate.routeType || 'Standardní'}
+                              value={formatCZK(rate.rate)}
+                              color="var(--color-purple)"
+                              contractNumber={contract?.number}
+                            />
+                          ))}
+                        </PriceSection>
+                      )}
+
+                      {/* KM sazby */}
+                      {config.kmRates?.length > 0 && (
+                        <PriceSection title="Kilometrové sazby" color="var(--color-green)">
+                          {config.kmRates.map((rate, idx) => (
+                            <PriceRow 
+                              key={idx}
+                              label={rate.routeType || 'Standardní'}
+                              value={`${rate.rate} Kč/km`}
+                              color="var(--color-green)"
+                              contractNumber={contract?.number}
+                            />
+                          ))}
+                        </PriceSection>
+                      )}
+
+                      {/* DEPO sazby */}
+                      {config.depoRates?.length > 0 && (
+                        <PriceSection title="DEPO sazby" color="#0891b2">
+                          {config.depoRates.map((rate, idx) => (
+                            <PriceRow 
+                              key={idx}
+                              label={`${rate.depoName} (${rate.rateType})`}
+                              value={formatCZK(rate.rate)}
+                              color="#0891b2"
+                              contractNumber={contract?.number}
+                            />
+                          ))}
+                        </PriceSection>
+                      )}
+
+                      {/* Linehaul sazby */}
+                      {config.linehaulRates?.length > 0 && (
+                        <PriceSection title="Linehaul sazby" color="var(--color-red)">
+                          {config.linehaulRates.map((rate, idx) => (
+                            <PriceRow 
+                              key={idx}
+                              label={`${rate.fromCode || '?'} → ${rate.toCode || '?'} (${rate.vehicleType})`}
+                              value={formatCZK(rate.rate)}
+                              color="var(--color-red)"
+                              contractNumber={contract?.number}
+                            />
+                          ))}
+                        </PriceSection>
+                      )}
+
+                      {/* Bonus sazby */}
+                      {config.bonusRates?.length > 0 && (
+                        <PriceSection title="Bonusy" color="var(--color-green)">
+                          {config.bonusRates.map((rate, idx) => (
+                            <PriceRow 
+                              key={idx}
+                              label={`Kvalita ${rate.qualityMin}% - ${rate.qualityMax}%`}
+                              value={formatCZK(rate.totalWithBonus)}
+                              color="var(--color-green)"
+                              contractNumber={contract?.number}
+                            />
+                          ))}
+                        </PriceSection>
+                      )}
+                    </div>
+
+                    {/* Prázdný ceník */}
+                    {!config.fixRates?.length && !config.kmRates?.length && !config.depoRates?.length && 
+                     !config.linehaulRates?.length && !config.bonusRates?.length && (
+                      <p className="text-center py-4" style={{ color: 'var(--color-text-muted)' }}>
+                        Tento ceník nemá definované žádné sazby
+                      </p>
+                    )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
+          ))}
+        </>
+      )}
+
+      {/* Historie smluv */}
+      {!isLoading && contractList?.length > 0 && (
+        <div className="card">
+          <div className="card-header" style={{ backgroundColor: 'var(--color-primary-light)' }}>
+            <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <FileText size={22} />
+              Historie smluv a dodatků
+            </h2>
           </div>
-
-        </div>
-      </div>
-
-      {/* ====== EXTRA SLUŽBY ====== */}
-      <div className="card">
-        <div className="card-header" style={{ backgroundColor: 'var(--color-red-light)' }}>
-          <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--color-red)' }}>
-            <Package size={22} />
-            📦 Extra služby
-          </h2>
-        </div>
-        <div className="p-6 space-y-6">
-          
-          {/* AlzaTrade 2.0 svozy (DROP 2.0) */}
-          <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-            <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
-              <Truck size={18} style={{ color: 'var(--color-red)' }} />
-              AlzaTrade 2.0 svozy (DROP 2.0)
-              <span className="text-xs font-normal px-2 py-1 rounded" style={{ backgroundColor: 'var(--color-red-light)', color: 'var(--color-red)' }}>
-                od 1.11.2025
-              </span>
-            </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <PriceRow label="Trasa A-I" value="8 500 Kč" color="var(--color-red)" dodatek={13} />
-              <PriceRow label="Dopoledne" value="8 500 Kč" color="var(--color-red)" dodatek={13} />
-              <PriceRow label="Posila C, D, H" value="11 600 Kč" color="var(--color-red)" dodatek={13} />
-              <PriceRow label="Sobotní trasa" value="8 500 Kč" color="var(--color-red)" dodatek={13} />
+          <div className="p-6">
+            <div className="space-y-2">
+              {contractList.map(contract => (
+                <div 
+                  key={contract.id} 
+                  className="grid grid-cols-[150px_100px_1fr] gap-4 p-3 rounded-lg items-center" 
+                  style={{ backgroundColor: 'var(--color-bg)' }}
+                >
+                  <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
+                    {contract.number || `Smlouva #${contract.id}`}
+                  </span>
+                  <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                    od {formatDate(contract.validFrom)}
+                  </span>
+                  <span className="text-sm" style={{ color: 'var(--color-text-dark)' }}>
+                    {contract.type || 'Obecná smlouva'}
+                    {contract.notes && ` – ${contract.notes}`}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
-
         </div>
-      </div>
+      )}
 
-      {/* ====== LEGENDA ====== */}
+      {/* Legenda */}
       <div className="flex flex-wrap items-center gap-4 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
         <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Legenda:</span>
         <div className="flex flex-wrap items-center gap-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
@@ -316,27 +369,10 @@ export default function Prices() {
             <span className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-orange-light)', color: '#e67e22' }}>?</span>
             = Chybí ve smlouvách
           </span>
-        </div>
-      </div>
-
-      {/* ====== SEZNAM SMLUV ====== */}
-      <div className="card">
-        <div className="card-header" style={{ backgroundColor: 'var(--color-primary-light)' }}>
-          <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-            <FileText size={22} />
-            Historie dodatků ke smlouvě
-          </h2>
-        </div>
-        <div className="p-6">
-          <div className="space-y-2">
-            {contractHistory.map(d => (
-              <div key={d.id} className="grid grid-cols-[100px_100px_1fr] gap-4 p-3 rounded-lg items-center" style={{ backgroundColor: 'var(--color-bg)' }}>
-                <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>Dodatek {d.id}</span>
-                <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>od {d.from}</span>
-                <span className="text-sm" style={{ color: 'var(--color-text-dark)' }}>{d.type}: {d.changes}</span>
-              </div>
-            ))}
-          </div>
+          <span className="flex items-center gap-1">
+            <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Aktivní</span>
+            = Aktuálně platný ceník
+          </span>
         </div>
       </div>
     </div>
