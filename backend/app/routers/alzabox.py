@@ -141,185 +141,382 @@ async def import_alzabox_deliveries(
     delivery_type: str = Query("DPO", description="Typ závozu: DPO, SD, THIRD"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Import dojezdových časů z XLSX souboru."""
+    """
+    Import dojezdových časů z XLSX souboru.
+    
+    Podporované formáty:
+    1. Nový formát (2024+): 
+       - Sheet "Plan" nebo "Actual" (bez "Skutecnost")
+       - Řádek 2: datumy ve sloupcích 2+
+       - Col0: "HH:MM | popis -- ABxxxx" nebo název trasy
+       
+    2. Starý formát:
+       - Sheety "Plan" a "Skutecnost"
+       - Řádek 1: datumy ve sloupcích 4+
+       - Col0: route_name, Col1: box_code, Col2: info
+    """
     try:
         content = await file.read()
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
         
-        if 'Plan' not in wb.sheetnames or 'Skutecnost' not in wb.sheetnames:
-            raise HTTPException(status_code=400, detail="Sheety 'Plan' a 'Skutecnost' nenalezeny")
+        # Detekce formátu souboru
+        is_new_format = 'Plan' in wb.sheetnames and 'Skutecnost' not in wb.sheetnames
         
-        plan_sheet = wb['Plan']
-        actual_sheet = wb['Skutecnost']
-        
-        # Načti datumy ze sloupců (od sloupce 4)
-        dates = []
-        for col in range(4, plan_sheet.max_column + 1):
-            date_val = plan_sheet.cell(row=1, column=col).value
-            if isinstance(date_val, datetime):
-                dates.append((col, date_val.date()))
-        
-        # Smaž existující záznamy pro dané období a delivery_type
-        if dates:
-            min_date = min(d for _, d in dates)
-            max_date = max(d for _, d in dates)
-            
-            min_datetime = datetime.combine(min_date, datetime.min.time())
-            max_datetime = datetime.combine(max_date, datetime.max.time())
-            
-            delete_stmt = delete(AlzaBoxDelivery).where(
-                and_(
-                    AlzaBoxDelivery.delivery_type == delivery_type,
-                    AlzaBoxDelivery.delivery_date >= min_datetime,
-                    AlzaBoxDelivery.delivery_date <= max_datetime
-                )
-            )
-            result = await db.execute(delete_stmt)
-            await db.flush()
-            logger.info(f"Smazáno {result.rowcount} existujících záznamů")
-        
-        # Načti mapování boxů z DB
-        result = await db.execute(select(AlzaBox))
-        boxes = {b.code: b.id for b in result.scalars().all()}
-        
-        # Načti assignments pro carrier_id
-        result = await db.execute(
-            select(AlzaBoxAssignment).order_by(AlzaBoxAssignment.valid_from.desc())
-        )
-        assignments = {}
-        for a in result.scalars().all():
-            if a.box_id not in assignments:
-                assignments[a.box_id] = a.carrier_id
-        
-        # Načti plánované časy z Plan sheetu
-        plan_data = {}
-        for row in range(3, plan_sheet.max_row + 1):
-            route_name = plan_sheet.cell(row=row, column=1).value
-            box_code = plan_sheet.cell(row=row, column=2).value
-            info = plan_sheet.cell(row=row, column=3).value
-            
-            if not box_code or not str(box_code).strip():
-                continue
-            
-            box_code = str(box_code).strip()
-            
-            # Parsuj plánovaný čas ze sloupce 3
-            # Formát 1: "09:00 | popis" → 09:00
-            # Formát 2: "Liberecko I 12 | popis" → 12:00 (číslo na konci = hodina)
-            planned_time = None
-            if info and '|' in str(info):
-                first_part = str(info).split('|')[0].strip()
-                
-                # Zkus formát HH:MM
-                if ':' in first_part:
-                    try:
-                        parts = first_part.split(':')
-                        if len(parts) >= 2:
-                            h = int(parts[0])
-                            m = int(parts[1])
-                            if 0 <= h <= 23 and 0 <= m <= 59:
-                                planned_time = f"{h:02d}:{m:02d}"
-                    except (ValueError, IndexError):
-                        pass
-                
-                # Pokud není HH:MM, zkus číslo na konci (např. "Liberecko I 12" → 12:00)
-                if not planned_time:
-                    match = re.search(r'(\d{1,2})\s*$', first_part)
-                    if match:
-                        h = int(match.group(1))
-                        if 0 <= h <= 23:
-                            planned_time = f"{h:02d}:00"
-            
-            plan_data[box_code] = {
-                'route_name': route_name,
-                'planned_time': planned_time
-            }
-        
-        # Načti skutečné časy ze Skutecnost sheetu
-        actual_data = {}
-        for row in range(3, actual_sheet.max_row + 1):
-            box_code = actual_sheet.cell(row=row, column=2).value
-            
-            if not box_code or not str(box_code).strip():
-                continue
-            
-            box_code = str(box_code).strip()
-            actual_data[box_code] = {}
-            
-            for col, dt in dates:
-                actual_time_val = actual_sheet.cell(row=row, column=col).value
-                if actual_time_val and isinstance(actual_time_val, datetime):
-                    actual_data[box_code][col] = actual_time_val
-        
-        # Vytvoř delivery záznamy
-        created = 0
-        unique_days = set()
-        
-        for box_code, plan_info in plan_data.items():
-            if box_code not in boxes:
-                continue
-            
-            box_id = boxes[box_code]
-            carrier_id = assignments.get(box_id)
-            route_name = plan_info['route_name']
-            planned_time_str = plan_info['planned_time']
-            
-            for col, delivery_date in dates:
-                actual_time = actual_data.get(box_code, {}).get(col)
-                
-                if not actual_time:
-                    continue
-                
-                # Spočítej plánovaný čas
-                planned_time_str_final = None
-                planned_datetime = None
-                if planned_time_str:
-                    try:
-                        parts = planned_time_str.split(':')
-                        h, m = int(parts[0]), int(parts[1])
-                        planned_datetime = datetime.combine(delivery_date, datetime.min.time().replace(hour=h, minute=m))
-                        planned_time_str_final = f"{h:02d}:{m:02d}"
-                    except:
-                        pass
-                
-                # Spočítej zpoždění
-                delay_minutes = None
-                on_time = None
-                if planned_datetime and actual_time:
-                    diff = (actual_time - planned_datetime).total_seconds() / 60
-                    delay_minutes = int(diff)
-                    on_time = diff <= 0
-                
-                delivery = AlzaBoxDelivery(
-                    box_id=box_id,
-                    carrier_id=carrier_id,
-                    delivery_date=datetime.combine(delivery_date, datetime.min.time()),
-                    delivery_type=delivery_type,
-                    route_name=route_name,
-                    planned_time=planned_time_str_final,  # String "HH:MM"
-                    actual_time=actual_time,
-                    delay_minutes=delay_minutes,
-                    on_time=on_time,
-                    created_at=datetime.utcnow()
-                )
-                db.add(delivery)
-                created += 1
-                unique_days.add(delivery_date)
-        
-        await db.commit()
-        wb.close()
-        
-        return {
-            "success": True,
-            "deliveries_created": created,
-            "deliveries_updated": 0,
-            "days_processed": len(unique_days)
-        }
+        if is_new_format:
+            # NOVÝ FORMÁT - vše v jednom sloupci
+            return await _import_deliveries_new_format(wb, delivery_type, db)
+        else:
+            # STARÝ FORMÁT - separátní sloupce
+            return await _import_deliveries_old_format(wb, delivery_type, db)
         
     except Exception as e:
         await db.rollback()
         logger.error(f"Error importing deliveries: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _import_deliveries_new_format(wb, delivery_type: str, db: AsyncSession):
+    """
+    Import z nového formátu:
+    - Sheet "Plan" nebo "Actual"
+    - Col0: "HH:MM | popis -- ABxxxx" nebo název trasy (bez "|")
+    - Sloupce 2+: actual times pro každý datum
+    """
+    sheet = wb['Plan'] if 'Plan' in wb.sheetnames else wb['Actual']
+    
+    # Načti datumy z řádku 2, sloupce 2+
+    dates = []
+    for col in range(2, sheet.max_column + 1):
+        date_val = sheet.cell(row=2, column=col).value
+        if isinstance(date_val, datetime):
+            dates.append((col, date_val.date()))
+    
+    if not dates:
+        raise HTTPException(status_code=400, detail="Nenalezeny žádné datumy v řádku 2")
+    
+    logger.info(f"Nalezeno {len(dates)} datumů: {dates[0][1]} až {dates[-1][1]}")
+    
+    # Smaž existující záznamy pro dané období
+    min_date = min(d for _, d in dates)
+    max_date = max(d for _, d in dates)
+    
+    delete_stmt = delete(AlzaBoxDelivery).where(
+        and_(
+            AlzaBoxDelivery.delivery_type == delivery_type,
+            AlzaBoxDelivery.delivery_date >= datetime.combine(min_date, datetime.min.time()),
+            AlzaBoxDelivery.delivery_date <= datetime.combine(max_date, datetime.max.time())
+        )
+    )
+    result = await db.execute(delete_stmt)
+    await db.flush()
+    logger.info(f"Smazáno {result.rowcount} existujících záznamů")
+    
+    # Načti mapování boxů z DB
+    result = await db.execute(select(AlzaBox))
+    boxes = {b.code: b.id for b in result.scalars().all()}
+    
+    # Načti mapování dopravců
+    result = await db.execute(select(Carrier))
+    carriers_by_name = {c.name.lower(): c.id for c in result.scalars().all()}
+    
+    # Načti mapování route_name → carrier_id z RoutePlanRoute
+    route_to_carrier = {}
+    route_plans_sql = """
+    SELECT rpr."routeName", rpr."carrierName"
+    FROM "RoutePlanRoute" rpr
+    JOIN "RoutePlan" rp ON rp.id = rpr."routePlanId"
+    WHERE rp."validFrom" <= :max_date
+    AND (rp."validTo" IS NULL OR rp."validTo" >= :min_date)
+    ORDER BY rp."validFrom" DESC
+    """
+    result = await db.execute(text(route_plans_sql), {
+        "min_date": datetime.combine(min_date, datetime.min.time()),
+        "max_date": datetime.combine(max_date, datetime.max.time())
+    })
+    for row in result.fetchall():
+        route_name, carrier_name = row[0], row[1]
+        if route_name and route_name not in route_to_carrier and carrier_name:
+            carrier_id = carriers_by_name.get(carrier_name.lower())
+            if carrier_id:
+                route_to_carrier[route_name] = carrier_id
+    
+    logger.info(f"Načteno {len(route_to_carrier)} mapování route→carrier")
+    
+    # Parsuj data z sheetu
+    current_route = None
+    created = 0
+    unique_days = set()
+    skipped_no_box = 0
+    skipped_no_time = 0
+    
+    for row_idx in range(3, sheet.max_row + 1):
+        col0 = sheet.cell(row=row_idx, column=1).value
+        
+        if not col0 or not str(col0).strip():
+            continue
+        
+        col0_str = str(col0).strip()
+        
+        # Je to název trasy? (neobsahuje "|")
+        if '|' not in col0_str:
+            current_route = col0_str
+            continue
+        
+        # Je to box? Parsuj "HH:MM | popis -- ABxxxx"
+        # Extrahuj planned_time
+        planned_time = None
+        time_match = re.match(r'^(\d{1,2}):(\d{2})', col0_str)
+        if time_match:
+            h, m = int(time_match.group(1)), int(time_match.group(2))
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                planned_time = f"{h:02d}:{m:02d}"
+        
+        # Extrahuj box_code z "-- ABxxxx"
+        box_code = None
+        box_match = re.search(r'--\s*(AB\d+)', col0_str)
+        if box_match:
+            box_code = box_match.group(1)
+        
+        if not box_code:
+            skipped_no_box += 1
+            continue
+        
+        if box_code not in boxes:
+            skipped_no_box += 1
+            continue
+        
+        box_id = boxes[box_code]
+        carrier_id = route_to_carrier.get(current_route) if current_route else None
+        
+        # Vytvoř delivery pro každý datum
+        for col, delivery_date in dates:
+            actual_time_val = sheet.cell(row=row_idx, column=col).value
+            
+            if not actual_time_val or not isinstance(actual_time_val, datetime):
+                skipped_no_time += 1
+                continue
+            
+            # Spočítej zpoždění
+            delay_minutes = None
+            on_time = None
+            if planned_time:
+                try:
+                    parts = planned_time.split(':')
+                    h, m = int(parts[0]), int(parts[1])
+                    planned_datetime = datetime.combine(delivery_date, datetime.min.time().replace(hour=h, minute=m))
+                    diff = (actual_time_val - planned_datetime).total_seconds() / 60
+                    delay_minutes = int(diff)
+                    on_time = diff <= 0
+                except:
+                    pass
+            
+            delivery = AlzaBoxDelivery(
+                box_id=box_id,
+                carrier_id=carrier_id,
+                delivery_date=datetime.combine(delivery_date, datetime.min.time()),
+                delivery_type=delivery_type,
+                route_name=current_route,
+                planned_time=planned_time,
+                actual_time=actual_time_val,
+                delay_minutes=delay_minutes,
+                on_time=on_time,
+                created_at=datetime.utcnow()
+            )
+            db.add(delivery)
+            created += 1
+            unique_days.add(delivery_date)
+    
+    await db.commit()
+    wb.close()
+    
+    return {
+        "success": True,
+        "format": "new",
+        "deliveries_created": created,
+        "days_processed": len(unique_days),
+        "routes_with_carrier": len(route_to_carrier),
+        "skipped_no_box": skipped_no_box
+    }
+
+
+async def _import_deliveries_old_format(wb, delivery_type: str, db: AsyncSession):
+    """Import ze starého formátu se sheety Plan a Skutecnost."""
+    if 'Plan' not in wb.sheetnames or 'Skutecnost' not in wb.sheetnames:
+        raise HTTPException(status_code=400, detail="Sheety 'Plan' a 'Skutecnost' nenalezeny")
+    
+    plan_sheet = wb['Plan']
+    actual_sheet = wb['Skutecnost']
+    
+    # Načti datumy ze sloupců (od sloupce 4)
+    dates = []
+    for col in range(4, plan_sheet.max_column + 1):
+        date_val = plan_sheet.cell(row=1, column=col).value
+        if isinstance(date_val, datetime):
+            dates.append((col, date_val.date()))
+    
+    if not dates:
+        raise HTTPException(status_code=400, detail="Nenalezeny žádné datumy")
+    
+    # Smaž existující záznamy pro dané období
+    min_date = min(d for _, d in dates)
+    max_date = max(d for _, d in dates)
+    
+    delete_stmt = delete(AlzaBoxDelivery).where(
+        and_(
+            AlzaBoxDelivery.delivery_type == delivery_type,
+            AlzaBoxDelivery.delivery_date >= datetime.combine(min_date, datetime.min.time()),
+            AlzaBoxDelivery.delivery_date <= datetime.combine(max_date, datetime.max.time())
+        )
+    )
+    result = await db.execute(delete_stmt)
+    await db.flush()
+    logger.info(f"Smazáno {result.rowcount} existujících záznamů")
+    
+    # Načti mapování boxů z DB
+    result = await db.execute(select(AlzaBox))
+    boxes = {b.code: b.id for b in result.scalars().all()}
+    
+    # Načti mapování dopravců
+    result = await db.execute(select(Carrier))
+    carriers_by_name = {c.name.lower(): c.id for c in result.scalars().all()}
+    
+    # Načti mapování route_name → carrier_id z RoutePlanRoute
+    route_to_carrier = {}
+    route_plans_sql = """
+    SELECT rpr."routeName", rpr."carrierName"
+    FROM "RoutePlanRoute" rpr
+    JOIN "RoutePlan" rp ON rp.id = rpr."routePlanId"
+    WHERE rp."validFrom" <= :max_date
+    AND (rp."validTo" IS NULL OR rp."validTo" >= :min_date)
+    ORDER BY rp."validFrom" DESC
+    """
+    result = await db.execute(text(route_plans_sql), {
+        "min_date": datetime.combine(min_date, datetime.min.time()),
+        "max_date": datetime.combine(max_date, datetime.max.time())
+    })
+    for row in result.fetchall():
+        route_name, carrier_name = row[0], row[1]
+        if route_name and route_name not in route_to_carrier and carrier_name:
+            carrier_id = carriers_by_name.get(carrier_name.lower())
+            if carrier_id:
+                route_to_carrier[route_name] = carrier_id
+    
+    logger.info(f"Načteno {len(route_to_carrier)} mapování route→carrier")
+    
+    # Načti plánované časy z Plan sheetu
+    plan_data = {}
+    for row in range(3, plan_sheet.max_row + 1):
+        route_name = plan_sheet.cell(row=row, column=1).value
+        box_code = plan_sheet.cell(row=row, column=2).value
+        info = plan_sheet.cell(row=row, column=3).value
+        
+        if not box_code or not str(box_code).strip():
+            continue
+        
+        box_code = str(box_code).strip()
+        
+        # Parsuj plánovaný čas
+        planned_time = None
+        if info and '|' in str(info):
+            first_part = str(info).split('|')[0].strip()
+            
+            if ':' in first_part:
+                try:
+                    parts = first_part.split(':')
+                    if len(parts) >= 2:
+                        h = int(parts[0])
+                        m = int(parts[1])
+                        if 0 <= h <= 23 and 0 <= m <= 59:
+                            planned_time = f"{h:02d}:{m:02d}"
+                except (ValueError, IndexError):
+                    pass
+            
+            if not planned_time:
+                match = re.search(r'(\d{1,2})\s*$', first_part)
+                if match:
+                    h = int(match.group(1))
+                    if 0 <= h <= 23:
+                        planned_time = f"{h:02d}:00"
+        
+        plan_data[box_code] = {
+            'route_name': route_name,
+            'planned_time': planned_time
+        }
+    
+    # Načti skutečné časy ze Skutecnost sheetu
+    actual_data = {}
+    for row in range(3, actual_sheet.max_row + 1):
+        box_code = actual_sheet.cell(row=row, column=2).value
+        
+        if not box_code or not str(box_code).strip():
+            continue
+        
+        box_code = str(box_code).strip()
+        actual_data[box_code] = {}
+        
+        for col, dt in dates:
+            actual_time_val = actual_sheet.cell(row=row, column=col).value
+            if actual_time_val and isinstance(actual_time_val, datetime):
+                actual_data[box_code][col] = actual_time_val
+    
+    # Vytvoř delivery záznamy
+    created = 0
+    unique_days = set()
+    
+    for box_code, plan_info in plan_data.items():
+        if box_code not in boxes:
+            continue
+        
+        box_id = boxes[box_code]
+        route_name = plan_info['route_name']
+        planned_time_str = plan_info['planned_time']
+        carrier_id = route_to_carrier.get(route_name)
+        
+        for col, delivery_date in dates:
+            actual_time = actual_data.get(box_code, {}).get(col)
+            
+            if not actual_time:
+                continue
+            
+            delay_minutes = None
+            on_time = None
+            if planned_time_str:
+                try:
+                    parts = planned_time_str.split(':')
+                    h, m = int(parts[0]), int(parts[1])
+                    planned_datetime = datetime.combine(delivery_date, datetime.min.time().replace(hour=h, minute=m))
+                    diff = (actual_time - planned_datetime).total_seconds() / 60
+                    delay_minutes = int(diff)
+                    on_time = diff <= 0
+                except:
+                    pass
+            
+            delivery = AlzaBoxDelivery(
+                box_id=box_id,
+                carrier_id=carrier_id,
+                delivery_date=datetime.combine(delivery_date, datetime.min.time()),
+                delivery_type=delivery_type,
+                route_name=route_name,
+                planned_time=planned_time_str,
+                actual_time=actual_time,
+                delay_minutes=delay_minutes,
+                on_time=on_time,
+                created_at=datetime.utcnow()
+            )
+            db.add(delivery)
+            created += 1
+            unique_days.add(delivery_date)
+    
+    await db.commit()
+    wb.close()
+    
+    return {
+        "success": True,
+        "format": "old",
+        "deliveries_created": created,
+        "days_processed": len(unique_days),
+        "routes_with_carrier": len(route_to_carrier)
+    }
 
 
 # =============================================================================
