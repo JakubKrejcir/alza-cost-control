@@ -3,17 +3,29 @@ import { useQuery } from '@tanstack/react-query'
 import { format, subDays } from 'date-fns'
 import { cs } from 'date-fns/locale'
 import { 
-  Package, Clock, TrendingUp, AlertTriangle,
-  CheckCircle, Filter, ChevronDown, ChevronUp,
-  ArrowLeft, MapPin, Truck, X, Calendar
+  Package, Clock, TrendingUp, Target,
+  CheckCircle, XCircle, Filter, ChevronDown, ChevronUp,
+  ArrowLeft, MapPin, Truck, X, Calendar, AlertTriangle
 } from 'lucide-react'
 import { alzabox as alzaboxApi } from '../lib/api'
+
+// =============================================================================
+// KONSTANTY
+// =============================================================================
+
+const TARGET_PCT = 99 // Cílová včasnost v %
+
+const getStatusColor = (pct) => {
+  if (pct >= 99) return { bg: 'var(--color-green-light)', fg: 'var(--color-green)', status: 'success' }
+  if (pct >= 95) return { bg: 'var(--color-orange-light)', fg: '#e67e22', status: 'warning' }
+  return { bg: 'var(--color-red-light)', fg: 'var(--color-red)', status: 'error' }
+}
 
 // =============================================================================
 // HELPER COMPONENTS
 // =============================================================================
 
-function StatCard({ icon: Icon, label, value, subtext, color = 'primary' }) {
+function StatCard({ icon: Icon, label, value, subtext, target, color = 'primary' }) {
   const colorMap = {
     primary: { bg: 'var(--color-primary-light)', fg: 'var(--color-primary)' },
     green: { bg: 'var(--color-green-light)', fg: 'var(--color-green)' },
@@ -24,14 +36,22 @@ function StatCard({ icon: Icon, label, value, subtext, color = 'primary' }) {
 
   return (
     <div className="stat-card">
-      <div className="flex items-center gap-3 mb-3">
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-          style={{ backgroundColor: colors.bg, color: colors.fg }}>
-          <Icon className="w-5 h-5" />
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: colors.bg, color: colors.fg }}>
+            <Icon className="w-5 h-5" />
+          </div>
+          <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{label}</span>
         </div>
-        <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{label}</span>
+        {target && (
+          <span className="text-xs px-2 py-1 rounded-full" 
+            style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text-muted)' }}>
+            Cíl: {target}
+          </span>
+        )}
       </div>
-      <div className="stat-card-value" style={{ color: 'var(--color-text-dark)' }}>{value}</div>
+      <div className="stat-card-value" style={{ color: colors.fg }}>{value}</div>
       {subtext && (
         <div className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>{subtext}</div>
       )}
@@ -39,69 +59,64 @@ function StatCard({ icon: Icon, label, value, subtext, color = 'primary' }) {
   )
 }
 
-function OnTimeBar({ percentage }) {
-  const getColor = (pct) => {
-    if (pct >= 95) return 'var(--color-green)'
-    if (pct >= 90) return 'var(--color-orange)'
-    return 'var(--color-red)'
-  }
+function ProgressBar({ value, showLabel = true }) {
+  const colors = getStatusColor(value)
   
   return (
-    <div className="w-full h-2 rounded-full" style={{ backgroundColor: 'var(--color-border)' }}>
-      <div 
-        className="h-full rounded-full transition-all duration-300"
-        style={{ width: `${Math.min(percentage, 100)}%`, backgroundColor: getColor(percentage) }}
-      />
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-2 rounded-full" style={{ backgroundColor: 'var(--color-border)' }}>
+        <div 
+          className="h-full rounded-full transition-all duration-300"
+          style={{ width: `${Math.min(value, 100)}%`, backgroundColor: colors.fg }}
+        />
+      </div>
+      {showLabel && (
+        <span className="text-sm font-medium w-14 text-right" style={{ color: colors.fg }}>
+          {value.toFixed(1)}%
+        </span>
+      )}
     </div>
   )
 }
 
-function DailyChart({ data }) {
-  if (!data || data.length === 0) return null
-  const maxDeliveries = Math.max(...data.map(d => d.totalDeliveries))
-  
+function StatusBadge({ onTime }) {
+  if (onTime) {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{ backgroundColor: 'var(--color-green-light)', color: 'var(--color-green)' }}>
+        <CheckCircle size={12} /> Včas
+      </span>
+    )
+  }
   return (
-    <div className="space-y-2">
-      <div className="flex items-end gap-1 h-32">
-        {data.map((day) => {
-          const height = (day.totalDeliveries / maxDeliveries) * 100
-          return (
-            <div key={day.date} className="flex-1 flex flex-col items-center group relative">
-              <div 
-                className="w-full rounded-t relative"
-                style={{ height: `${height}%`, backgroundColor: 'var(--color-border)', minHeight: '4px' }}
-              >
-                <div 
-                  className="absolute bottom-0 left-0 right-0 rounded-t"
-                  style={{ 
-                    height: `${(day.onTimeDeliveries / day.totalDeliveries) * 100}%`,
-                    backgroundColor: day.onTimePct >= 95 ? 'var(--color-green)' : 
-                                     day.onTimePct >= 90 ? 'var(--color-orange)' : 'var(--color-red)'
-                  }}
-                />
-              </div>
-              <div className="absolute bottom-full mb-2 hidden group-hover:block z-10">
-                <div className="px-2 py-1 rounded text-xs whitespace-nowrap"
-                  style={{ backgroundColor: 'var(--color-card)', boxShadow: 'var(--shadow-lg)' }}>
-                  <div style={{ color: 'var(--color-text-dark)' }}>{format(new Date(day.date), 'd.M.', { locale: cs })}</div>
-                  <div style={{ color: 'var(--color-text-muted)' }}>{day.totalDeliveries} doručení</div>
-                  <div style={{ color: day.onTimePct >= 95 ? 'var(--color-green)' : 'var(--color-orange)' }}>
-                    {day.onTimePct.toFixed(0)}% včas
-                  </div>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <div className="flex gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        {data.map((day, idx) => (
-          <div key={day.date} className="flex-1 text-center">
-            {idx % 5 === 0 ? format(new Date(day.date), 'd.M.', { locale: cs }) : ''}
-          </div>
-        ))}
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+      style={{ backgroundColor: 'var(--color-red-light)', color: 'var(--color-red)' }}>
+      <XCircle size={12} /> Pozdě
+    </span>
+  )
+}
+
+function TimeDiff({ planned, actual }) {
+  if (!planned || !actual) return <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+  
+  // Parse times
+  const [pH, pM] = planned.split(':').map(Number)
+  const [aH, aM] = actual.split(':').map(Number)
+  const plannedMins = pH * 60 + pM
+  const actualMins = aH * 60 + aM
+  const diff = actualMins - plannedMins
+  
+  if (diff <= 0) {
+    return (
+      <span style={{ color: 'var(--color-green)' }}>
+        {diff === 0 ? 'Přesně' : `${Math.abs(diff)} min dříve`}
+      </span>
+    )
+  }
+  return (
+    <span style={{ color: 'var(--color-red)' }}>
+      +{diff} min
+    </span>
   )
 }
 
@@ -128,7 +143,8 @@ function BoxDetailModal({ boxId, filters, onClose }) {
     )
   }
 
-  const { box, stats, history, trend } = data || {}
+  const { box, stats, history } = data || {}
+  const colors = getStatusColor(stats?.onTimePct || 0)
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -137,9 +153,12 @@ function BoxDetailModal({ boxId, filters, onClose }) {
         <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
           <div>
             <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-dark)' }}>
-              {box?.code} - {box?.name}
+              {box?.code}
             </h2>
-            <div className="flex items-center gap-4 text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+              {box?.name}
+            </div>
+            <div className="flex items-center gap-4 text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>
               <span className="flex items-center gap-1"><MapPin size={14} />{box?.city}</span>
               <span className="flex items-center gap-1"><Truck size={14} />{box?.carrierName || 'Nepřiřazeno'}</span>
             </div>
@@ -159,59 +178,49 @@ function BoxDetailModal({ boxId, filters, onClose }) {
               </div>
               <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Doručení celkem</div>
             </div>
-            <div className="text-center p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
-              <div className="text-2xl font-bold" style={{ 
-                color: stats?.onTimePct >= 95 ? 'var(--color-green)' : 
-                       stats?.onTimePct >= 90 ? '#e67e22' : 'var(--color-red)' 
-              }}>
+            <div className="text-center p-4 rounded-lg" style={{ backgroundColor: colors.bg }}>
+              <div className="text-2xl font-bold" style={{ color: colors.fg }}>
                 {stats?.onTimePct || 0}%
               </div>
-              <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Včas</div>
+              <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                Včasnost (cíl {TARGET_PCT}%)
+              </div>
             </div>
             <div className="text-center p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
               <div className="text-2xl font-bold" style={{ color: 'var(--color-text-dark)' }}>
-                {stats?.avgDelayMinutes || 0} min
+                {stats?.onTimeDeliveries || 0}
               </div>
-              <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Ø zpoždění</div>
+              <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Včas (=1)</div>
             </div>
           </div>
 
-          {/* Trend chart */}
-          {trend && trend.length > 0 && (
-            <div>
-              <h3 className="font-medium mb-3" style={{ color: 'var(--color-text-dark)' }}>Trend</h3>
-              <DailyChart data={trend} />
-            </div>
-          )}
-
           {/* History table */}
           <div>
-            <h3 className="font-medium mb-3" style={{ color: 'var(--color-text-dark)' }}>Historie doručení</h3>
-            <div className="overflow-x-auto max-h-64">
+            <h3 className="font-medium mb-3" style={{ color: 'var(--color-text-dark)' }}>
+              Historie dojezdů
+            </h3>
+            <div className="overflow-x-auto max-h-80 border rounded-lg" style={{ borderColor: 'var(--color-border)' }}>
               <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <th className="text-left p-2">Datum</th>
-                    <th className="text-left p-2">Trasa</th>
-                    <th className="text-center p-2">Plán</th>
-                    <th className="text-center p-2">Skutečnost</th>
-                    <th className="text-right p-2">Zpoždění</th>
+                <thead className="sticky top-0" style={{ backgroundColor: 'var(--color-bg)' }}>
+                  <tr>
+                    <th className="text-left p-3 font-medium">Datum</th>
+                    <th className="text-center p-3 font-medium">Plán</th>
+                    <th className="text-center p-3 font-medium">Skutečnost</th>
+                    <th className="text-center p-3 font-medium">Rozdíl</th>
+                    <th className="text-center p-3 font-medium">Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history?.map((h, idx) => (
-                    <tr key={idx} style={{ 
-                      borderBottom: '1px solid var(--color-border-light)',
-                      backgroundColor: h.onTime ? 'transparent' : 'var(--color-red-light)'
-                    }}>
-                      <td className="p-2">{h.date}</td>
-                      <td className="p-2">{h.routeName}</td>
-                      <td className="text-center p-2">{h.plannedTime || '—'}</td>
-                      <td className="text-center p-2">{h.actualTime || '—'}</td>
-                      <td className="text-right p-2" style={{ 
-                        color: h.delayMinutes > 0 ? 'var(--color-red)' : 'var(--color-green)' 
-                      }}>
-                        {h.delayMinutes > 0 ? '+' : ''}{h.delayMinutes} min
+                    <tr key={idx} style={{ borderTop: '1px solid var(--color-border-light)' }}>
+                      <td className="p-3">{h.date}</td>
+                      <td className="text-center p-3 font-mono">{h.plannedTime || '—'}</td>
+                      <td className="text-center p-3 font-mono">{h.actualTime || '—'}</td>
+                      <td className="text-center p-3">
+                        <TimeDiff planned={h.plannedTime} actual={h.actualTime} />
+                      </td>
+                      <td className="text-center p-3">
+                        <StatusBadge onTime={h.onTime} />
                       </td>
                     </tr>
                   ))}
@@ -230,7 +239,7 @@ function BoxDetailModal({ boxId, filters, onClose }) {
 // =============================================================================
 
 export default function AlzaBoxBI() {
-  // View state: 'overview' | 'route' | 'box'
+  // View state: 'overview' | 'route'
   const [view, setView] = useState('overview')
   const [selectedRoute, setSelectedRoute] = useState(null)
   const [selectedBoxId, setSelectedBoxId] = useState(null)
@@ -272,11 +281,6 @@ export default function AlzaBoxBI() {
     queryFn: () => alzaboxApi.getByDay(filters)
   })
 
-  const { data: countries } = useQuery({
-    queryKey: ['alzabox-countries'],
-    queryFn: () => alzaboxApi.getCountries()
-  })
-
   const { data: boxStats } = useQuery({
     queryKey: ['alzabox-boxes', selectedRoute, filters],
     queryFn: () => alzaboxApi.getByBox({ ...filters, route_name: selectedRoute }),
@@ -300,8 +304,9 @@ export default function AlzaBoxBI() {
     }
   }
 
-  const problemRoutes = routeStats?.filter(r => r.onTimePct < 90) || []
-  const selectedCarrier = carriers?.find(c => c.id === carrierId)
+  const summaryColors = getStatusColor(summary?.onTimePct || 0)
+  const lateDeliveries = (summary?.totalDeliveries || 0) - (summary?.onTimeDeliveries || 0)
+  const routesBelowTarget = routeStats?.filter(r => r.onTimePct < TARGET_PCT).length || 0
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -315,10 +320,13 @@ export default function AlzaBoxBI() {
           )}
           <div>
             <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>
-              {view === 'overview' ? 'AlzaBox BI' : `Trasa: ${selectedRoute}`}
+              {view === 'overview' ? 'Včasnost dojezdů k AlzaBoxům' : `Trasa: ${selectedRoute}`}
             </h1>
             <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
-              {view === 'overview' ? 'Analýza dojezdů a kvality doručení' : 'Detail boxů na trase'}
+              {view === 'overview' 
+                ? `Cíl: ${TARGET_PCT}% včasnost | Včas = 1, Pozdě = 0`
+                : 'Detail boxů na trase'
+              }
             </p>
           </div>
         </div>
@@ -351,7 +359,7 @@ export default function AlzaBoxBI() {
                 <option value="">Všichni dopravci</option>
                 {carriers?.map(c => (
                   <option key={c.id} value={c.id}>
-                    {c.name} ({c.onTimePct}% včas)
+                    {c.name} ({c.onTimePct}%)
                   </option>
                 ))}
               </select>
@@ -394,14 +402,6 @@ export default function AlzaBoxBI() {
               </select>
             </div>
           </div>
-          
-          {selectedCarrier && (
-            <div className="mt-3 pt-3 border-t flex items-center gap-4" style={{ borderColor: 'var(--color-border)' }}>
-              <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                <strong>{selectedCarrier.name}</strong>: {selectedCarrier.boxCount} boxů, {selectedCarrier.deliveryCount.toLocaleString()} doručení
-              </span>
-            </div>
-          )}
         </div>
       )}
 
@@ -411,74 +411,94 @@ export default function AlzaBoxBI() {
           {/* Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
-              icon={Package}
-              label="Celkem doručení"
-              value={summary?.totalDeliveries?.toLocaleString('cs-CZ') || '—'}
-              subtext={`za ${Math.ceil((new Date(dateRange.end) - new Date(dateRange.start)) / (1000*60*60*24))} dní`}
-              color="primary"
+              icon={Target}
+              label="Včasnost"
+              value={`${summary?.onTimePct || 0}%`}
+              target={`${TARGET_PCT}%`}
+              subtext={`${summary?.onTimeDeliveries?.toLocaleString('cs-CZ') || 0} včas z ${summary?.totalDeliveries?.toLocaleString('cs-CZ') || 0}`}
+              color={summaryColors.status}
             />
             <StatCard
               icon={CheckCircle}
-              label="Včas nebo dříve"
-              value={`${summary?.onTimePct || 0}%`}
-              subtext={`${summary?.onTimeDeliveries?.toLocaleString('cs-CZ') || 0} doručení`}
-              color={summary?.onTimePct >= 95 ? 'green' : summary?.onTimePct >= 90 ? 'orange' : 'red'}
+              label="Včas (=1)"
+              value={summary?.onTimeDeliveries?.toLocaleString('cs-CZ') || '0'}
+              subtext="Doručeno včas nebo dříve"
+              color="green"
             />
             <StatCard
-              icon={Clock}
-              label="Průměrné zpoždění"
-              value={`${summary?.avgDelayMinutes || 0} min`}
-              subtext={summary?.avgDelayMinutes < 0 ? 'v průměru dříve' : 'v průměru později'}
-              color={summary?.avgDelayMinutes <= 0 ? 'green' : 'orange'}
+              icon={XCircle}
+              label="Pozdě (=0)"
+              value={lateDeliveries.toLocaleString('cs-CZ')}
+              subtext="Doručeno po plánovaném čase"
+              color={lateDeliveries > 0 ? 'red' : 'green'}
             />
             <StatCard
               icon={AlertTriangle}
-              label="Problémové trasy"
-              value={problemRoutes.length}
-              subtext="< 90% včas"
-              color={problemRoutes.length === 0 ? 'green' : 'red'}
+              label="Trasy pod cílem"
+              value={routesBelowTarget}
+              subtext={`< ${TARGET_PCT}% včasnost`}
+              color={routesBelowTarget === 0 ? 'green' : 'red'}
             />
           </div>
 
-          {/* Countries Overview */}
-          {countries && countries.length > 0 && (
-            <div className="card p-4">
-              <h3 className="font-semibold mb-3" style={{ color: 'var(--color-text-dark)' }}>
-                Alzaboxy podle země
+          {/* Daily Breakdown */}
+          <div className="card overflow-hidden">
+            <div className="card-header">
+              <h3 className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                Denní přehled
               </h3>
-              <div className="flex flex-wrap gap-4">
-                {countries.map(c => (
-                  <div key={c.country} className="flex items-center gap-2 px-3 py-2 rounded-lg"
-                    style={{ backgroundColor: 'var(--color-bg)' }}>
-                    <span className="text-lg">
-                      {c.country === 'CZ' ? '🇨🇿' : c.country === 'SK' ? '🇸🇰' : 
-                       c.country === 'HU' ? '🇭🇺' : c.country === 'AT' ? '🇦🇹' : '🌍'}
-                    </span>
-                    <span style={{ color: 'var(--color-text-dark)' }}>{c.country}</span>
-                    <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
-                      {c.boxCount.toLocaleString('cs-CZ')}
-                    </span>
-                  </div>
-                ))}
-              </div>
             </div>
-          )}
-
-          {/* Daily Chart */}
-          {dailyStats && dailyStats.length > 0 && (
-            <div className="card p-6">
-              <h3 className="font-semibold mb-4" style={{ color: 'var(--color-text-dark)' }}>
-                Denní přehled doručení
-              </h3>
-              <DailyChart data={dailyStats} />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr style={{ backgroundColor: 'var(--color-bg)' }}>
+                    <th className="text-left p-3 font-medium">Datum</th>
+                    <th className="text-center p-3 font-medium">Celkem</th>
+                    <th className="text-center p-3 font-medium">Včas (=1)</th>
+                    <th className="text-center p-3 font-medium">Pozdě (=0)</th>
+                    <th className="p-3 font-medium">Včasnost</th>
+                    <th className="text-center p-3 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyStats?.map((day) => {
+                    const late = day.totalDeliveries - day.onTimeDeliveries
+                    const colors = getStatusColor(day.onTimePct)
+                    return (
+                      <tr key={day.date} style={{ borderTop: '1px solid var(--color-border-light)' }}>
+                        <td className="p-3 font-medium">
+                          {format(new Date(day.date), 'EEEE d.M.', { locale: cs })}
+                        </td>
+                        <td className="text-center p-3">{day.totalDeliveries}</td>
+                        <td className="text-center p-3" style={{ color: 'var(--color-green)' }}>
+                          {day.onTimeDeliveries}
+                        </td>
+                        <td className="text-center p-3" style={{ color: late > 0 ? 'var(--color-red)' : 'inherit' }}>
+                          {late}
+                        </td>
+                        <td className="p-3 w-48">
+                          <ProgressBar value={day.onTimePct} />
+                        </td>
+                        <td className="text-center p-3">
+                          {day.onTimePct >= TARGET_PCT ? (
+                            <CheckCircle size={18} style={{ color: 'var(--color-green)' }} />
+                          ) : (
+                            <XCircle size={18} style={{ color: 'var(--color-red)' }} />
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
 
           {/* Routes Table */}
           <div className="card overflow-hidden">
             <div className="card-header">
               <h3 className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>
-                Statistiky podle tras
+                Včasnost podle tras
               </h3>
               <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
                 Klikněte na trasu pro zobrazení detailu boxů
@@ -487,43 +507,51 @@ export default function AlzaBoxBI() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <th className="text-left p-3">Trasa</th>
-                    <th className="text-center p-3">Doručení</th>
-                    <th className="text-center p-3">Včas</th>
-                    <th className="p-3 w-32"></th>
-                    <th className="text-right p-3">Ø Zpoždění</th>
+                  <tr style={{ backgroundColor: 'var(--color-bg)' }}>
+                    <th className="text-left p-3 font-medium">Trasa</th>
+                    <th className="text-center p-3 font-medium">Celkem</th>
+                    <th className="text-center p-3 font-medium">Včas (=1)</th>
+                    <th className="text-center p-3 font-medium">Pozdě (=0)</th>
+                    <th className="p-3 font-medium w-48">Včasnost</th>
+                    <th className="text-center p-3 font-medium">vs Cíl</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {routeStats?.map((route) => (
-                    <tr 
-                      key={route.routeName}
-                      onClick={() => handleRouteClick(route.routeName)}
-                      className="cursor-pointer hover:bg-gray-50"
-                      style={{ 
-                        borderBottom: '1px solid var(--color-border-light)',
-                        backgroundColor: route.onTimePct < 90 ? 'var(--color-red-light)' : 'transparent'
-                      }}
-                    >
-                      <td className="p-3 font-medium" style={{ color: 'var(--color-text-dark)' }}>
-                        {route.routeName}
-                      </td>
-                      <td className="text-center p-3">{route.totalDeliveries}</td>
-                      <td className="text-center p-3">
-                        <span className="font-semibold" style={{ 
-                          color: route.onTimePct >= 95 ? 'var(--color-green)' : 
-                                 route.onTimePct >= 90 ? '#e67e22' : 'var(--color-red)' 
-                        }}>
-                          {route.onTimePct.toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="p-3"><OnTimeBar percentage={route.onTimePct} /></td>
-                      <td className="text-right p-3">
-                        {route.avgDelayMinutes > 0 ? '+' : ''}{route.avgDelayMinutes.toFixed(0)} min
-                      </td>
-                    </tr>
-                  ))}
+                  {routeStats?.map((route) => {
+                    const late = route.totalDeliveries - route.onTimeDeliveries
+                    const colors = getStatusColor(route.onTimePct)
+                    const diffFromTarget = route.onTimePct - TARGET_PCT
+                    return (
+                      <tr 
+                        key={route.routeName}
+                        onClick={() => handleRouteClick(route.routeName)}
+                        className="cursor-pointer hover:bg-gray-50"
+                        style={{ borderTop: '1px solid var(--color-border-light)' }}
+                      >
+                        <td className="p-3 font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                          {route.routeName}
+                        </td>
+                        <td className="text-center p-3">{route.totalDeliveries}</td>
+                        <td className="text-center p-3" style={{ color: 'var(--color-green)' }}>
+                          {route.onTimeDeliveries}
+                        </td>
+                        <td className="text-center p-3" style={{ color: late > 0 ? 'var(--color-red)' : 'inherit' }}>
+                          {late}
+                        </td>
+                        <td className="p-3">
+                          <ProgressBar value={route.onTimePct} />
+                        </td>
+                        <td className="text-center p-3">
+                          <span style={{ 
+                            color: diffFromTarget >= 0 ? 'var(--color-green)' : 'var(--color-red)',
+                            fontWeight: 500
+                          }}>
+                            {diffFromTarget >= 0 ? '+' : ''}{diffFromTarget.toFixed(1)}%
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -539,56 +567,63 @@ export default function AlzaBoxBI() {
               Boxy na trase {selectedRoute}
             </h3>
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-              Klikněte na box pro zobrazení detailu
+              Klikněte na box pro zobrazení historie dojezdů
             </p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <th className="text-left p-3">Box</th>
-                  <th className="text-left p-3">Město</th>
-                  <th className="text-center p-3">Doručení</th>
-                  <th className="text-center p-3">Včas</th>
-                  <th className="p-3 w-32"></th>
-                  <th className="text-right p-3">Ø Zpoždění</th>
-                  <th className="text-right p-3">Max</th>
+                <tr style={{ backgroundColor: 'var(--color-bg)' }}>
+                  <th className="text-left p-3 font-medium">Box</th>
+                  <th className="text-left p-3 font-medium">Město</th>
+                  <th className="text-center p-3 font-medium">Celkem</th>
+                  <th className="text-center p-3 font-medium">Včas (=1)</th>
+                  <th className="text-center p-3 font-medium">Pozdě (=0)</th>
+                  <th className="p-3 font-medium w-48">Včasnost</th>
+                  <th className="text-center p-3 font-medium">vs Cíl</th>
                 </tr>
               </thead>
               <tbody>
-                {boxStats?.map((box) => (
-                  <tr 
-                    key={box.boxId}
-                    onClick={() => handleBoxClick(box.boxId)}
-                    className="cursor-pointer hover:bg-gray-50"
-                    style={{ 
-                      borderBottom: '1px solid var(--color-border-light)',
-                      backgroundColor: box.onTimePct < 90 ? 'var(--color-red-light)' : 'transparent'
-                    }}
-                  >
-                    <td className="p-3">
-                      <div className="font-medium" style={{ color: 'var(--color-text-dark)' }}>{box.boxCode}</div>
-                      <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{box.boxName}</div>
-                    </td>
-                    <td className="p-3" style={{ color: 'var(--color-text-muted)' }}>{box.city}</td>
-                    <td className="text-center p-3">{box.totalDeliveries}</td>
-                    <td className="text-center p-3">
-                      <span className="font-semibold" style={{ 
-                        color: box.onTimePct >= 95 ? 'var(--color-green)' : 
-                               box.onTimePct >= 90 ? '#e67e22' : 'var(--color-red)' 
-                      }}>
-                        {box.onTimePct.toFixed(1)}%
-                      </span>
-                    </td>
-                    <td className="p-3"><OnTimeBar percentage={box.onTimePct} /></td>
-                    <td className="text-right p-3">
-                      {box.avgDelayMinutes > 0 ? '+' : ''}{box.avgDelayMinutes.toFixed(0)} min
-                    </td>
-                    <td className="text-right p-3" style={{ color: 'var(--color-red)' }}>
-                      {box.maxDelayMinutes > 0 ? `+${box.maxDelayMinutes}` : box.maxDelayMinutes} min
-                    </td>
-                  </tr>
-                ))}
+                {boxStats?.map((box) => {
+                  const late = box.totalDeliveries - box.onTimeDeliveries
+                  const diffFromTarget = box.onTimePct - TARGET_PCT
+                  return (
+                    <tr 
+                      key={box.boxId}
+                      onClick={() => handleBoxClick(box.boxId)}
+                      className="cursor-pointer hover:bg-gray-50"
+                      style={{ borderTop: '1px solid var(--color-border-light)' }}
+                    >
+                      <td className="p-3">
+                        <div className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                          {box.boxCode}
+                        </div>
+                        <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                          {box.boxName}
+                        </div>
+                      </td>
+                      <td className="p-3" style={{ color: 'var(--color-text-muted)' }}>{box.city}</td>
+                      <td className="text-center p-3">{box.totalDeliveries}</td>
+                      <td className="text-center p-3" style={{ color: 'var(--color-green)' }}>
+                        {box.onTimeDeliveries}
+                      </td>
+                      <td className="text-center p-3" style={{ color: late > 0 ? 'var(--color-red)' : 'inherit' }}>
+                        {late}
+                      </td>
+                      <td className="p-3">
+                        <ProgressBar value={box.onTimePct} />
+                      </td>
+                      <td className="text-center p-3">
+                        <span style={{ 
+                          color: diffFromTarget >= 0 ? 'var(--color-green)' : 'var(--color-red)',
+                          fontWeight: 500
+                        }}>
+                          {diffFromTarget >= 0 ? '+' : ''}{diffFromTarget.toFixed(1)}%
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
