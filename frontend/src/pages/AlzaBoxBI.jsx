@@ -7,17 +7,7 @@ import {
   CheckCircle, XCircle, BarChart3, Calendar, Filter,
   ChevronDown, ChevronUp
 } from 'lucide-react'
-
-// API client - přidat do lib/api.js
-const alzaboxApi = {
-  getSummary: (params) => fetch(`/api/alzabox/stats/summary?${new URLSearchParams(params)}`).then(r => r.json()),
-  getByRoute: (params) => fetch(`/api/alzabox/stats/by-route?${new URLSearchParams(params)}`).then(r => r.json()),
-  getByDay: (params) => fetch(`/api/alzabox/stats/by-day?${new URLSearchParams(params)}`).then(r => r.json()),
-  getHeatmap: (params) => fetch(`/api/alzabox/stats/heatmap?${new URLSearchParams(params)}`).then(r => r.json()),
-  getBoxes: (params) => fetch(`/api/alzabox/boxes?${new URLSearchParams(params)}`).then(r => r.json()),
-  getCountries: () => fetch('/api/alzabox/countries').then(r => r.json()),
-  getRoutes: (params) => fetch(`/api/alzabox/routes?${new URLSearchParams(params)}`).then(r => r.json()),
-}
+import { alzabox as alzaboxApi } from '../lib/api'
 
 function StatCard({ icon: Icon, label, value, subtext, color = 'primary', trend }) {
   const colorMap = {
@@ -177,7 +167,6 @@ function DailyChart({ data }) {
       <div className="flex items-end gap-1 h-40">
         {data.map((day, idx) => {
           const height = (day.totalDeliveries / maxDeliveries) * 100
-          const onTimeHeight = (day.onTimeDeliveries / maxDeliveries) * 100
           
           return (
             <div 
@@ -204,19 +193,23 @@ function DailyChart({ data }) {
               
               {/* Tooltip */}
               <div className="absolute bottom-full mb-2 hidden group-hover:block z-10">
-                <div className="bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap">
-                  <div>{format(new Date(day.date), 'd.M.', { locale: cs })}</div>
-                  <div>{day.totalDeliveries} doručení</div>
-                  <div>{day.onTimePct.toFixed(1)}% včas</div>
+                <div 
+                  className="px-2 py-1 rounded text-xs whitespace-nowrap"
+                  style={{ backgroundColor: 'var(--color-card)', boxShadow: 'var(--shadow-lg)' }}
+                >
+                  <div style={{ color: 'var(--color-text-dark)' }}>{format(new Date(day.date), 'd.M.', { locale: cs })}</div>
+                  <div style={{ color: 'var(--color-text-muted)' }}>{day.totalDeliveries} doručení</div>
+                  <div style={{ color: day.onTimePct >= 95 ? 'var(--color-green)' : 'var(--color-orange)' }}>
+                    {day.onTimePct.toFixed(0)}% včas
+                  </div>
                 </div>
               </div>
             </div>
           )
         })}
       </div>
-      
       {/* X axis labels */}
-      <div className="flex gap-1 text-xs" style={{ color: 'var(--color-text-light)' }}>
+      <div className="flex gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
         {data.map((day, idx) => (
           <div key={day.date} className="flex-1 text-center">
             {idx % 3 === 0 ? format(new Date(day.date), 'd.M.', { locale: cs }) : ''}
@@ -228,36 +221,38 @@ function DailyChart({ data }) {
 }
 
 export default function AlzaBoxBI() {
+  const [showFilters, setShowFilters] = useState(true)
   const [dateRange, setDateRange] = useState({
     start: format(subDays(new Date(), 30), 'yyyy-MM-dd'),
     end: format(new Date(), 'yyyy-MM-dd')
   })
   const [deliveryType, setDeliveryType] = useState('DPO')
-  const [showFilters, setShowFilters] = useState(false)
 
-  const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ['alzabox-summary', dateRange],
-    queryFn: () => alzaboxApi.getSummary({
-      start_date: dateRange.start,
-      end_date: dateRange.end
+  // Queries using proper API client with auth
+  const { data: summary } = useQuery({
+    queryKey: ['alzabox-summary', dateRange, deliveryType],
+    queryFn: () => alzaboxApi.getSummary({ 
+      start_date: dateRange.start, 
+      end_date: dateRange.end,
+      delivery_type: deliveryType 
     })
   })
 
   const { data: routeStats } = useQuery({
     queryKey: ['alzabox-routes', dateRange, deliveryType],
-    queryFn: () => alzaboxApi.getByRoute({
-      start_date: dateRange.start,
-      end_date: dateRange.end,
-      delivery_type: deliveryType
+    queryFn: () => alzaboxApi.getByRoute({ 
+      start_date: dateRange.start, 
+      end_date: dateRange.end, 
+      delivery_type: deliveryType 
     })
   })
 
   const { data: dailyStats } = useQuery({
     queryKey: ['alzabox-daily', dateRange, deliveryType],
-    queryFn: () => alzaboxApi.getByDay({
-      start_date: dateRange.start,
-      end_date: dateRange.end,
-      delivery_type: deliveryType
+    queryFn: () => alzaboxApi.getByDay({ 
+      start_date: dateRange.start, 
+      end_date: dateRange.end, 
+      delivery_type: deliveryType 
     })
   })
 
