@@ -249,12 +249,14 @@ async def import_alzabox_deliveries(
                     continue
                 
                 # Spočítej plánovaný čas
+                planned_time_str_final = None
                 planned_datetime = None
                 if planned_time_str:
                     try:
                         parts = planned_time_str.split(':')
                         h, m = int(parts[0]), int(parts[1])
                         planned_datetime = datetime.combine(delivery_date, datetime.min.time().replace(hour=h, minute=m))
+                        planned_time_str_final = f"{h:02d}:{m:02d}"
                     except:
                         pass
                 
@@ -272,7 +274,7 @@ async def import_alzabox_deliveries(
                     delivery_date=datetime.combine(delivery_date, datetime.min.time()),
                     delivery_type=delivery_type,
                     route_name=route_name,
-                    planned_time=planned_datetime,
+                    planned_time=planned_time_str_final,  # String "HH:MM"
                     actual_time=actual_time,
                     delay_minutes=delay_minutes,
                     on_time=on_time,
