@@ -64,14 +64,16 @@ function DepotBadge({ depot }) {
 }
 
 // Tab komponenta
-function Tab({ active, onClick, children, count }) {
+function Tab({ active, onClick, children, count, highlight }) {
   return (
     <button
       onClick={onClick}
       className={`px-4 py-2 text-sm font-medium rounded-lg transition-all flex items-center gap-2 ${
         active 
           ? 'bg-alza-orange text-black' 
-          : 'text-gray-400 hover:text-white hover:bg-white/5'
+          : highlight
+            ? 'text-cyan-400 hover:text-white hover:bg-white/5 border border-cyan-500/30'
+            : 'text-gray-400 hover:text-white hover:bg-white/5'
       }`}
     >
       {children}
@@ -89,54 +91,51 @@ function Tab({ active, onClick, children, count }) {
 export default function Documents() {
   const { selectedCarrierId, selectedPeriod } = useCarrier()
   
-  const [activeTab, setActiveTab] = useState('plans') // 'plans', 'proofs', 'invoices', 'contracts', 'alzabox'
+  // 'alzabox', 'plans', 'proofs', 'invoices', 'contracts'
+  const [activeTab, setActiveTab] = useState('alzabox')
   const [dragOver, setDragOver] = useState(false)
   const [uploadResults, setUploadResults] = useState([])
   const [selectedPlans, setSelectedPlans] = useState(new Set())
   const [selectedProofs, setSelectedProofs] = useState(new Set())
   const [selectedContracts, setSelectedContracts] = useState(new Set())
   
-  // AlzaBox upload state
-  const [alzaboxUploadType, setAlzaboxUploadType] = useState('locations') // 'locations' nebo 'deliveries'
-  const [alzaboxDeliveryType, setAlzaboxDeliveryType] = useState('DPO') // 'DPO', 'SD', 'THIRD'
-  
   const queryClient = useQueryClient()
 
-  // Route Plans - všechny pro dopravce
+  // Route Plans - pro dopravce
   const { data: planList, isLoading: loadingPlans } = useQuery({
     queryKey: ['route-plans', selectedCarrierId],
     queryFn: () => routePlans.getAll({ carrier_id: selectedCarrierId }),
     enabled: !!selectedCarrierId
   })
 
-  // Proofy - VŠECHNY pro dopravce (bez filtru období)
+  // Proofy - pro dopravce
   const { data: allProofList, isLoading: loadingProofs } = useQuery({
     queryKey: ['proofs-all', selectedCarrierId],
     queryFn: () => proofs.getAll({ carrier_id: selectedCarrierId }),
     enabled: !!selectedCarrierId
   })
 
-  // Invoices - pro dopravce a období
+  // Invoices - pro dopravce
   const { data: invoiceList, isLoading: loadingInvoices } = useQuery({
     queryKey: ['invoices', selectedCarrierId, selectedPeriod],
     queryFn: () => invoices.getAll({ carrier_id: selectedCarrierId, period: selectedPeriod }),
     enabled: !!selectedCarrierId
   })
 
-  // Contracts - všechny pro dopravce
+  // Contracts - pro dopravce
   const { data: contractList, isLoading: loadingContracts } = useQuery({
     queryKey: ['contracts', selectedCarrierId],
     queryFn: () => contracts.getAll(selectedCarrierId),
     enabled: !!selectedCarrierId
   })
 
-  // AlzaBox stats
-  const { data: alzaboxCountries } = useQuery({
-    queryKey: ['alzabox-countries'],
-    queryFn: () => alzabox.getCountries()
+  // AlzaBox summary - GLOBÁLNÍ (bez dopravce)
+  const { data: alzaboxSummary, isLoading: loadingAlzabox } = useQuery({
+    queryKey: ['alzabox-summary-global'],
+    queryFn: () => alzabox.getSummary()
   })
 
-  // Upload mutations
+  // Upload mutations pro dopravce
   const uploadPlanMutation = useMutation({
     mutationFn: ({ file, carrierId }) => routePlans.upload(file, carrierId),
     onSuccess: (data, variables) => {
@@ -221,50 +220,77 @@ export default function Documents() {
     }
   })
 
-  // AlzaBox upload mutations
+  // AlzaBox upload mutations - GLOBÁLNÍ (bez dopravce)
   const uploadAlzaboxLocationsMutation = useMutation({
-    mutationFn: ({ file }) => alzabox.importLocations(file),
+    mutationFn: (file) => alzabox.importLocations(file),
     onSuccess: (data, variables) => {
       setUploadResults(prev => [...prev, { 
         type: 'alzabox-locations', 
-        fileName: variables.file.name, 
+        fileName: variables.name, 
         success: true,
-        message: `Naimportováno: ${data.boxes_created} nových, ${data.boxes_updated} aktualizováno`
+        message: `Nahráno ${data.imported || 0} boxů`
       }])
-      queryClient.invalidateQueries(['alzabox-countries'])
+      queryClient.invalidateQueries(['alzabox-summary-global'])
     },
     onError: (error, variables) => {
       setUploadResults(prev => [...prev, { 
         type: 'alzabox-locations', 
-        fileName: variables.file.name, 
+        fileName: variables.name, 
         success: false,
-        message: error.response?.data?.detail || 'Chyba při importu'
+        message: error.response?.data?.detail || 'Chyba při nahrávání'
       }])
     }
   })
 
   const uploadAlzaboxDeliveriesMutation = useMutation({
-    mutationFn: ({ file, deliveryType }) => alzabox.importDeliveries(file, deliveryType),
+    mutationFn: (file) => alzabox.importDeliveries(file),
     onSuccess: (data, variables) => {
       setUploadResults(prev => [...prev, { 
         type: 'alzabox-deliveries', 
-        fileName: variables.file.name, 
+        fileName: variables.name, 
         success: true,
-        message: `Naimportováno: ${data.deliveries_created} nových, ${data.deliveries_updated} aktualizováno, ${data.dates_processed} dní`
+        message: `Nahráno ${data.imported || 0} dojezdů${data.unmatched_carriers?.length ? ` (${data.unmatched_carriers.length} nenamapovaných dopravců)` : ''}`
       }])
-      queryClient.invalidateQueries(['alzabox'])
+      queryClient.invalidateQueries(['alzabox-summary-global'])
     },
     onError: (error, variables) => {
       setUploadResults(prev => [...prev, { 
         type: 'alzabox-deliveries', 
-        fileName: variables.file.name, 
+        fileName: variables.name, 
         success: false,
-        message: error.response?.data?.detail || 'Chyba při importu'
+        message: error.response?.data?.detail || 'Chyba při nahrávání'
       }])
     }
   })
 
-  // Delete mutations
+  // Delete AlzaBox data mutations
+  const deleteAlzaboxLocationsMutation = useMutation({
+    mutationFn: () => alzabox.deleteLocations(),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['alzabox-summary-global'])
+      setUploadResults(prev => [...prev, { 
+        type: 'alzabox-locations', 
+        fileName: 'Všechny boxy', 
+        success: true,
+        message: 'Data smazána'
+      }])
+    }
+  })
+
+  const deleteAlzaboxDeliveriesMutation = useMutation({
+    mutationFn: () => alzabox.deleteDeliveries(),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['alzabox-summary-global'])
+      setUploadResults(prev => [...prev, { 
+        type: 'alzabox-deliveries', 
+        fileName: 'Všechny dojezdy', 
+        success: true,
+        message: 'Data smazána'
+      }])
+    }
+  })
+
+  // Delete mutations pro dopravce
   const deletePlanMutation = useMutation({
     mutationFn: (id) => routePlans.delete(id),
     onSuccess: () => {
@@ -325,9 +351,9 @@ export default function Documents() {
     }
   })
 
-  // File handling
-  const handleFiles = useCallback((files) => {
-    if (!selectedCarrierId && activeTab !== 'alzabox') {
+  // File handling pro DOPRAVCE
+  const handleCarrierFiles = useCallback((files) => {
+    if (!selectedCarrierId) {
       alert('Vyberte dopravce')
       return
     }
@@ -336,20 +362,13 @@ export default function Documents() {
       const fileName = file.name.toLowerCase()
       const ext = fileName.split('.').pop()
       
-      // Rozpoznání typu souboru
       if (ext === 'pdf') {
-        // PDF - rozlišit fakturu vs smlouvu
-        // Smlouva = obsahuje "con" (case insensitive) a má alespoň 5 číslic
-        const hasConKeyword = fileName.includes('con')
-        const digitCount = (fileName.match(/\d/g) || []).length
-        
-        if (hasConKeyword && digitCount >= 5) {
+        if (fileName.includes('smlouva') || fileName.includes('contract') || fileName.includes('ramcova') || /con\d{5}/.test(fileName)) {
           uploadContractMutation.mutate({ file, carrierId: selectedCarrierId })
         } else {
           uploadInvoiceMutation.mutate({ file, carrierId: selectedCarrierId, period: selectedPeriod })
         }
       } else if (ext === 'xlsx' || ext === 'xls') {
-        // Excel - rozlišit podle názvu
         if (fileName.includes('drivecool') || fileName.includes('plan') || fileName.includes('route')) {
           uploadPlanMutation.mutate({ file, carrierId: selectedCarrierId })
         } else {
@@ -364,30 +383,37 @@ export default function Documents() {
         }])
       }
     })
-  }, [selectedCarrierId, selectedPeriod, uploadPlanMutation, uploadProofMutation, uploadInvoiceMutation, uploadContractMutation, activeTab])
+  }, [selectedCarrierId, selectedPeriod, uploadPlanMutation, uploadProofMutation, uploadInvoiceMutation, uploadContractMutation])
 
-  // AlzaBox file handling
+  // File handling pro ALZABOX (globální)
   const handleAlzaboxFiles = useCallback((files) => {
     Array.from(files).forEach(file => {
-      const ext = file.name.toLowerCase().split('.').pop()
+      const fileName = file.name.toLowerCase()
+      const ext = fileName.split('.').pop()
       
-      if (ext !== 'xlsx' && ext !== 'xls') {
+      if (ext === 'xlsx' || ext === 'xls') {
+        if (fileName.includes('location') || fileName.includes('umisten') || (fileName.includes('box') && !fileName.includes('dojezd'))) {
+          uploadAlzaboxLocationsMutation.mutate(file)
+        } else if (fileName.includes('dojezd') || fileName.includes('delivery') || fileName.includes('actual')) {
+          uploadAlzaboxDeliveriesMutation.mutate(file)
+        } else {
+          setUploadResults(prev => [...prev, { 
+            type: 'alzabox-unknown', 
+            fileName: file.name, 
+            success: false,
+            message: 'Nerozpoznaný typ - použijte "location" nebo "dojezd" v názvu'
+          }])
+        }
+      } else {
         setUploadResults(prev => [...prev, { 
-          type: 'alzabox', 
+          type: 'alzabox-unknown', 
           fileName: file.name, 
           success: false,
           message: 'Nepodporovaný formát (pouze XLSX)'
         }])
-        return
-      }
-
-      if (alzaboxUploadType === 'locations') {
-        uploadAlzaboxLocationsMutation.mutate({ file })
-      } else {
-        uploadAlzaboxDeliveriesMutation.mutate({ file, deliveryType: alzaboxDeliveryType })
       }
     })
-  }, [alzaboxUploadType, alzaboxDeliveryType, uploadAlzaboxLocationsMutation, uploadAlzaboxDeliveriesMutation])
+  }, [uploadAlzaboxLocationsMutation, uploadAlzaboxDeliveriesMutation])
 
   const handleDrop = useCallback((e) => {
     e.preventDefault()
@@ -395,11 +421,11 @@ export default function Documents() {
     if (activeTab === 'alzabox') {
       handleAlzaboxFiles(e.dataTransfer.files)
     } else {
-      handleFiles(e.dataTransfer.files)
+      handleCarrierFiles(e.dataTransfer.files)
     }
-  }, [handleFiles, handleAlzaboxFiles, activeTab])
+  }, [activeTab, handleAlzaboxFiles, handleCarrierFiles])
 
-  // Selection helpers - Plans
+  // Selection helpers
   const togglePlanSelection = (id) => {
     const newSelected = new Set(selectedPlans)
     newSelected.has(id) ? newSelected.delete(id) : newSelected.add(id)
@@ -411,7 +437,6 @@ export default function Documents() {
     setSelectedPlans(selectedPlans.size === planList.length ? new Set() : new Set(planList.map(p => p.id)))
   }
 
-  // Selection helpers - Proofs
   const toggleProofSelection = (id) => {
     const newSelected = new Set(selectedProofs)
     newSelected.has(id) ? newSelected.delete(id) : newSelected.add(id)
@@ -423,7 +448,6 @@ export default function Documents() {
     setSelectedProofs(selectedProofs.size === allProofList.length ? new Set() : new Set(allProofList.map(p => p.id)))
   }
 
-  // Selection helpers - Contracts
   const toggleContractSelection = (id) => {
     const newSelected = new Set(selectedContracts)
     newSelected.has(id) ? newSelected.delete(id) : newSelected.add(id)
@@ -457,7 +481,7 @@ export default function Documents() {
     }
   }
 
-  // Group plans by year
+  // Group data
   const plansByYear = planList?.reduce((acc, plan) => {
     const year = plan.validFrom ? new Date(plan.validFrom).getFullYear() : 'Bez data'
     if (!acc[year]) acc[year] = []
@@ -465,7 +489,6 @@ export default function Documents() {
     return acc
   }, {}) || {}
 
-  // Group proofs by year
   const proofsByYear = allProofList?.reduce((acc, proof) => {
     const year = proof.period ? '20' + proof.period.split('/')[1] : 'Bez data'
     if (!acc[year]) acc[year] = []
@@ -477,9 +500,6 @@ export default function Documents() {
                       uploadInvoiceMutation.isPending || uploadContractMutation.isPending ||
                       uploadAlzaboxLocationsMutation.isPending || uploadAlzaboxDeliveriesMutation.isPending
 
-  // Total alzabox count
-  const totalAlzaboxes = alzaboxCountries?.reduce((sum, c) => sum + c.boxCount, 0) || 0
-
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
@@ -488,129 +508,17 @@ export default function Documents() {
         <p className="text-gray-400 text-sm mt-1">Nahrávejte a spravujte plány, proofy, faktury, smlouvy a AlzaBox data</p>
       </div>
 
-      {/* Warning if no carrier selected (except for AlzaBox tab) */}
-      {!selectedCarrierId && activeTab !== 'alzabox' && (
-        <div className="card p-6 border border-yellow-500/20 bg-yellow-500/5">
-          <div className="flex items-center gap-3 text-yellow-400">
-            <AlertTriangle size={24} />
-            <div>
-              <div className="font-medium">Vyberte dopravce</div>
-              <div className="text-sm text-gray-400">Pro zobrazení a nahrávání dokumentů vyberte dopravce v horním menu</div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Drop Zone - for carrier-dependent tabs */}
-      {selectedCarrierId && activeTab !== 'alzabox' && (
-        <div
-          onDrop={handleDrop}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={() => setDragOver(false)}
-          className={`card p-8 border-2 border-dashed transition-all ${
-            dragOver 
-              ? 'border-alza-orange bg-alza-orange/5' 
-              : 'border-white/20 hover:border-white/40'
-          }`}
-        >
-          <div className="text-center">
-            <UploadIcon className={`w-12 h-12 mx-auto mb-3 ${dragOver ? 'text-alza-orange' : 'text-gray-500'}`} />
-            
-            <p className="text-lg font-medium mb-1">
-              {isUploading ? 'Nahrávám...' : 'Přetáhněte soubory sem'}
-            </p>
-            <p className="text-gray-400 text-sm mb-4">
-              nebo klikněte pro výběr
-            </p>
-            
-            <input
-              type="file"
-              multiple
-              accept=".xlsx,.xls,.pdf"
-              onChange={(e) => handleFiles(e.target.files)}
-              className="hidden"
-              id="file-input"
-              disabled={isUploading}
-            />
-            <label
-              htmlFor="file-input"
-              className={`btn btn-primary inline-flex items-center gap-2 cursor-pointer ${
-                isUploading ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
-            >
-              <UploadIcon size={18} />
-              Vybrat soubory
-            </label>
-
-          <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
-            <div className="flex items-center gap-1.5">
-              <Map size={16} className="text-purple-400" />
-              Drivecool*.xlsx = Plán
-            </div>
-            <div className="flex items-center gap-1.5">
-              <FileSpreadsheet size={16} className="text-green-400" />
-              *.xlsx = Proof
-            </div>
-            <div className="flex items-center gap-1.5">
-              <FileText size={16} className="text-red-400" />
-              *.pdf = Faktura
-            </div>
-            <div className="flex items-center gap-1.5">
-              <FileSignature size={16} className="text-blue-400" />
-              *con*12345*.pdf = Smlouva
-            </div>
-          </div>
-        </div>
-      </div>
-      )}
-
-      {/* Upload Results */}
-      {uploadResults.length > 0 && (
-        <div className="card overflow-hidden">
-          <div className="card-header flex items-center justify-between">
-            <h2 className="font-semibold">Výsledky nahrávání</h2>
-            <button onClick={() => setUploadResults([])} className="text-gray-400 hover:text-white">
-              <X size={18} />
-            </button>
-          </div>
-          <div className="divide-y divide-white/5">
-            {uploadResults.map((result, idx) => (
-              <div key={idx} className="px-4 py-3 flex items-center gap-3">
-                {result.success ? (
-                  <CheckCircle className="w-5 h-5 text-green-400 shrink-0" />
-                ) : (
-                  <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate text-sm">{result.fileName}</div>
-                  <div className={`text-xs ${result.success ? 'text-gray-400' : 'text-red-400'}`}>
-                    {result.message}
-                  </div>
-                </div>
-                <span className={`text-xs px-2 py-1 rounded ${
-                  result.type === 'plan' ? 'bg-purple-500/20 text-purple-400' : 
-                  result.type === 'proof' ? 'bg-green-500/20 text-green-400' : 
-                  result.type === 'invoice' ? 'bg-red-500/20 text-red-400' : 
-                  result.type === 'contract' ? 'bg-blue-500/20 text-blue-400' :
-                  result.type.startsWith('alzabox') ? 'bg-cyan-500/20 text-cyan-400' :
-                  'bg-gray-500/20 text-gray-400'
-                }`}>
-                  {result.type === 'plan' ? 'Plán' :
-                   result.type === 'proof' ? 'Proof' : 
-                   result.type === 'invoice' ? 'Faktura' : 
-                   result.type === 'contract' ? 'Smlouva' :
-                   result.type === 'alzabox-locations' ? 'AB Lokace' :
-                   result.type === 'alzabox-deliveries' ? 'AB Dojezdy' :
-                   'Neznámý'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Tabs */}
+      {/* Taby - AlzaBox je VŽDY dostupný */}
       <div className="flex flex-wrap gap-2 border-b border-white/10 pb-3">
+        <Tab 
+          active={activeTab === 'alzabox'} 
+          onClick={() => setActiveTab('alzabox')} 
+          count={alzaboxSummary?.total_boxes}
+          highlight={!selectedCarrierId && activeTab !== 'alzabox'}
+        >
+          <Package size={16} /> AlzaBox Data
+        </Tab>
+        
         {selectedCarrierId && (
           <>
             <Tab active={activeTab === 'plans'} onClick={() => setActiveTab('plans')} count={planList?.length}>
@@ -627,164 +535,188 @@ export default function Documents() {
             </Tab>
           </>
         )}
-        <Tab active={activeTab === 'alzabox'} onClick={() => setActiveTab('alzabox')} count={totalAlzaboxes}>
-          <Package size={16} /> AlzaBox
-        </Tab>
       </div>
 
-      {/* === ALZABOX === */}
+      {/* Warning - jen když není dopravce a nejsme na AlzaBox */}
+      {!selectedCarrierId && activeTab !== 'alzabox' && (
+        <div className="card p-6 border border-yellow-500/20 bg-yellow-500/5">
+          <div className="flex items-center gap-3 text-yellow-400">
+            <AlertTriangle size={24} />
+            <div>
+              <div className="font-medium">Vyberte dopravce</div>
+              <div className="text-sm text-gray-400">Pro plány, proofy, faktury a smlouvy vyberte dopravce</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Drop Zone pro dopravce */}
+      {selectedCarrierId && activeTab !== 'alzabox' && (
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          className={`card p-8 border-2 border-dashed transition-all ${
+            dragOver ? 'border-alza-orange bg-alza-orange/5' : 'border-white/20 hover:border-white/40'
+          }`}
+        >
+          <div className="text-center">
+            <UploadIcon className={`w-12 h-12 mx-auto mb-3 ${dragOver ? 'text-alza-orange' : 'text-gray-500'}`} />
+            <p className="text-lg font-medium mb-1">{isUploading ? 'Nahrávám...' : 'Přetáhněte soubory sem'}</p>
+            <p className="text-gray-400 text-sm mb-4">nebo klikněte pro výběr</p>
+            
+            <input type="file" multiple accept=".xlsx,.xls,.pdf" onChange={(e) => handleCarrierFiles(e.target.files)}
+              className="hidden" id="file-input-carrier" disabled={isUploading} />
+            <label htmlFor="file-input-carrier"
+              className={`btn btn-primary inline-flex items-center gap-2 cursor-pointer ${isUploading ? 'opacity-50' : ''}`}>
+              <UploadIcon size={18} /> Vybrat soubory
+            </label>
+
+            <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
+              <div className="flex items-center gap-1.5"><Map size={16} className="text-purple-400" /> Drivecool*.xlsx = Plán</div>
+              <div className="flex items-center gap-1.5"><FileSpreadsheet size={16} className="text-green-400" /> *.xlsx = Proof</div>
+              <div className="flex items-center gap-1.5"><FileText size={16} className="text-red-400" /> *.pdf = Faktura</div>
+              <div className="flex items-center gap-1.5"><FileSignature size={16} className="text-blue-400" /> *smlouva*.pdf = Smlouva</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Results */}
+      {uploadResults.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="font-semibold">Výsledky nahrávání</h2>
+            <button onClick={() => setUploadResults([])} className="text-gray-400 hover:text-white"><X size={18} /></button>
+          </div>
+          <div className="divide-y divide-white/5">
+            {uploadResults.map((result, idx) => (
+              <div key={idx} className="px-4 py-3 flex items-center gap-3">
+                {result.success ? <CheckCircle className="w-5 h-5 text-green-400" /> : <AlertCircle className="w-5 h-5 text-red-400" />}
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium truncate text-sm">{result.fileName}</div>
+                  <div className={`text-xs ${result.success ? 'text-gray-400' : 'text-red-400'}`}>{result.message}</div>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${
+                  result.type === 'plan' ? 'bg-purple-500/20 text-purple-400' : 
+                  result.type === 'proof' ? 'bg-green-500/20 text-green-400' : 
+                  result.type === 'invoice' ? 'bg-red-500/20 text-red-400' :
+                  result.type === 'contract' ? 'bg-blue-500/20 text-blue-400' :
+                  result.type.startsWith('alzabox') ? 'bg-cyan-500/20 text-cyan-400' : 'bg-gray-500/20 text-gray-400'
+                }`}>
+                  {result.type === 'plan' ? 'Plán' : result.type === 'proof' ? 'Proof' : result.type === 'invoice' ? 'Faktura' :
+                   result.type === 'contract' ? 'Smlouva' : result.type === 'alzabox-locations' ? 'AlzaBoxy' :
+                   result.type === 'alzabox-deliveries' ? 'Dojezdy' : 'Neznámý'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* === ALZABOX DATA === */}
       {activeTab === 'alzabox' && (
         <div className="space-y-6">
-          {/* AlzaBox Upload Section */}
-          <div className="card p-6">
-            <h2 className="font-semibold mb-4 flex items-center gap-2">
-              <Package className="text-cyan-400" size={20} />
-              Import AlzaBox dat
-            </h2>
-            
-            {/* Upload Type Selection */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <button
-                onClick={() => setAlzaboxUploadType('locations')}
-                className={`p-4 rounded-lg border-2 transition-all text-left ${
-                  alzaboxUploadType === 'locations'
-                    ? 'border-cyan-500 bg-cyan-500/10'
-                    : 'border-white/20 hover:border-white/40'
-                }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <MapPin className={alzaboxUploadType === 'locations' ? 'text-cyan-400' : 'text-gray-500'} size={24} />
-                  <span className="font-medium">Umístění boxů</span>
-                </div>
-                <p className="text-sm text-gray-400">
-                  Import GPS souřadnic, měst, krajů, dopravců
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Soubor: AB_umisteni_a_dalsi_data.xlsx
-                </p>
-              </button>
+          {/* Drop Zone pro AlzaBox */}
+          <div
+            onDrop={handleDrop}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+            onDragLeave={() => setDragOver(false)}
+            className={`card p-8 border-2 border-dashed transition-all ${
+              dragOver ? 'border-cyan-500 bg-cyan-500/5' : 'border-white/20 hover:border-white/40'
+            }`}
+          >
+            <div className="text-center">
+              <Package className={`w-12 h-12 mx-auto mb-3 ${dragOver ? 'text-cyan-400' : 'text-gray-500'}`} />
+              <p className="text-lg font-medium mb-1">{isUploading ? 'Nahrávám...' : 'Přetáhněte AlzaBox soubory sem'}</p>
+              <p className="text-gray-400 text-sm mb-4">Data jsou globální - platí pro všechny dopravce</p>
+              
+              <input type="file" multiple accept=".xlsx,.xls" onChange={(e) => handleAlzaboxFiles(e.target.files)}
+                className="hidden" id="file-input-alzabox" disabled={isUploading} />
+              <label htmlFor="file-input-alzabox"
+                className={`btn bg-cyan-600 hover:bg-cyan-500 text-white inline-flex items-center gap-2 cursor-pointer ${isUploading ? 'opacity-50' : ''}`}>
+                <UploadIcon size={18} /> Vybrat soubory
+              </label>
 
-              <button
-                onClick={() => setAlzaboxUploadType('deliveries')}
-                className={`p-4 rounded-lg border-2 transition-all text-left ${
-                  alzaboxUploadType === 'deliveries'
-                    ? 'border-cyan-500 bg-cyan-500/10'
-                    : 'border-white/20 hover:border-white/40'
-                }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <Clock className={alzaboxUploadType === 'deliveries' ? 'text-cyan-400' : 'text-gray-500'} size={24} />
-                  <span className="font-medium">Dojezdy (plán vs realita)</span>
-                </div>
-                <p className="text-sm text-gray-400">
-                  Import plánovaných a skutečných časů doručení
-                </p>
-                <p className="text-xs text-gray-500 mt-1">
-                  Soubor: AB_dojezdy_plan_vs_realita.xlsx
-                </p>
-              </button>
-            </div>
-
-            {/* Delivery Type Selection (only for deliveries) */}
-            {alzaboxUploadType === 'deliveries' && (
-              <div className="mb-6">
-                <label className="text-sm text-gray-400 mb-2 block">Typ závozu:</label>
-                <div className="flex gap-2">
-                  {[
-                    { value: 'DPO', label: 'DPO (ranní)', color: 'blue' },
-                    { value: 'SD', label: 'SD (odpolední)', color: 'orange' },
-                    { value: 'THIRD', label: '3. závoz', color: 'purple' }
-                  ].map(({ value, label, color }) => (
-                    <button
-                      key={value}
-                      onClick={() => setAlzaboxDeliveryType(value)}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                        alzaboxDeliveryType === value
-                          ? `bg-${color}-500/20 text-${color}-400 border border-${color}-500/50`
-                          : 'bg-white/5 text-gray-400 hover:bg-white/10'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Drop Zone for AlzaBox */}
-            <div
-              onDrop={handleDrop}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-              onDragLeave={() => setDragOver(false)}
-              className={`p-8 border-2 border-dashed rounded-lg transition-all ${
-                dragOver 
-                  ? 'border-cyan-500 bg-cyan-500/5' 
-                  : 'border-white/20 hover:border-white/40'
-              }`}
-            >
-              <div className="text-center">
-                <UploadIcon className={`w-10 h-10 mx-auto mb-3 ${dragOver ? 'text-cyan-400' : 'text-gray-500'}`} />
-                
-                <p className="font-medium mb-1">
-                  {isUploading ? 'Importuji...' : 'Přetáhněte XLSX soubor sem'}
-                </p>
-                <p className="text-gray-400 text-sm mb-4">
-                  {alzaboxUploadType === 'locations' 
-                    ? 'Import umístění AlzaBoxů' 
-                    : `Import dojezdů (${alzaboxDeliveryType})`}
-                </p>
-                
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={(e) => handleAlzaboxFiles(e.target.files)}
-                  className="hidden"
-                  id="alzabox-file-input"
-                  disabled={isUploading}
-                />
-                <label
-                  htmlFor="alzabox-file-input"
-                  className={`btn inline-flex items-center gap-2 cursor-pointer ${
-                    isUploading ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                  style={{ backgroundColor: 'var(--color-cyan)', color: 'black' }}
-                >
-                  <UploadIcon size={18} />
-                  Vybrat soubor
-                </label>
+              <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
+                <div className="flex items-center gap-1.5"><MapPin size={16} className="text-cyan-400" /> *location*.xlsx = Umístění boxů</div>
+                <div className="flex items-center gap-1.5"><Clock size={16} className="text-green-400" /> *dojezd*.xlsx = Dojezdy k boxům</div>
               </div>
             </div>
           </div>
 
-          {/* AlzaBox Stats */}
-          {alzaboxCountries && alzaboxCountries.length > 0 && (
-            <div className="card p-6">
-              <h3 className="font-semibold mb-4">Naimportované AlzaBoxy</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {alzaboxCountries.map(c => (
-                  <div 
-                    key={c.country}
-                    className="p-4 rounded-lg bg-white/5 text-center"
-                  >
-                    <div className="text-2xl mb-1">
-                      {c.country === 'CZ' ? '🇨🇿' : 
-                       c.country === 'SK' ? '🇸🇰' : 
-                       c.country === 'HU' ? '🇭🇺' : 
-                       c.country === 'AT' ? '🇦🇹' : 
-                       c.country === 'DE' ? '🇩🇪' : '🌍'}
+          {/* AlzaBox Summary */}
+          <div className="card overflow-hidden">
+            <div className="card-header flex items-center justify-between">
+              <h2 className="font-semibold flex items-center gap-2"><Package size={18} className="text-cyan-400" /> AlzaBox Data</h2>
+              <span className="text-sm text-gray-400">Globální data (všichni dopravci)</span>
+            </div>
+            
+            {loadingAlzabox ? (
+              <div className="p-8 text-center text-gray-500">Načítám...</div>
+            ) : (
+              <div className="p-6 space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-white/5 rounded-lg p-4">
+                    <div className="flex items-center gap-3">
+                      <MapPin className="w-8 h-8 text-cyan-400" />
+                      <div>
+                        <div className="text-2xl font-bold">{alzaboxSummary?.total_boxes?.toLocaleString() || 0}</div>
+                        <div className="text-sm text-gray-400">AlzaBoxů</div>
+                      </div>
                     </div>
-                    <div className="text-2xl font-bold text-cyan-400">{c.boxCount.toLocaleString('cs-CZ')}</div>
-                    <div className="text-sm text-gray-400">{c.country}</div>
+                    <div className="mt-4">
+                      <button onClick={() => { if (confirm('Smazat všechny boxy?')) deleteAlzaboxLocationsMutation.mutate() }}
+                        disabled={deleteAlzaboxLocationsMutation.isPending || !alzaboxSummary?.total_boxes}
+                        className="btn btn-sm bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50">
+                        <Trash2 size={14} /> Smazat
+                      </button>
+                    </div>
                   </div>
-                ))}
-                <div className="p-4 rounded-lg bg-cyan-500/10 text-center">
-                  <div className="text-2xl mb-1">📦</div>
-                  <div className="text-2xl font-bold text-white">{totalAlzaboxes.toLocaleString('cs-CZ')}</div>
-                  <div className="text-sm text-gray-400">Celkem</div>
+                  
+                  <div className="bg-white/5 rounded-lg p-4">
+                    <div className="flex items-center gap-3">
+                      <Clock className="w-8 h-8 text-green-400" />
+                      <div>
+                        <div className="text-2xl font-bold">{alzaboxSummary?.total_deliveries?.toLocaleString() || 0}</div>
+                        <div className="text-sm text-gray-400">Dojezdů</div>
+                      </div>
+                    </div>
+                    <div className="mt-4">
+                      <button onClick={() => { if (confirm('Smazat všechny dojezdy?')) deleteAlzaboxDeliveriesMutation.mutate() }}
+                        disabled={deleteAlzaboxDeliveriesMutation.isPending || !alzaboxSummary?.total_deliveries}
+                        className="btn btn-sm bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-50">
+                        <Trash2 size={14} /> Smazat
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-white/5 rounded-lg p-4">
+                    <div className="flex items-center gap-3">
+                      <CheckCircle className={`w-8 h-8 ${(alzaboxSummary?.on_time_rate || 0) >= 99 ? 'text-green-400' : (alzaboxSummary?.on_time_rate || 0) >= 95 ? 'text-yellow-400' : 'text-red-400'}`} />
+                      <div>
+                        <div className="text-2xl font-bold">{(alzaboxSummary?.on_time_rate || 0).toFixed(1)}%</div>
+                        <div className="text-sm text-gray-400">Včasnost (cíl 99%)</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle size={20} className="text-cyan-400 mt-0.5" />
+                    <div className="text-sm">
+                      <div className="font-medium text-cyan-400 mb-1">Globální data</div>
+                      <div className="text-gray-400">
+                        AlzaBox data (umístění boxů a dojezdy) jsou sdílená pro všechny dopravce. 
+                        Filtrování podle dopravce probíhá při zobrazení statistik v sekci "AlzaBox BI".
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
@@ -817,25 +749,26 @@ export default function Documents() {
             </div>
           ) : (
             <div className="divide-y divide-white/5">
-              {Object.entries(plansByYear).sort(([a], [b]) => String(b).localeCompare(String(a))).map(([year, plans]) => (
+              {Object.entries(plansByYear).sort(([a], [b]) => String(b).localeCompare(String(a))).map(([year, planItems]) => (
                 <div key={year}>
-                  <div className="px-4 py-2 bg-white/5 text-sm font-medium text-gray-400">{year} ({plans.length})</div>
-                  {plans.sort((a, b) => new Date(b.validFrom) - new Date(a.validFrom)).map(plan => (
+                  <div className="px-4 py-2 bg-white/5 text-sm font-medium text-gray-400">{year} ({planItems.length})</div>
+                  {planItems.sort((a, b) => new Date(b.validFrom) - new Date(a.validFrom)).map(plan => (
                     <div key={plan.id} className={`px-4 py-3 flex items-center gap-3 hover:bg-white/5 ${selectedPlans.has(plan.id) ? 'bg-purple-500/5' : ''}`}>
                       <button onClick={() => togglePlanSelection(plan.id)} className="text-gray-400 hover:text-white">
                         {selectedPlans.has(plan.id) ? <CheckSquare size={18} className="text-purple-400" /> : <Square size={18} />}
                       </button>
+                      <Map size={20} className="text-purple-400 shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
                           <span className="font-medium text-sm truncate">{plan.fileName}</span>
                           <PlanTypeBadge type={plan.planType} />
                           <DepotBadge depot={plan.depot} />
                         </div>
-                        <div className="text-xs text-gray-500 mt-0.5">
-                          Od {formatDate(plan.validFrom)} • {plan.totalRoutes} tras
+                        <div className="text-xs text-gray-500">
+                          Od {formatDate(plan.validFrom)} {plan.routeCount && `• ${plan.routeCount} tras`}
                         </div>
                       </div>
-                      <button onClick={() => { if (confirm(`Smazat "${plan.fileName}"?`)) deletePlanMutation.mutate(plan.id) }}
+                      <button onClick={() => { if (confirm(`Smazat?`)) deletePlanMutation.mutate(plan.id) }}
                         className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded">
                         <Trash2 size={16} />
                       </button>
@@ -894,24 +827,16 @@ export default function Documents() {
                           </div>
                         </div>
                         <div className="text-sm font-medium text-alza-orange">{formatCZK(proof.grandTotal)}</div>
-                        <button onClick={() => { if (confirm(`Smazat proof "${proof.period}"?`)) deleteProofMutation.mutate(proof.id) }}
+                        <button onClick={() => { if (confirm(`Smazat?`)) deleteProofMutation.mutate(proof.id) }}
                           className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded">
                           <Trash2 size={16} />
                         </button>
                       </div>
                       <div className="ml-9 mt-2 grid grid-cols-4 gap-2 text-xs">
-                        <div className="bg-white/5 rounded px-2 py-1">
-                          <span className="text-gray-500">FIX:</span> <span className="font-medium">{formatCZK(proof.totalFix)}</span>
-                        </div>
-                        <div className="bg-white/5 rounded px-2 py-1">
-                          <span className="text-gray-500">KM:</span> <span className="font-medium">{formatCZK(proof.totalKm)}</span>
-                        </div>
-                        <div className="bg-white/5 rounded px-2 py-1">
-                          <span className="text-gray-500">LH:</span> <span className="font-medium">{formatCZK(proof.totalLinehaul)}</span>
-                        </div>
-                        <div className="bg-white/5 rounded px-2 py-1">
-                          <span className="text-gray-500">Tras:</span> <span className="font-medium">{(proof.totalDpo || 0) + (proof.totalSd || 0)}</span>
-                        </div>
+                        <div className="bg-white/5 rounded px-2 py-1"><span className="text-gray-500">FIX:</span> <span className="font-medium">{formatCZK(proof.totalFix)}</span></div>
+                        <div className="bg-white/5 rounded px-2 py-1"><span className="text-gray-500">KM:</span> <span className="font-medium">{formatCZK(proof.totalKm)}</span></div>
+                        <div className="bg-white/5 rounded px-2 py-1"><span className="text-gray-500">LH:</span> <span className="font-medium">{formatCZK(proof.totalLinehaul)}</span></div>
+                        <div className="bg-white/5 rounded px-2 py-1"><span className="text-gray-500">Tras:</span> <span className="font-medium">{(proof.totalDpo || 0) + (proof.totalSd || 0)}</span></div>
                       </div>
                     </div>
                   ))}
@@ -940,16 +865,7 @@ export default function Documents() {
           ) : (
             <div className="overflow-x-auto">
               <table className="table">
-                <thead>
-                  <tr>
-                    <th>Číslo faktury</th>
-                    <th>Typ</th>
-                    <th className="text-right">Bez DPH</th>
-                    <th className="text-right">Celkem</th>
-                    <th>Status</th>
-                    <th className="w-12"></th>
-                  </tr>
-                </thead>
+                <thead><tr><th>Číslo</th><th>Typ</th><th className="text-right">Bez DPH</th><th className="text-right">Celkem</th><th>Status</th><th></th></tr></thead>
                 <tbody>
                   {invoiceList.map(invoice => (
                     <tr key={invoice.id}>
@@ -968,14 +884,13 @@ export default function Documents() {
                       <td>
                         <span className={`text-xs px-2 py-1 rounded ${
                           invoice.status === 'matched' ? 'bg-green-500/20 text-green-400' :
-                          invoice.status === 'disputed' ? 'bg-red-500/20 text-red-400' :
-                          'bg-yellow-500/20 text-yellow-400'
+                          invoice.status === 'disputed' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
                         }`}>
                           {invoice.status === 'matched' ? 'OK' : invoice.status === 'disputed' ? 'Sporná' : 'Kontrola'}
                         </span>
                       </td>
                       <td>
-                        <button onClick={() => { if (confirm(`Smazat fakturu "${invoice.invoiceNumber}"?`)) deleteInvoiceMutation.mutate(invoice.id) }}
+                        <button onClick={() => { if (confirm(`Smazat?`)) deleteInvoiceMutation.mutate(invoice.id) }}
                           className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded">
                           <Trash2 size={16} />
                         </button>
@@ -1015,7 +930,6 @@ export default function Documents() {
             <div className="p-8 text-center text-gray-500">
               <FileSignature className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>Žádné smlouvy</p>
-              <p className="text-sm mt-1">Nahrajte PDF soubory obsahující "con" v názvu a alespoň 5 číslic</p>
             </div>
           ) : (
             <div className="divide-y divide-white/5">
@@ -1032,7 +946,7 @@ export default function Documents() {
                       {contract.validTo && ` do ${formatDate(contract.validTo)}`}
                     </div>
                   </div>
-                  <button onClick={() => { if (confirm(`Smazat smlouvu?`)) deleteContractMutation.mutate(contract.id) }}
+                  <button onClick={() => { if (confirm(`Smazat?`)) deleteContractMutation.mutate(contract.id) }}
                     className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded">
                     <Trash2 size={16} />
                   </button>
