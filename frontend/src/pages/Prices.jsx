@@ -46,26 +46,24 @@ function getServiceConfig(type) {
   return SERVICE_TYPE_CONFIG[type] || SERVICE_TYPE_CONFIG['general']
 }
 
-// Detekce rozvozové oblasti (depa) z názvu trasy nebo sazby
-function detectArea(rate, rateType = 'other') {
+// Detekce rozvozového depa ze sazby
+function detectDepot(rate, rateType = 'other') {
   const text = `${rate.routeType || ''} ${rate.depoName || ''} ${rate.fromCode || ''} ${rate.toCode || ''} ${rate.description || ''}`.toLowerCase()
   
-  // FIX sazby - podle routeType
+  // FIX sazby - podle routeType (DIRECT trasy)
   if (rateType === 'fix') {
-    // DIRECT_Praha = trasy z Nový Bydžov do Prahy (patří k depu Nový Bydžov)
-    if (text.includes('praha')) return 'Nový Bydžov'
-    // DIRECT_Vratimov = rozvoz z depa Vratimov
+    if (text.includes('praha') || text.includes('nový bydžov') || text.includes('bydžov') || text.includes('nb')) return 'Nový Bydžov'
     if (text.includes('vratimov')) return 'Vratimov'
   }
   
   // KM sazby - sdílené mezi depy
   if (rateType === 'km') {
-    return null // Sdílená sazba - zobrazí se u obou dep
+    return null // Sdílená sazba
   }
   
-  // DEPO sazby - hodinové patří k Vratimovu, měsíční ke skladu Nový Bydžov
+  // DEPO sazby
   if (rateType === 'depo') {
-    if (text.includes('sklad') || text.includes('all_in') || text.includes('all in') || text.includes('skladník') || text.includes('brigádník')) return 'Nový Bydžov'
+    if (text.includes('sklad') || text.includes('all_in') || text.includes('all in') || text.includes('skladník') || text.includes('brigádník') || text.includes('monthly')) return 'Nový Bydžov'
     if (text.includes('vratimov') || text.includes('hourly') || text.includes('hodin')) return 'Vratimov'
   }
   
@@ -73,11 +71,10 @@ function detectArea(rate, rateType = 'other') {
   if (rateType === 'linehaul') {
     if (text.includes('nový bydžov') || text.includes('novy_bydzov') || text.includes('bydžov') || text.includes('nb')) return 'Nový Bydžov'
     if (text.includes('vratimov')) return 'Vratimov'
-    // Default - pokud není specifikováno, vrátíme null a sazba se zobrazí u obou
-    return null
+    return null // Nespecifikováno
   }
   
-  // Bonus sazby - patří k Nový Bydžov
+  // Bonus sazby
   if (rateType === 'bonus') {
     return 'Nový Bydžov'
   }
@@ -85,19 +82,17 @@ function detectArea(rate, rateType = 'other') {
   return null
 }
 
-// Konfigurace rozvozových oblastí (dep)
-const AREA_CONFIG = {
+// Konfigurace rozvozových dep
+const DEPOT_CONFIG = {
   'Vratimov': { 
     color: '#3b82f6', 
     icon: '🏭',
     label: 'Depo Vratimov',
-    description: 'Linehaul z CZTC1/CZLC4 → třídění → rozvoz dodávkami'
   },
   'Nový Bydžov': { 
     color: '#10b981', 
     icon: '📦',
     label: 'Depo Nový Bydžov',
-    description: 'Linehaul z CZTC1/CZLC4 + Direct trasy + sklad'
   },
 }
 
@@ -110,10 +105,14 @@ const VEHICLE_PALLETS = {
   'LKW': '33 pal',
 }
 
-// Mapování kódu skladu na název
+// Mapování kódu expedičního skladu na název
 const WAREHOUSE_NAMES = {
   'CZTC1': 'Úžice (Třídírna)',
   'CZLC4': 'Chrášťany',
+  'LCU': 'LCU',
+  'LCS': 'LCS',
+  'LCZ': 'LCZ',
+  'SKLC3': 'SKLC3',
 }
 
 // Deduplikace sazeb - ponech jen nejnovější podle klíče
@@ -129,22 +128,33 @@ function deduplicateRates(rates, getKey) {
   return Array.from(map.values())
 }
 
-function AreaSection({ area, fixRates, kmRates, depoRates, linehaulRates, bonusRates }) {
-  const areaConfig = AREA_CONFIG[area] || { color: '#6b7280', icon: '📍', label: area, description: '' }
+// Komponenta pro zobrazení štítku dodatku
+function ContractBadge({ label }) {
+  if (!label) return null
+  return (
+    <span className="text-xs px-1.5 py-0.5 rounded ml-2" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>
+      {label}
+    </span>
+  )
+}
+
+// Komponenta pro jedno depo - všechny sazby pohromadě
+function DepotSection({ depot, linehaulRates, fixRates, kmRates, depoRates, bonusRates }) {
+  const depotConfig = DEPOT_CONFIG[depot] || { color: '#6b7280', icon: '📍', label: depot }
   
-  // Deduplikace - jen nejnovější sazba každého typu
+  // Deduplikace
+  const uniqueLinehaulRates = deduplicateRates(linehaulRates, r => `${r.fromCode}_${r.toCode}_${r.vehicleType}`)
   const uniqueFixRates = deduplicateRates(fixRates, r => r.routeType || 'default')
   const uniqueKmRates = deduplicateRates(kmRates, r => r.routeType || 'default')
   const uniqueDepoRates = deduplicateRates(depoRates, r => `${r.depoName}_${r.rateType}`)
-  const uniqueLinehaulRates = deduplicateRates(linehaulRates, r => `${r.fromCode}_${r.toCode}_${r.vehicleType}`)
   const uniqueBonusRates = deduplicateRates(bonusRates, r => `${r.qualityMin}_${r.qualityMax}`)
   
-  const hasRates = uniqueFixRates.length > 0 || uniqueKmRates.length > 0 || 
-                   uniqueDepoRates.length > 0 || uniqueLinehaulRates.length > 0 || uniqueBonusRates.length > 0
+  const hasRates = uniqueLinehaulRates.length > 0 || uniqueFixRates.length > 0 || 
+                   uniqueKmRates.length > 0 || uniqueDepoRates.length > 0 || uniqueBonusRates.length > 0
   
   if (!hasRates) return null
 
-  // Seskupit linehauly podle zdroje (CZTC1, CZLC4)
+  // Seskupit linehauly podle zdroje
   const linehaulsBySource = uniqueLinehaulRates.reduce((acc, rate) => {
     const source = rate.fromCode || 'Neznámý'
     if (!acc[source]) acc[source] = []
@@ -152,236 +162,179 @@ function AreaSection({ area, fixRates, kmRates, depoRates, linehaulRates, bonusR
     return acc
   }, {})
 
+  // Rozdělit DEPO sazby na hodinové a měsíční
+  const hourlyDepoRates = uniqueDepoRates.filter(r => r.rateType === 'hourly' || r.depoName?.toLowerCase().includes('vratimov'))
+  const monthlyDepoRates = uniqueDepoRates.filter(r => r.rateType === 'monthly' || r.depoName?.toLowerCase().includes('sklad'))
+
   return (
-    <div className="border rounded-lg overflow-hidden" style={{ borderColor: areaConfig.color + '40' }}>
-      {/* Area header */}
+    <div className="border rounded-lg overflow-hidden" style={{ borderColor: depotConfig.color + '40' }}>
+      {/* Header depa */}
       <div 
-        className="px-4 py-3 flex items-center justify-between"
-        style={{ backgroundColor: areaConfig.color + '10' }}
+        className="px-4 py-3 flex items-center gap-2"
+        style={{ backgroundColor: depotConfig.color + '10' }}
       >
-        <div className="flex items-center gap-2">
-          <span className="text-lg">{areaConfig.icon}</span>
-          <div>
-            <span className="font-semibold" style={{ color: areaConfig.color }}>
-              {areaConfig.label}
-            </span>
-            {areaConfig.description && (
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                {areaConfig.description}
-              </p>
-            )}
-          </div>
-        </div>
+        <span className="text-xl">{depotConfig.icon}</span>
+        <span className="font-semibold text-lg" style={{ color: depotConfig.color }}>
+          {depotConfig.label}
+        </span>
       </div>
       
-      {/* Rates */}
-      <div className="p-4 space-y-4">
+      {/* Obsah - všechny sekce */}
+      <div className="p-4 space-y-6">
         
-        {/* Pro Vratimov - Linehauly + Rozvoz */}
-        {area === 'Vratimov' && (
-          <>
-            {/* Linehauly do depa */}
-            {Object.keys(linehaulsBySource).length > 0 && (
-              <div className="space-y-3">
-                <h5 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-2" style={{ color: 'var(--color-text-muted)' }}>
-                  <Truck size={14} />
-                  Linehaul do depa Vratimov
-                </h5>
-                {Object.entries(linehaulsBySource).map(([source, rates]) => (
-                  <div key={source} className="space-y-2">
-                    <h6 className="text-xs font-medium" style={{ color: '#ef4444' }}>
-                      Z {WAREHOUSE_NAMES[source] || source} ({source}):
-                    </h6>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                      {rates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>
-                            {rate.vehicleType}
-                            <span className="text-xs ml-1 px-1 rounded" style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
-                              {VEHICLE_PALLETS[rate.vehicleType] || '?'}
-                            </span>
+        {/* 1. LINEHAUL - z expedičních skladů na depo */}
+        {Object.keys(linehaulsBySource).length > 0 && (
+          <div className="space-y-3">
+            <h5 className="text-sm font-semibold flex items-center gap-2" style={{ color: '#ef4444' }}>
+              <Truck size={16} />
+              Linehaul (z expedičních skladů na depo)
+            </h5>
+            <div className="space-y-3">
+              {Object.entries(linehaulsBySource).map(([source, rates]) => (
+                <div key={source} className="space-y-2">
+                  <h6 className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                    Z {WAREHOUSE_NAMES[source] || source} ({source}):
+                  </h6>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                    {rates.map((rate, idx) => (
+                      <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                        <span style={{ color: 'var(--color-text-muted)' }}>
+                          {rate.vehicleType}
+                          <span className="text-xs ml-1 px-1 rounded" style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
+                            {VEHICLE_PALLETS[rate.vehicleType] || '?'}
                           </span>
+                        </span>
+                        <div className="flex items-center">
                           <span className="font-semibold" style={{ color: '#ef4444' }}>{formatCZK(rate.rate)}</span>
+                          <ContractBadge label={rate.contractLabel} />
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-
-            {/* Rozvoz z depa */}
-            {(uniqueFixRates.length > 0 || uniqueKmRates.length > 0 || uniqueDepoRates.length > 0) && (
-              <div className="space-y-3">
-                <h5 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
-                  Rozvoz z depa (dodávky)
-                </h5>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {uniqueFixRates.length > 0 && (
-                    <div className="space-y-2">
-                      <h6 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#8b5cf6' }}>
-                        <DollarSign size={14} />
-                        FIX sazba
-                      </h6>
-                      {uniqueFixRates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>Za trasu</span>
-                          <span className="font-semibold" style={{ color: '#8b5cf6' }}>{formatCZK(rate.rate)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {uniqueKmRates.length > 0 && (
-                    <div className="space-y-2">
-                      <h6 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#10b981' }}>
-                        <MapPin size={14} />
-                        Km sazba
-                      </h6>
-                      {uniqueKmRates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>Za km</span>
-                          <span className="font-semibold" style={{ color: '#10b981' }}>{rate.rate} Kč/km</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {uniqueDepoRates.length > 0 && (
-                    <div className="space-y-2">
-                      <h6 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#0891b2' }}>
-                        <Warehouse size={14} />
-                        Práce na depu
-                      </h6>
-                      {uniqueDepoRates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>Hodinová</span>
-                          <span className="font-semibold" style={{ color: '#0891b2' }}>{formatCZK(rate.rate)}/h</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              </div>
-            )}
-          </>
+              ))}
+            </div>
+          </div>
         )}
 
-        {/* Pro Nový Bydžov - Linehauly + Direct trasy + Sklad */}
-        {area === 'Nový Bydžov' && (
-          <>
-            {/* Linehauly do depa */}
-            {Object.keys(linehaulsBySource).length > 0 && (
-              <div className="space-y-3">
-                <h5 className="text-xs font-semibold uppercase tracking-wide flex items-center gap-2" style={{ color: 'var(--color-text-muted)' }}>
-                  <Truck size={14} />
-                  Linehaul do depa Nový Bydžov
-                </h5>
-                {Object.entries(linehaulsBySource).map(([source, rates]) => (
-                  <div key={source} className="space-y-2">
-                    <h6 className="text-xs font-medium" style={{ color: '#ef4444' }}>
-                      Z {WAREHOUSE_NAMES[source] || source} ({source}):
-                    </h6>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                      {rates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>
-                            {rate.vehicleType}
-                            <span className="text-xs ml-1 px-1 rounded" style={{ backgroundColor: '#fef3c7', color: '#92400e' }}>
-                              {VEHICLE_PALLETS[rate.vehicleType] || '?'}
-                            </span>
-                          </span>
-                          <span className="font-semibold" style={{ color: '#ef4444' }}>{formatCZK(rate.rate)}</span>
-                        </div>
-                      ))}
+        {/* 2. ROZVOZ Z DEPA (dodávky) - FIX, KM, DEPO hodiny */}
+        {(uniqueFixRates.length > 0 || uniqueKmRates.length > 0 || hourlyDepoRates.length > 0) && (
+          <div className="space-y-3">
+            <h5 className="text-sm font-semibold flex items-center gap-2" style={{ color: '#8b5cf6' }}>
+              <Package size={16} />
+              Rozvoz z depa (dodávky)
+            </h5>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+              {/* FIX sazby */}
+              {uniqueFixRates.length > 0 && (
+                <div className="space-y-2">
+                  <h6 className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+                    <DollarSign size={12} />
+                    FIX sazba
+                  </h6>
+                  {uniqueFixRates.map((rate, idx) => (
+                    <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                      <span style={{ color: 'var(--color-text-muted)' }}>Za trasu</span>
+                      <div className="flex items-center">
+                        <span className="font-semibold" style={{ color: '#8b5cf6' }}>{formatCZK(rate.rate)}</span>
+                        <ContractBadge label={rate.contractLabel} />
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Direct trasy */}
-            {(uniqueFixRates.length > 0 || uniqueKmRates.length > 0) && (
-              <div className="space-y-3">
-                <h5 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
-                  Direct trasy (rozvoz z depa)
-                </h5>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {uniqueFixRates.length > 0 && (
-                    <div className="space-y-2">
-                      <h6 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#8b5cf6' }}>
-                        <DollarSign size={14} />
-                        FIX sazba
-                      </h6>
-                      {uniqueFixRates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>Za trasu</span>
-                          <span className="font-semibold" style={{ color: '#8b5cf6' }}>{formatCZK(rate.rate)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {uniqueKmRates.length > 0 && (
-                    <div className="space-y-2">
-                      <h6 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#10b981' }}>
-                        <MapPin size={14} />
-                        Km sazba
-                      </h6>
-                      {uniqueKmRates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>Za km</span>
-                          <span className="font-semibold" style={{ color: '#10b981' }}>{rate.rate} Kč/km</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  ))}
                 </div>
-              </div>
-            )}
-
-            {/* Skladové služby + Bonusy */}
-            {(uniqueDepoRates.length > 0 || uniqueBonusRates.length > 0) && (
-              <div className="space-y-3">
-                <h5 className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
-                  Skladové služby
-                </h5>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {uniqueDepoRates.length > 0 && (
-                    <div className="space-y-2">
-                      <h6 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#0891b2' }}>
-                        <Warehouse size={14} />
-                        Měsíční paušál
-                      </h6>
-                      {uniqueDepoRates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>
-                            {rate.depoName?.replace(/_/g, ' ')}
-                          </span>
-                          <span className="font-semibold" style={{ color: '#0891b2' }}>
-                            {formatCZK(rate.rate)}/měs
-                          </span>
-                        </div>
-                      ))}
+              )}
+              
+              {/* KM sazby */}
+              {uniqueKmRates.length > 0 && (
+                <div className="space-y-2">
+                  <h6 className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+                    <MapPin size={12} />
+                    Km sazba
+                  </h6>
+                  {uniqueKmRates.map((rate, idx) => (
+                    <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                      <span style={{ color: 'var(--color-text-muted)' }}>Za km</span>
+                      <div className="flex items-center">
+                        <span className="font-semibold" style={{ color: '#10b981' }}>{rate.rate} Kč/km</span>
+                        <ContractBadge label={rate.contractLabel} />
+                      </div>
                     </div>
-                  )}
-                  {uniqueBonusRates.length > 0 && (
-                    <div className="space-y-2">
-                      <h6 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#f59e0b' }}>
-                        <Award size={14} />
-                        Bonusy za kvalitu
-                      </h6>
-                      {uniqueBonusRates.map((rate, idx) => (
-                        <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
-                          <span style={{ color: 'var(--color-text-muted)' }}>
-                            {rate.qualityMin >= 98 ? '≥' : ''}{rate.qualityMin}% - {rate.qualityMax}%
-                          </span>
-                          <span className="font-semibold" style={{ color: '#f59e0b' }}>+{formatCZK(rate.bonusAmount)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  ))}
                 </div>
-              </div>
-            )}
-          </>
+              )}
+              
+              {/* DEPO hodiny */}
+              {hourlyDepoRates.length > 0 && (
+                <div className="space-y-2">
+                  <h6 className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+                    <Warehouse size={12} />
+                    Práce na depu
+                  </h6>
+                  {hourlyDepoRates.map((rate, idx) => (
+                    <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                      <span style={{ color: 'var(--color-text-muted)' }}>Hodinová</span>
+                      <div className="flex items-center">
+                        <span className="font-semibold" style={{ color: '#0891b2' }}>{formatCZK(rate.rate)}/h</span>
+                        <ContractBadge label={rate.contractLabel} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 3. SKLADOVÉ SLUŽBY + BONUSY (pouze Nový Bydžov) */}
+        {(monthlyDepoRates.length > 0 || uniqueBonusRates.length > 0) && (
+          <div className="space-y-3">
+            <h5 className="text-sm font-semibold flex items-center gap-2" style={{ color: '#0891b2' }}>
+              <Warehouse size={16} />
+              Skladové služby
+            </h5>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Měsíční paušály */}
+              {monthlyDepoRates.length > 0 && (
+                <div className="space-y-2">
+                  <h6 className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                    Měsíční paušál
+                  </h6>
+                  {monthlyDepoRates.map((rate, idx) => (
+                    <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                      <span style={{ color: 'var(--color-text-muted)' }}>
+                        {rate.depoName?.replace(/_/g, ' ')}
+                      </span>
+                      <div className="flex items-center">
+                        <span className="font-semibold" style={{ color: '#0891b2' }}>{formatCZK(rate.rate)}/měs</span>
+                        <ContractBadge label={rate.contractLabel} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Bonusy */}
+              {uniqueBonusRates.length > 0 && (
+                <div className="space-y-2">
+                  <h6 className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--color-text-muted)' }}>
+                    <Award size={12} />
+                    Bonusy za kvalitu
+                  </h6>
+                  {uniqueBonusRates.map((rate, idx) => (
+                    <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                      <span style={{ color: 'var(--color-text-muted)' }}>
+                        {rate.qualityMin >= 98 ? '≥' : ''}{rate.qualityMin}% - {rate.qualityMax}%
+                      </span>
+                      <div className="flex items-center">
+                        <span className="font-semibold" style={{ color: '#f59e0b' }}>+{formatCZK(rate.bonusAmount)}</span>
+                        <ContractBadge label={rate.contractLabel} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -425,39 +378,38 @@ function ServiceCard({ type, configs, contractList }) {
     })
   })
 
-  // Seskupit sazby podle rozvozové oblasti (depa)
-  const areas = ['Vratimov', 'Nový Bydžov']
-  const ratesByArea = {}
+  // Seskupit sazby podle rozvozového depa
+  const depots = ['Vratimov', 'Nový Bydžov']
+  const ratesByDepot = {}
   
-  // Najdi které oblasti mají FIX sazby (pro sdílení KM sazeb)
-  const areasWithFixRates = new Set(
-    allFixRates.map(r => detectArea(r, 'fix')).filter(Boolean)
+  // Najdi která depa mají FIX sazby (pro sdílení KM sazeb)
+  const depotsWithFixRates = new Set(
+    allFixRates.map(r => detectDepot(r, 'fix')).filter(Boolean)
   )
   
-  areas.forEach(area => {
+  depots.forEach(depot => {
     // FIX sazby - přesné přiřazení
-    const fixRates = allFixRates.filter(r => detectArea(r, 'fix') === area)
+    const fixRates = allFixRates.filter(r => detectDepot(r, 'fix') === depot)
     
-    // KM sazby - sdílené mezi oblastmi které mají FIX sazby
-    let kmRates = allKmRates.filter(r => detectArea(r, 'km') === area)
-    // Pokud je KM sazba sdílená (null), přidej ji do oblastí s FIX sazbami
-    if (areasWithFixRates.has(area)) {
-      const sharedKmRates = allKmRates.filter(r => detectArea(r, 'km') === null)
+    // KM sazby - sdílené mezi depy které mají FIX sazby
+    let kmRates = allKmRates.filter(r => detectDepot(r, 'km') === depot)
+    if (depotsWithFixRates.has(depot)) {
+      const sharedKmRates = allKmRates.filter(r => detectDepot(r, 'km') === null)
       kmRates = [...kmRates, ...sharedKmRates]
     }
     
     // DEPO sazby
-    const depoRates = allDepoRates.filter(r => detectArea(r, 'depo') === area)
+    const depoRates = allDepoRates.filter(r => detectDepot(r, 'depo') === depot)
     
-    // Linehaul sazby - přesné přiřazení + sdílené (null) jdou do obou dep
-    let linehaulRates = allLinehaulRates.filter(r => detectArea(r, 'linehaul') === area)
-    const sharedLinehaulRates = allLinehaulRates.filter(r => detectArea(r, 'linehaul') === null)
+    // Linehaul sazby - přesné + sdílené
+    let linehaulRates = allLinehaulRates.filter(r => detectDepot(r, 'linehaul') === depot)
+    const sharedLinehaulRates = allLinehaulRates.filter(r => detectDepot(r, 'linehaul') === null)
     linehaulRates = [...linehaulRates, ...sharedLinehaulRates]
     
     // Bonus sazby
-    const bonusRates = allBonusRates.filter(r => detectArea(r, 'bonus') === area)
+    const bonusRates = allBonusRates.filter(r => detectDepot(r, 'bonus') === depot)
     
-    ratesByArea[area] = { fixRates, kmRates, depoRates, linehaulRates, bonusRates }
+    ratesByDepot[depot] = { fixRates, kmRates, depoRates, linehaulRates, bonusRates }
   })
 
   const hasAnyRates = allFixRates.length > 0 || allKmRates.length > 0 || 
@@ -466,11 +418,11 @@ function ServiceCard({ type, configs, contractList }) {
 
   if (!hasAnyRates) return null
   
-  // Najdi oblasti s nějakými sazbami
-  const activeAreas = areas.filter(area => {
-    const a = ratesByArea[area]
-    return a.fixRates.length > 0 || a.kmRates.length > 0 || a.depoRates.length > 0 || 
-           a.linehaulRates.length > 0 || a.bonusRates.length > 0
+  // Najdi depa s nějakými sazbami
+  const activeDepots = depots.filter(depot => {
+    const d = ratesByDepot[depot]
+    return d.fixRates.length > 0 || d.kmRates.length > 0 || d.depoRates.length > 0 || 
+           d.linehaulRates.length > 0 || d.bonusRates.length > 0
   })
 
   return (
@@ -491,22 +443,22 @@ function ServiceCard({ type, configs, contractList }) {
             {serviceConfig.label}
           </h2>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {activeAreas.length} {activeAreas.length === 1 ? 'oblast' : 'oblasti'} • {activeConfigs.length} aktivní {activeConfigs.length === 1 ? 'ceník' : 'ceníky'}
+            {activeDepots.length} {activeDepots.length === 1 ? 'depo' : 'depa'} • {activeConfigs.length} aktivní {activeConfigs.length === 1 ? 'ceník' : 'ceníky'}
           </p>
         </div>
       </div>
 
-      {/* Content - Area sections */}
+      {/* Content - Depot sections */}
       <div className="p-6 space-y-4">
-        {activeAreas.map(area => (
-          <AreaSection
-            key={area}
-            area={area}
-            fixRates={ratesByArea[area].fixRates}
-            kmRates={ratesByArea[area].kmRates}
-            depoRates={ratesByArea[area].depoRates}
-            linehaulRates={ratesByArea[area].linehaulRates}
-            bonusRates={ratesByArea[area].bonusRates}
+        {activeDepots.map(depot => (
+          <DepotSection
+            key={depot}
+            depot={depot}
+            linehaulRates={ratesByDepot[depot].linehaulRates}
+            fixRates={ratesByDepot[depot].fixRates}
+            kmRates={ratesByDepot[depot].kmRates}
+            depoRates={ratesByDepot[depot].depoRates}
+            bonusRates={ratesByDepot[depot].bonusRates}
           />
         ))}
       </div>
@@ -726,16 +678,13 @@ export default function Prices() {
       {/* Legenda */}
       {hasPrices && (
         <div className="flex flex-wrap items-center gap-4 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-          <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Rozvozová depa:</span>
+          <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Struktura:</span>
           <div className="flex flex-wrap items-center gap-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            <span className="flex items-center gap-1">
-              <span className="text-base">🏭</span> Vratimov
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="text-base">📦</span> Nový Bydžov
-            </span>
-            <span>•</span>
-            <span>Expediční sklady: CZTC1 (Úžice), CZLC4 (Chrášťany)</span>
+            <span>Expediční sklady: CZTC1, CZLC4, LCU...</span>
+            <span>→</span>
+            <span>Rozvozová depa: 🏭 Vratimov, 📦 Nový Bydžov</span>
+            <span>→</span>
+            <span>AlzaBoxy</span>
           </div>
         </div>
       )}

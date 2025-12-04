@@ -1,8 +1,8 @@
 # Alza Cost Control - Procesní dokumentace
 
-> **Verze:** 3.9.0  
+> **Verze:** 3.10.0  
 > **Datum:** Prosinec 2025  
-> **Aktualizace:** Linehauly do obou dep (Vratimov i Nový Bydžov)
+> **Aktualizace:** Restrukturace ceníků, expediční sklady vs rozvozová depa
 
 ---
 
@@ -62,127 +62,108 @@ Kontrola nákladů na dopravu pro Alzu - porovnání:
 
 ## 3. EXPEDIČNÍ SKLADY A ROZVOZOVÁ DEPA
 
-### 3.1 Struktura logistiky (Drivecool)
+### 3.1 Struktura logistiky
 
 ```
                     EXPEDIČNÍ SKLADY
                           │
-        ┌─────────────────┴─────────────────┐
-        │                                   │
-        ▼                                   ▼
-  ┌───────────┐                       ┌───────────┐
-  │  CZTC1    │                       │  CZLC4    │
-  │  Úžice    │                       │ Chrášťany │
-  │(třídírna) │                       │           │
-  └─────┬─────┘                       └─────┬─────┘
-        │                                   │
-        │         LINEHAUL                  │
-        │    ┌────────┴────────┐            │
-        │    │                 │            │
-        │    ▼                 ▼            │
-        │ ┌───────┐      ┌───────────┐      │
-        └►│ DEPO  │      │   DEPO    │◄─────┘
-          │VRATIM.│      │ NOVÝ BYD. │
-          └───┬───┘      └─────┬─────┘
-              │                │
-              ▼                ▼
-        ┌───────────┐    ┌───────────┐
-        │ AlzaBoxy  │    │ AlzaBoxy  │
-        │ Morava    │    │ okolí NB  │
-        └───────────┘    └───────────┘
+     ┌────────────────────┼────────────────────┐
+     │                    │                    │
+     ▼                    ▼                    ▼
+┌─────────┐        ┌─────────────┐       ┌─────────┐
+│ CZTC1   │        │   CZLC4     │       │  LCU    │
+│ Úžice   │        │ Chrášťany   │       │  LCS    │
+│(třídírna│        │             │       │  LCZ    │
+└────┬────┘        └──────┬──────┘       │  SKLC3  │
+     │                    │              └────┬────┘
+     │     LINEHAUL       │                   │
+     │    nebo DIRECT     │                   │
+     │         │          │                   │
+     ▼         ▼          ▼                   ▼
+┌──────────────────────────────────────────────────┐
+│              ROZVOZOVÁ DEPA                       │
+│  ┌───────────────┐    ┌───────────────────┐      │
+│  │ 🏭 VRATIMOV   │    │ 📦 NOVÝ BYDŽOV    │      │
+│  └───────┬───────┘    └─────────┬─────────┘      │
+│          │                      │                │
+│          ▼                      ▼                │
+│    ┌───────────┐          ┌───────────┐          │
+│    │ AlzaBoxy  │          │ AlzaBoxy  │          │
+│    │ Morava    │          │ okolí NB  │          │
+│    └───────────┘          └───────────┘          │
+└──────────────────────────────────────────────────┘
 ```
 
-### 3.2 Expediční sklady vs Rozvozová depa
+### 3.2 Klíčové pojmy
 
-| Typ | Název | Kód | Funkce |
-|-----|-------|-----|--------|
-| **Expediční sklad** | Úžice (Třídírna) | CZTC1 | Třídírna, výchozí bod linehaulů |
-| **Expediční sklad** | Chrášťany | CZLC4 | Hlavní sklad, expedice |
-| **Rozvozové depo** | Vratimov | - | Příjem linehaulů, třídění, rozvoz na Moravu |
-| **Rozvozové depo** | Nový Bydžov | - | Direct trasy + skladové služby |
+| Pojem | Popis |
+|-------|-------|
+| **Expediční sklad** | Sklad, odkud se expeduje zboží (CZTC1, CZLC4, LCU...) |
+| **Rozvozové depo** | Místo, kam přijíždí linehauly a odkud jedou dodávky na rozvoz |
+| **Linehaul** | Přeprava z expedičního skladu na rozvozové depo (kamion, solo, dodávka) |
+| **Direct trasa** | Dodávka jede přímo z expedičního skladu (bez přetřídění na depu) |
+| **Rozvoz z depa** | Dodávky, které jedou z rozvozového depa k AlzaBoxům |
 
-### 3.3 Linehaul sazby
+### 3.3 Způsoby obsluhy rozvozové oblasti
 
-Linehauly mohou směřovat do **obou rozvozových dep** (Vratimov i Nový Bydžov).
+**1. Linehaul + rozvoz z depa:**
+```
+Exp. sklad → Linehaul → Depo → Třídění → Rozvoz dodávkami → AlzaBoxy
+```
 
-**Do depa Vratimov:**
-| Zdroj | Typ vozu | Palety | Sazba |
-|-------|----------|--------|-------|
-| CZTC1 (Úžice) | Dodávka | 8-10 | 9 100 Kč |
-| CZTC1 (Úžice) | Solo | 15-18 | 14 800 Kč |
-| CZTC1 (Úžice) | Kamion | 33 | 22 000 Kč |
-| CZLC4 (Chrášťany) | Dodávka | 8-10 | 10 100 Kč |
-| CZLC4 (Chrášťany) | Solo | 18-21 | 16 500 Kč |
-| CZLC4 (Chrášťany) | Kamion | 33 | 24 180 Kč |
+**2. Direct trasy:**
+```
+Exp. sklad → Direct dodávka → AlzaBoxy
+```
 
-**Do depa Nový Bydžov:**
-| Zdroj | Typ vozu | Palety | Sazba |
-|-------|----------|--------|-------|
-| CZTC1 (Úžice) | Dodávka | 8-10 | TBD |
-| CZTC1 (Úžice) | Solo | 15-18 | TBD |
-| CZLC4 (Chrášťany) | Dodávka | 8-10 | TBD |
-| CZLC4 (Chrášťany) | Solo | 18-21 | TBD |
+### 3.4 Sazby per depo
 
-### 3.4 Rozvozové sazby
+**Depo Vratimov:**
+| Typ sazby | Popis | Příklad |
+|-----------|-------|---------|
+| Linehaul | Z exp. skladu na depo | CZTC1 → Vratimov |
+| FIX | Paušál za rozvozvou trasu | 2 500 Kč |
+| KM | Kilometrová sazba | 10,97 Kč/km |
+| DEPO | Práce na depu (hodinová) | 850 Kč/h |
 
-**Depo Vratimov (rozvoz dodávkami):**
-| Sazba | Hodnota |
-|-------|---------|
-| FIX | 2 500 Kč/trasa |
-| KM | 10,97 Kč/km |
-| DEPO | 850 Kč/hod |
+**Depo Nový Bydžov:**
+| Typ sazby | Popis | Příklad |
+|-----------|-------|---------|
+| Linehaul | Z exp. skladu na depo | CZLC4 → NB |
+| FIX | Paušál za rozvozvou trasu | 3 200 Kč |
+| KM | Kilometrová sazba | 10,97 Kč/km |
+| Sklad | Měsíční paušál | 410 000 Kč |
+| Bonus | Za kvalitu ≥98% | +35 600 Kč |
 
-**Depo Nový Bydžov (direct trasy):**
-| Sazba | Hodnota |
-|-------|---------|
-| FIX | 3 200 Kč/trasa |
-| KM | 10,97 Kč/km |
+### 3.5 Alza Trade Delivery 2.0
 
-**Skladové služby (Nový Bydžov):**
-| Sazba | Hodnota |
-|-------|---------|
-| Sklad ALL IN | 410 000 Kč/měs |
-| Bonus ≥98% | +35 600 Kč |
-
-### 3.5 Platnost ceníků
-
-- Nový ceník **nahrazuje** starý pro stejný typ sazby
-- Zobrazuje se **pouze aktuálně platná** částka
-- Deduplikace podle klíče (typ sazby + parametry)
-
-```javascript
-// Příklad deduplikace
-const uniqueRates = deduplicateRates(rates, r => `${r.fromCode}_${r.vehicleType}`)
+Služba svozu (první míle) od dodavatelů:
+```
+Dodavatel → Svoz → CZTC1 (třídírna)
 ```
 
 ### 3.6 Zobrazení v aplikaci (Prices.jsx)
 
+Ceníky zobrazeny **per typ služby → per depo**:
+
 ```
-📦 AlzaBox (2 depa • 1 aktivní ceník)
-│
+📦 AlzaBox
 ├── 🏭 Depo Vratimov
-│   │   Linehaul z CZTC1/CZLC4 → třídění → rozvoz dodávkami
-│   │
-│   ├── LINEHAUL DO DEPA
-│   │   Z Úžice (CZTC1): Dodávka/Solo/Kamion
-│   │   Z Chrášťan (CZLC4): Dodávka/Solo/Kamion
-│   │
-│   └── ROZVOZ Z DEPA (dodávky)
-│       FIX: 2 500 Kč | KM: 10,97 Kč | DEPO: 850 Kč/h
+│   ├── Linehaul (z exp. skladů na depo)
+│   │   └── Z Úžice: Dodávka/Solo/Kamion [D8]
+│   │   └── Z Chrášťan: Dodávka/Solo/Kamion [D8]
+│   └── Rozvoz z depa (dodávky)
+│       └── FIX 2 500 Kč [D7] | KM 10,97 Kč [D7] | DEPO 850 Kč/h [D7]
 │
 └── 📦 Depo Nový Bydžov
-    │   Linehaul + Direct trasy + skladové služby
-    │
-    ├── LINEHAUL DO DEPA
-    │   Z Úžice (CZTC1): Dodávka/Solo/Kamion
-    │   Z Chrášťan (CZLC4): Dodávka/Solo/Kamion
-    │
-    ├── DIRECT TRASY
-    │   FIX: 3 200 Kč | KM: 10,97 Kč
-    │
-    └── SKLADOVÉ SLUŽBY
-        ALL IN: 410 000 Kč/měs | Bonus ≥98%: +35 600 Kč
+    ├── Linehaul (z exp. skladů na depo)
+    ├── Rozvoz z depa (dodávky)
+    │   └── FIX 3 200 Kč [D7] | KM 10,97 Kč [D7]
+    └── Skladové služby
+        └── ALL IN 410 000 Kč [D12] | Bonus ≥98% +35 600 Kč [D12]
 ```
+
+**Čísla dodatků** ([D7], [D8], [D12]) jsou zachována u každé sazby.
 
 ---
 
@@ -364,4 +345,4 @@ AlzaBoxLocation (Box)
 
 ---
 
-*Aktualizováno: Prosinec 2025 - v3.9.0*
+*Aktualizováno: Prosinec 2025 - v3.10.0*

@@ -1,8 +1,8 @@
 # Technická dokumentace - Transport Brain
 
-> **Verze:** 3.9.0  
+> **Verze:** 3.10.0  
 > **Datum:** Prosinec 2025  
-> **Aktualizace:** Linehauly do obou dep (Vratimov i Nový Bydžov)
+> **Aktualizace:** Restrukturace ceníků per depo, zachování čísel dodatků
 
 ---
 
@@ -262,4 +262,4 @@ FRONTEND_URL=<frontend url for CORS>
 
 ---
 
-*Aktualizováno: Prosinec 2025 - v3.9.0*
+*Aktualizováno: Prosinec 2025 - v3.10.0*
