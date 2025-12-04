@@ -5,7 +5,8 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
     'X-API-Key': import.meta.env.VITE_API_KEY || ''
-  }
+  },
+  timeout: 30000 // 30 sekund default
 })
 
 // Carriers
@@ -36,21 +37,24 @@ export const contracts = {
     formData.append('file', file)
     formData.append('carrier_id', carrierId)
     return api.post('/contracts/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000 // 2 minuty
     }).then(r => r.data)
   },
   parsePreview: (file) => {
     const formData = new FormData()
     formData.append('file', file)
     return api.post('/contracts/parse-preview', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000
     }).then(r => r.data)
   },
   uploadPdf: (file) => {
     const formData = new FormData()
     formData.append('file', file)
     return api.post('/contracts/upload-pdf', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000
     }).then(r => r.data)
   },
   update: (id, data) => api.put(`/contracts/${id}`, data).then(r => r.data),
@@ -78,7 +82,8 @@ export const proofs = {
     formData.append('carrier_id', carrierId)
     formData.append('period', period)
     return api.post('/proofs/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 180000 // 3 minuty
     }).then(r => r.data)
   },
   update: (id, data) => api.put(`/proofs/${id}`, data).then(r => r.data),
@@ -96,7 +101,8 @@ export const invoices = {
     formData.append('carrier_id', carrierId)
     formData.append('period', period)
     return api.post('/invoices/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000
     }).then(r => r.data)
   },
   update: (id, data) => api.put(`/invoices/${id}`, data).then(r => r.data),
@@ -122,7 +128,8 @@ export const routePlans = {
       formData.append('valid_from', validFrom)
     }
     return api.post('/route-plans/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 120000
     }).then(r => r.data)
   },
   uploadBatch: (files, carrierId) => {
@@ -130,7 +137,8 @@ export const routePlans = {
     files.forEach(file => formData.append('files', file))
     formData.append('carrier_id', carrierId)
     return api.post('/route-plans/upload-batch', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000 // 5 minut
     }).then(r => r.data)
   },
   compare: (planId, proofId) => api.get(`/route-plans/${planId}/compare/${proofId}`).then(r => r.data),
@@ -146,14 +154,15 @@ export const analysis = {
   getDashboard: (params) => api.get('/analysis/dashboard', { params }).then(r => r.data)
 }
 
-// Alzabox
+// Alzabox - S DELŠÍM TIMEOUTEM pro velké soubory
 export const alzabox = {
-  // Import
+  // Import - 5 minut timeout pro velké soubory
   importLocations: (file) => {
     const formData = new FormData()
     formData.append('file', file)
     return api.post('/alzabox/import/locations', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000 // 5 minut
     }).then(r => r.data)
   },
   
@@ -161,7 +170,8 @@ export const alzabox = {
     const formData = new FormData()
     formData.append('file', file)
     return api.post(`/alzabox/import/deliveries?delivery_type=${deliveryType}`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000 // 5 minut
     }).then(r => r.data)
   },
   
