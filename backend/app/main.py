@@ -1,5 +1,5 @@
 """
-Alza Cost Control API - Main Application
+Alza Cost Control - FastAPI Backend
 """
 import os
 from contextlib import asynccontextmanager
@@ -8,72 +8,153 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.database import engine, Base
-from app.api_key_middleware import APIKeyMiddleware
-from app.routers import (
-    carriers, 
-    depots, 
-    contracts, 
-    prices, 
-    proofs, 
-    invoices, 
-    analysis, 
-    route_plans,
-    alzabox,
-    auth,
-    expected_billing
-)
+from app.middleware import APIKeyMiddleware
+from app.routers import carriers, depots, contracts, prices, proofs, invoices, analysis
+from app.routers import route_plans
+from app.routers import alzabox
 
 
 async def run_migrations():
-    """Run any pending migrations"""
+    """Run database migrations on startup"""
     async with engine.begin() as conn:
-        # Check if LoginLog table exists, create if not
+        # Check if planType column exists
         result = await conn.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = 'LoginLog'
-            )
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'planType'
         """))
-        exists = result.scalar()
+        column_exists = result.fetchone() is not None
         
-        if not exists:
-            await conn.execute(text("""
-                CREATE TABLE "LoginLog" (
-                    id SERIAL PRIMARY KEY,
-                    email VARCHAR(255) NOT NULL,
-                    "loginAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    "ipAddress" VARCHAR(45),
-                    "userAgent" TEXT
-                )
-            """))
-            print("Migration: Created LoginLog table")
-        
-        # Check for unique constraint on RoutePlan
-        result = await conn.execute(text("""
-            SELECT EXISTS (
-                SELECT 1 FROM pg_constraint 
-                WHERE conname = 'uq_carrier_date_plantype_depot'
-            )
-        """))
-        constraint_exists = result.scalar()
-        
-        if not constraint_exists:
-            # First check if the old constraint exists and drop it
+        if not column_exists:
+            print("Migration: Adding planType column to RoutePlan...")
+            
+            # Add column
             await conn.execute(text("""
                 ALTER TABLE "RoutePlan" 
-                DROP CONSTRAINT IF EXISTS "uq_carrier_date_plantype"
+                ADD COLUMN "planType" VARCHAR(10) DEFAULT 'BOTH'
             """))
             
-            # Add the new constraint with depot
-            try:
-                await conn.execute(text("""
-                    ALTER TABLE "RoutePlan" 
-                    ADD CONSTRAINT "uq_carrier_date_plantype_depot" 
-                    UNIQUE ("carrierId", "validFrom", "planType", "depot")
-                """))
-                print("Migration: Added unique constraint with depot")
-            except Exception as e:
-                print(f"Migration warning: {e}")
+            # Set default for existing records
+            await conn.execute(text("""
+                UPDATE "RoutePlan" 
+                SET "planType" = 'BOTH' 
+                WHERE "planType" IS NULL
+            """))
+            
+            print("Migration: planType column added successfully")
+        
+        # Check if depot column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'depot'
+        """))
+        depot_column_exists = result.fetchone() is not None
+        
+        if not depot_column_exists:
+            print("Migration: Adding depot column to RoutePlan...")
+            
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN "depot" VARCHAR(20) DEFAULT 'BOTH'
+            """))
+            
+            print("Migration: depot column added successfully")
+        
+        # Check if vratimovStops column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'vratimovStops'
+        """))
+        stops_column_exists = result.fetchone() is not None
+        
+        if not stops_column_exists:
+            print("Migration: Adding stops per depot columns to RoutePlan...")
+            
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "vratimovStops" INTEGER DEFAULT 0
+            """))
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "bydzovStops" INTEGER DEFAULT 0
+            """))
+            
+            print("Migration: stops columns added successfully")
+        
+        # Check if vratimovKm column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'vratimovKm'
+        """))
+        km_column_exists = result.fetchone() is not None
+        
+        if not km_column_exists:
+            print("Migration: Adding km per depot columns to RoutePlan...")
+            
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "vratimovKm" NUMERIC(10, 2) DEFAULT 0
+            """))
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "bydzovKm" NUMERIC(10, 2) DEFAULT 0
+            """))
+            
+            print("Migration: km columns added successfully")
+        
+        # Check if vratimovDurationMin column exists
+        result = await conn.execute(text("""
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'RoutePlan' AND column_name = 'vratimovDurationMin'
+        """))
+        duration_column_exists = result.fetchone() is not None
+        
+        if not duration_column_exists:
+            print("Migration: Adding duration per depot columns to RoutePlan...")
+            
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "vratimovDurationMin" INTEGER DEFAULT 0
+            """))
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD COLUMN IF NOT EXISTS "bydzovDurationMin" INTEGER DEFAULT 0
+            """))
+            
+            print("Migration: duration columns added successfully")
+        
+        # Check if NEW unique constraint exists (with depot)
+        result = await conn.execute(text("""
+            SELECT constraint_name 
+            FROM information_schema.table_constraints 
+            WHERE table_name = 'RoutePlan' 
+            AND constraint_name = 'uq_carrier_date_plantype_depot'
+        """))
+        new_constraint_exists = result.fetchone() is not None
+        
+        if not new_constraint_exists:
+            print("Migration: Updating unique constraint to include depot...")
+            
+            # Drop old constraints if they exist
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                DROP CONSTRAINT IF EXISTS uq_carrier_date_plantype
+            """))
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                DROP CONSTRAINT IF EXISTS uq_carrier_date
+            """))
+            
+            # Add new constraint with depot
+            await conn.execute(text("""
+                ALTER TABLE "RoutePlan" 
+                ADD CONSTRAINT uq_carrier_date_plantype_depot 
+                UNIQUE ("carrierId", "validFrom", "planType", "depot")
+            """))
             
             print("Migration: Unique constraint updated successfully")
 
@@ -98,7 +179,7 @@ IS_PRODUCTION = bool(os.getenv("API_KEY"))
 app = FastAPI(
     title="Alza Cost Control API",
     description="Backend API pro kontrolu nákladů na dopravu",
-    version="2.3.0",
+    version="2.2.0",
     lifespan=lifespan,
     redirect_slashes=True,
     docs_url=None if IS_PRODUCTION else "/docs",
@@ -131,7 +212,7 @@ app.add_middleware(APIKeyMiddleware)
 # Health check
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "version": "2.3.0"}
+    return {"status": "ok", "version": "2.2.0"}
 
 
 # Routers
@@ -143,6 +224,4 @@ app.include_router(proofs.router, prefix="/api/proofs", tags=["Proofs"])
 app.include_router(invoices.router, prefix="/api/invoices", tags=["Invoices"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["Analysis"])
 app.include_router(route_plans.router, prefix="/api/route-plans", tags=["Route Plans"])
-app.include_router(alzabox.router, prefix="/api/alzabox", tags=["AlzaBox BI"])
-app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
-app.include_router(expected_billing.router, prefix="/api/expected-billing", tags=["Expected Billing"])
+app.include_router(alzabox.router, prefix="/api/alzabox", tags=["AlzaBox"])

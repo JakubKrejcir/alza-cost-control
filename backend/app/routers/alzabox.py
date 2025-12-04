@@ -16,7 +16,7 @@ import logging
 from app.database import get_db
 from app.models import AlzaBox, AlzaBoxAssignment, AlzaBoxDelivery, Carrier
 
-router = APIRouter(prefix="/alzabox", tags=["alzabox"])
+router = APIRouter(tags=["alzabox"])
 logger = logging.getLogger(__name__)
 
 
