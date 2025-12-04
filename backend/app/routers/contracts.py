@@ -218,23 +218,17 @@ def extract_price_rates(text: str) -> dict:
                 continue
     
     # ============ LINEHAUL SAZBY ============
-    # Formát: "24 180 Kč bez DPH CZLC4 -> Vratimov" nebo tabulka s trasami
+    # Formát 1: "24 180 Kč bez DPH CZLC4 -> Vratimov" (AlzaBox dodatky)
+    # Formát 2: Třídírna tabulky - line-by-line parsing
+    
     linehaul_patterns = [
-        # Tabulkový formát: číslo před trasou
+        # Tabulkový formát: číslo před trasou (AlzaBox)
         (r'([\d\s]+)\s*kč\s*bez\s*dph\s*czlc4\s*[–\->]+\s*vratimov', 'CZLC4', 'Vratimov', 'LKW'),
         # Formát: trasa před číslem
         (r'linehaul\s+czlc4\s*[–\->]+\s*vratimov[^0-9]*([\d\s]+)\s*kč', 'CZLC4', 'Vratimov', 'LKW'),
-        # Třídírna formát
-        (r'cztc1\s*[–\-]\s*depo\s+vratimov[^0-9]*dodávka[^0-9]*([\d\s]+)[,\.\-]*', 'CZTC1', 'Vratimov', 'Dodávka'),
-        (r'cztc1\s*[–\-]\s*depo\s+vratimov[^0-9]*solo[^0-9]*([\d\s]+)[,\.\-]*', 'CZTC1', 'Vratimov', 'Solo'),
-        (r'cztc1\s*[–\-]\s*depo\s+vratimov[^0-9]*kamion[^0-9]*([\d\s]+)[,\.\-]*', 'CZTC1', 'Vratimov', 'Kamion'),
-        (r'czlc4\s*[–\-]\s*depo\s+vratimov[^0-9]*dodávka[^0-9]*([\d\s]+)[,\.\-]*', 'CZLC4', 'Vratimov', 'Dodávka'),
-        (r'czlc4\s*[–\-]\s*depo\s+vratimov[^0-9]*solo[^0-9]*([\d\s]+)[,\.\-]*', 'CZLC4', 'Vratimov', 'Solo'),
-        (r'czlc4\s*[–\-]\s*depo\s+vratimov[^0-9]*kamion[^0-9]*([\d\s]+)[,\.\-]*', 'CZLC4', 'Vratimov', 'Kamion'),
-        # LKW/sólo/dodávka pro Nový Bydžov (různé formáty)
+        # LKW/sólo/dodávka pro Nový Bydžov
         (r'lcu\s*[–\-]\s*depo\s+nový\s+bydžov[^0-9]*([\d\s]+)[,\.\-]*', 'LCU', 'Novy_Bydzov', 'LKW'),
         (r'lcz/cztc1\s*[–\-]\s*depo\s+nový\s+bydžov[^0-9]*([\d\s]+)[,\.\-]*', 'LCZ_CZTC1', 'Novy_Bydzov', 'LKW'),
-        (r'([\d\s]+)[,\.\-]*\s*lcu\s*[–\-]\s*depo\s+nový\s+bydžov', 'LCU', 'Novy_Bydzov', 'LKW'),
     ]
     
     seen_linehaul = set()
@@ -254,6 +248,47 @@ def extract_price_rates(text: str) -> dict:
                     seen_linehaul.add(key)
             except ValueError:
                 continue
+    
+    # Třídírna tabulky - line-by-line parsing
+    # Formát: "CZTC1 – DEPO Vratimov CZTC1 DEPO Vratimov (Plachta) 8-10 9 100,-"
+    for line in text.split('\n'):
+        line_lower = line.lower().strip()
+        
+        # Detekuj zdroj (CZTC1 nebo CZLC4)
+        from_code = None
+        if 'cztc1 – depo vratimov' in line_lower or 'cztc1 - depo vratimov' in line_lower:
+            from_code = 'CZTC1'
+        elif 'czlc4 – depo vratimov' in line_lower or 'czlc4 - depo vratimov' in line_lower:
+            from_code = 'CZLC4'
+        
+        if from_code:
+            # Najdi cenu na konci řádku - formát "X XXX,-" nebo "XX XXX,-"
+            price_match = re.search(r'\s(\d{1,2}\s?\d{3})[,\-]+\s*$', line_lower)
+            if price_match:
+                try:
+                    rate = int(price_match.group(1).replace(' ', ''))
+                    if 1000 <= rate <= 100000:
+                        # Detekuj typ vozu
+                        if 'plachta' in line_lower:
+                            vehicle = 'Dodavka'
+                        elif 'solo' in line_lower:
+                            vehicle = 'Solo'
+                        elif 'kamion' in line_lower:
+                            vehicle = 'Kamion'
+                        else:
+                            continue  # Neznámý typ vozu, přeskoč
+                        
+                        key = (from_code, 'Vratimov', vehicle, rate)
+                        if key not in seen_linehaul:
+                            rates['linehaul_rates'].append({
+                                'from_code': from_code,
+                                'to_code': 'Vratimov',
+                                'vehicle_type': vehicle,
+                                'rate': rate
+                            })
+                            seen_linehaul.add(key)
+                except ValueError:
+                    continue
     
     # ============ BONUS SAZBY ============
     # Formát: "≥ 98 % + 35 600" nebo "97,51 – 97,99 % + 30 000"
