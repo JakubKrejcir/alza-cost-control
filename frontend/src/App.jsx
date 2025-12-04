@@ -6,6 +6,7 @@ import Documents from './pages/Documents'
 import Prices from './pages/Prices'
 import Carriers from './pages/Carriers'
 import AlzaBoxBI from './pages/AlzaBoxBI'
+import ExpectedBilling from './pages/ExpectedBilling'
 import LoginGate from './components/LoginGate'
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
           <Route path="/" element={<Layout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
+            <Route path="expected-billing" element={<ExpectedBilling />} />
             <Route path="upload" element={<Documents />} />
             <Route path="prices" element={<Prices />} />
             <Route path="alzabox" element={<AlzaBoxBI />} />
