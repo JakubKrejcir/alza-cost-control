@@ -1,6 +1,6 @@
 """
 AlzaBox Router - Import dat a BI API (ASYNC verze)
-Verze: 3.10.1 - Opravený summary endpoint
+Verze: 3.10.2 - Opravený parser pro nový formát XLSX
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from typing import Optional, List
 from decimal import Decimal
 import openpyxl
 import io
+import re
 import logging
 
 from app.database import get_db
@@ -28,7 +29,23 @@ async def import_alzabox_locations(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
 ):
-    """Import AlzaBox umístění z XLSX souboru."""
+    """
+    Import AlzaBox umístění z XLSX souboru.
+    
+    Očekávaná struktura (sheet LL_PS):
+    - Col 1: Výdejní místo (id) → alza_id
+    - Col 2: Kód dopravce → code (AB130)
+    - Col 4: Skupina výdejních míst → route_group
+    - Col 5: Odesílatel → source_warehouse
+    - Col 6: Dopravce → carrier_name
+    - Col 7: Název combo → name
+    - Col 8: Stát → country
+    - Col 9: Město → city
+    - Col 10: GPS Y → gps_lat
+    - Col 11: GPS X → gps_lon
+    - Col 12: Kraj → region
+    - Col 13: První spuštění → first_launch
+    """
     try:
         content = await file.read()
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
@@ -46,18 +63,21 @@ async def import_alzabox_locations(
         if not sheet:
             raise HTTPException(status_code=400, detail=f"Žádný sheet nenalezen. Dostupné: {wb.sheetnames}")
         
-        logger.info(f"Importing locations from sheet: {sheet.title}")
+        logger.info(f"Importing locations from sheet: {sheet.title}, rows: {sheet.max_row}")
         
         # Načti existující dopravce
         result = await db.execute(select(Carrier))
         carriers = {c.name: c.id for c in result.scalars().all()}
+        logger.info(f"Found {len(carriers)} carriers in DB")
         
         # Načti existující boxy
         result = await db.execute(select(AlzaBox))
         existing_boxes = {b.code: b for b in result.scalars().all()}
+        logger.info(f"Found {len(existing_boxes)} existing boxes")
         
         created = 0
         updated = 0
+        skipped = 0
         
         for row in range(2, sheet.max_row + 1):
             alza_id = sheet.cell(row=row, column=1).value
@@ -73,10 +93,12 @@ async def import_alzabox_locations(
             region = sheet.cell(row=row, column=12).value
             first_launch = sheet.cell(row=row, column=13).value
             
-            if not code or not name:
+            if not code:
+                skipped += 1
                 continue
             
             code = str(code).strip()
+            name = str(name).strip() if name else code
             
             if code in existing_boxes:
                 box = existing_boxes[code]
@@ -108,15 +130,32 @@ async def import_alzabox_locations(
                 await db.flush()
                 existing_boxes[code] = box
                 created += 1
+            
+            # Přiřazení k dopravci
+            carrier_id = carriers.get(carrier_name) if carrier_name else None
+            
+            if carrier_id or route_group:
+                assignment = AlzaBoxAssignment(
+                    box_id=box.id,
+                    carrier_id=carrier_id,
+                    route_group=str(route_group) if route_group else None,
+                    depot_name=None,
+                    valid_from=datetime.utcnow(),
+                    created_at=datetime.utcnow()
+                )
+                db.add(assignment)
         
         await db.commit()
         wb.close()
+        
+        logger.info(f"Import complete: created={created}, updated={updated}, skipped={skipped}")
         
         return {
             "success": True,
             "imported": created + updated,
             "boxes_created": created,
-            "boxes_updated": updated
+            "boxes_updated": updated,
+            "skipped": skipped
         }
         
     except Exception as e:
@@ -131,10 +170,21 @@ async def import_alzabox_deliveries(
     delivery_type: str = Query("DPO", description="Typ závozu: DPO, SD, THIRD"),
     db: AsyncSession = Depends(get_db)
 ):
-    """Import dojezdových časů z XLSX souboru."""
+    """
+    Import dojezdových časů z XLSX souboru.
+    
+    Očekávaná struktura:
+    - Sheet 'Plan' a 'Actual'
+    - Row 2: datumy (od col 2)
+    - Row 3+: data
+      - Col 1: "Název trasy" (hlavička skupiny) NEBO "09:00 | Název boxu -- AB1234"
+      - Col 2+: časy dojezdů (datetime)
+    """
     try:
         content = await file.read()
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+        
+        logger.info(f"Available sheets: {wb.sheetnames}")
         
         # Flexibilní detekce sheetů
         plan_sheet = None
@@ -145,7 +195,7 @@ async def import_alzabox_deliveries(
                 plan_sheet = wb[name]
                 break
         
-        for name in ['Skutecnost', 'Skutečnost', 'Actual', 'skutecnost', 'SKUTECNOST']:
+        for name in ['Actual', 'Skutecnost', 'Skutečnost', 'actual', 'ACTUAL']:
             if name in wb.sheetnames:
                 actual_sheet = wb[name]
                 break
@@ -154,22 +204,22 @@ async def import_alzabox_deliveries(
             available = ', '.join(wb.sheetnames)
             raise HTTPException(
                 status_code=400, 
-                detail=f"Sheety 'Plan' a 'Skutecnost' nenalezeny. Dostupné: {available}"
+                detail=f"Sheety 'Plan' a 'Actual' nenalezeny. Dostupné: {available}"
             )
         
         logger.info(f"Using sheets: Plan={plan_sheet.title}, Actual={actual_sheet.title}")
         
-        # Načti datumy ze sloupců
+        # Načti datumy z ROW 2 (od col 2)
         dates = []
-        for col in range(4, plan_sheet.max_column + 1):
-            date_val = plan_sheet.cell(row=1, column=col).value
+        for col in range(2, plan_sheet.max_column + 1):
+            date_val = plan_sheet.cell(row=2, column=col).value
             if isinstance(date_val, datetime):
                 dates.append((col, date_val.date()))
         
         if not dates:
-            raise HTTPException(status_code=400, detail="Žádné datumy nenalezeny v hlavičce")
+            raise HTTPException(status_code=400, detail="Žádné datumy nenalezeny v řádku 2")
         
-        logger.info(f"Found {len(dates)} dates")
+        logger.info(f"Found {len(dates)} dates: {dates[0][1]} to {dates[-1][1]}")
         
         # Smaž existující záznamy pro období
         min_date = min(d for _, d in dates)
@@ -186,68 +236,95 @@ async def import_alzabox_deliveries(
         await db.flush()
         logger.info(f"Deleted {result.rowcount} existing records")
         
-        # Načti boxy
+        # Načti boxy z DB
         result = await db.execute(select(AlzaBox))
         boxes = {b.code: b.id for b in result.scalars().all()}
+        logger.info(f"Loaded {len(boxes)} boxes from DB")
         
-        # Načti plán
+        # Parsuj Plan sheet - extrahuj plánované časy a kódy boxů
+        # Formát: "09:00 | Brno - Bystrc (OC Max) -- AB1688"
         plan_data = {}
+        current_route = None
+        
         for row in range(3, plan_sheet.max_row + 1):
-            route_name = plan_sheet.cell(row=row, column=1).value
-            box_code = plan_sheet.cell(row=row, column=2).value
-            info = plan_sheet.cell(row=row, column=3).value
+            col1 = plan_sheet.cell(row=row, column=1).value
             
-            if not box_code:
+            if not col1:
                 continue
             
-            box_code = str(box_code).strip()
+            col1 = str(col1).strip()
             
-            planned_time = None
-            if info and '|' in str(info):
-                time_part = str(info).split('|')[0].strip()
-                if ':' in time_part and len(time_part) <= 6:
-                    planned_time = time_part
+            # Detekuj hlavičku trasy (nemá | ani --)
+            if '|' not in col1 and '--' not in col1:
+                current_route = col1
+                continue
             
-            plan_data[box_code] = {'route_name': route_name, 'planned_time': planned_time}
+            # Parsuj řádek boxu: "09:00 | Název -- AB1234"
+            # Regex pro extrakci času a kódu
+            match = re.match(r'^(\d{1,2}:\d{2})\s*\|\s*.*--\s*(AB\d+)', col1)
+            if match:
+                planned_time = match.group(1)
+                box_code = match.group(2)
+                plan_data[box_code] = {
+                    'route_name': current_route,
+                    'planned_time': planned_time,
+                    'row': row
+                }
         
-        # Načti skutečnost
+        logger.info(f"Parsed {len(plan_data)} boxes from Plan sheet")
+        
+        # Parsuj Actual sheet - stejná struktura
         actual_data = {}
+        
         for row in range(3, actual_sheet.max_row + 1):
-            box_code = actual_sheet.cell(row=row, column=2).value
+            col1 = actual_sheet.cell(row=row, column=1).value
             
-            if not box_code:
+            if not col1:
                 continue
             
-            box_code = str(box_code).strip()
-            actual_data[box_code] = {}
+            col1 = str(col1).strip()
             
-            for col, dt in dates:
-                val = actual_sheet.cell(row=row, column=col).value
-                if val and isinstance(val, datetime):
-                    actual_data[box_code][col] = val
+            # Parsuj řádek boxu
+            match = re.match(r'^(\d{1,2}:\d{2})\s*\|\s*.*--\s*(AB\d+)', col1)
+            if match:
+                box_code = match.group(2)
+                actual_data[box_code] = {'row': row}
+                
+                # Načti časy pro všechny datumy
+                for col, dt in dates:
+                    val = actual_sheet.cell(row=row, column=col).value
+                    if val and isinstance(val, datetime):
+                        if 'times' not in actual_data[box_code]:
+                            actual_data[box_code]['times'] = {}
+                        actual_data[box_code]['times'][col] = val
         
-        # Vytvoř záznamy
+        logger.info(f"Parsed {len(actual_data)} boxes from Actual sheet")
+        
+        # Vytvoř delivery záznamy
         created = 0
-        skipped = 0
+        skipped_no_box = 0
+        skipped_no_actual = 0
         
         for box_code, plan_info in plan_data.items():
             if box_code not in boxes:
-                skipped += 1
+                skipped_no_box += 1
                 continue
             
             box_id = boxes[box_code]
             route_name = plan_info['route_name']
             planned_time = plan_info['planned_time']
             
-            if box_code not in actual_data:
+            if box_code not in actual_data or 'times' not in actual_data[box_code]:
+                skipped_no_actual += 1
                 continue
             
             for col, dt in dates:
-                if col not in actual_data[box_code]:
+                if col not in actual_data[box_code]['times']:
                     continue
                 
-                actual_time = actual_data[box_code][col]
+                actual_time = actual_data[box_code]['times'][col]
                 
+                # Vypočítej zpoždění
                 delay_minutes = None
                 on_time = None
                 if planned_time:
@@ -277,10 +354,13 @@ async def import_alzabox_deliveries(
         await db.commit()
         wb.close()
         
+        logger.info(f"Import complete: created={created}, skipped_no_box={skipped_no_box}, skipped_no_actual={skipped_no_actual}")
+        
         return {
             "success": True,
             "imported": created,
-            "skipped": skipped,
+            "skipped_no_box": skipped_no_box,
+            "skipped_no_actual": skipped_no_actual,
             "dates_processed": len(dates)
         }
         
