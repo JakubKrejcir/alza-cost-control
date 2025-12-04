@@ -159,7 +159,7 @@ export default function Prices() {
   // Načti ceníky pro vybraného dopravce
   const { data: priceList, isLoading } = useQuery({
     queryKey: ['prices', selectedCarrierId],
-    queryFn: () => prices.getAll({ carrier_id: selectedCarrierId, active: true }),
+    queryFn: () => prices.getAll({ carrier_id: selectedCarrierId }),
     enabled: !!selectedCarrierId
   })
   
