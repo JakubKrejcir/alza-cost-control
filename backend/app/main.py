@@ -217,7 +217,7 @@ async def health_check():
 
 
 # Routers
-app.include_router(auth.router, prefix="/api", tags=["Auth"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
 app.include_router(carriers.router, prefix="/api/carriers", tags=["Carriers"])
 app.include_router(depots.router, prefix="/api/depots", tags=["Depots"])
 app.include_router(contracts.router, prefix="/api/contracts", tags=["Contracts"])
