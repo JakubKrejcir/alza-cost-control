@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 import pdfplumber
 
 from app.database import get_db
-from app.models import Contract, Carrier, PriceConfig, FixRate, KmRate, DepoRate
+from app.models import Contract, Carrier, PriceConfig, FixRate, KmRate, DepoRate, LinehaulRate, BonusRate
 from app.schemas import ContractCreate, ContractUpdate, ContractResponse
 
 router = APIRouter()
@@ -128,46 +128,160 @@ def extract_contract_info(text: str, filename: str = None) -> dict:
 
 
 def extract_price_rates(text: str) -> dict:
-    """Extract price rates from PDF text"""
-    rates = {'fix_rates': [], 'km_rates': [], 'depo_rates': []}
+    """Extract price rates from PDF text - improved version for Alza contracts"""
+    rates = {
+        'fix_rates': [], 
+        'km_rates': [], 
+        'depo_rates': [],
+        'linehaul_rates': [],
+        'bonus_rates': []
+    }
     
-    # FIX sazby - hledej vzory jako "8 500 Kč" nebo "3200 Kč"
+    # Normalize text - remove extra whitespace, normalize numbers
+    text_clean = re.sub(r'\s+', ' ', text)
+    text_lower = text_clean.lower()
+    
+    # ============ FIX SAZBY ============
+    # Tabulkový formát: "3 200 Kč bez DPH DIRECT Praha" nebo "FIXNÍ ČÁSTKA ... X XXX Kč ... DIRECT"
     fix_patterns = [
-        (r'trasa?\s*[A-I]\s*[:\-–]?\s*([\d\s]+)\s*Kč', 'DROP'),
-        (r'DIRECT[_\s]*Praha[:\s]*([\d\s]+)\s*Kč', 'DIRECT_Praha'),
-        (r'DIRECT[_\s]*Vratimov[:\s]*([\d\s]+)\s*Kč', 'DIRECT_Vratimov'),
-        (r'DIRECT[_\s]*DPO[:\s]*([\d\s]+)\s*Kč', 'DIRECT_DPO'),
-        (r'DIRECT[_\s]*SD[:\s]*([\d\s]+)\s*Kč', 'DIRECT_SD'),
-        (r'Dopoledne[:\s]*([\d\s]+)\s*Kč', 'DROP_Dopoledne'),
+        # Formát: číslo před DIRECT (z tabulky)
+        (r'([\d\s]+)\s*kč\s*bez\s*dph\s*direct\s+praha', 'DIRECT_Praha'),
+        (r'([\d\s]+)\s*kč\s*bez\s*dph\s*direct\s+vratimov', 'DIRECT_Vratimov'),
+        # Formát: DIRECT před číslem
+        (r'direct\s+praha[^0-9]*?([\d\s]+)\s*kč', 'DIRECT_Praha'),
+        (r'direct\s+vratimov[^0-9]*?([\d\s]+)\s*kč', 'DIRECT_Vratimov'),
+        # Formát s FIXNÍ ČÁSTKA
+        (r'fixní\s+částka\s+([\d\s]+)\s*kč[^0-9]*direct\s+praha', 'DIRECT_Praha'),
+        (r'fixní\s+částka\s+([\d\s]+)\s*kč[^0-9]*direct\s+vratimov', 'DIRECT_Vratimov'),
     ]
     
+    seen_fix = set()
     for pattern, route_type in fix_patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
+        matches = re.findall(pattern, text_lower)
         for match in matches:
             try:
                 rate = int(match.replace(' ', '').replace('\xa0', ''))
-                if 1000 <= rate <= 50000:  # Rozumný rozsah
+                if 1000 <= rate <= 50000 and (route_type, rate) not in seen_fix:
                     rates['fix_rates'].append({'route_type': route_type, 'rate': rate})
+                    seen_fix.add((route_type, rate))
             except ValueError:
                 continue
     
-    # KM sazba
-    km_match = re.search(r'(\d+[,.]?\d*)\s*Kč\s*/\s*km', text, re.IGNORECASE)
-    if km_match:
-        try:
-            rate = float(km_match.group(1).replace(',', '.'))
-            rates['km_rates'].append({'route_type': 'standard', 'rate': rate})
-        except ValueError:
-            pass
+    # ============ KM SAZBY ============
+    # Formát: "10,97 Kč bez DPH Direct Praha" nebo "Cena za kilometr ... 10,97 Kč"
+    km_patterns = [
+        r'(\d+[,\.]\d+)\s*kč\s*bez\s*dph\s*direct',  # Tabulkový formát
+        r'cena\s+za\s+kilometr[^0-9]*?(\d+[,\.]\d+)\s*kč',
+        r'(\d+[,\.]\d+)\s*kč\s*/\s*km',
+    ]
     
-    # DEPO sazby
-    depo_match = re.search(r'hodinov[áa]\s+sazba[:\s]*(\d+)\s*Kč', text, re.IGNORECASE)
-    if depo_match:
-        rates['depo_rates'].append({
-            'depo_name': 'Vratimov',
-            'rate_type': 'hourly',
-            'rate': int(depo_match.group(1))
-        })
+    seen_km = set()
+    for pattern in km_patterns:
+        matches = re.findall(pattern, text_lower)
+        for match in matches:
+            try:
+                rate = float(match.replace(',', '.'))
+                if 1 <= rate <= 100 and rate not in seen_km:
+                    rates['km_rates'].append({'route_type': 'standard', 'rate': rate})
+                    seen_km.add(rate)
+            except ValueError:
+                continue
+    
+    # ============ DEPO SAZBY ============
+    # Formát: "Hodinová sazba na DEPU 850 Kč" nebo "Sklad ALL IN 410 000 Kč/měsíc"
+    depo_patterns = [
+        (r'hodinov[áa]\s+sazba\s+na\s+depu?\s*[:\-–]?\s*([\d\s]+)\s*kč', 'Vratimov', 'hourly'),
+        (r'sklad\s+all\s+in\s*[:\-–]?\s*([\d\s]+)[,\.\-]*\s*/?\s*měsíc', 'Sklad_ALL_IN', 'monthly'),
+        (r'sklad\s+all\s+in\s+.*?po\s+slevě[^0-9]*([\d\s]+)[,\.\-]*\s*/?\s*měsíc', 'Sklad_ALL_IN_sleva', 'monthly'),
+        (r'(\d+)\s*x\s*skladník[^0-9]*([\d\s]+)[,\.\-]*\s*/?\s*měsíc', 'Skladnici', 'monthly'),
+        (r'brigádník[^0-9]*([\d\s]+)[,\.\-]*\s*/?\s*den', 'Brigadnik', 'daily'),
+    ]
+    
+    seen_depo = set()
+    for pattern, depo_name, rate_type in depo_patterns:
+        matches = re.findall(pattern, text_lower)
+        for match in matches:
+            try:
+                if isinstance(match, tuple):
+                    rate_str = match[-1]
+                else:
+                    rate_str = match
+                rate = int(rate_str.replace(' ', '').replace('\xa0', ''))
+                if rate > 0 and (depo_name, rate) not in seen_depo:
+                    rates['depo_rates'].append({
+                        'depo_name': depo_name, 
+                        'rate_type': rate_type, 
+                        'rate': rate
+                    })
+                    seen_depo.add((depo_name, rate))
+            except ValueError:
+                continue
+    
+    # ============ LINEHAUL SAZBY ============
+    # Formát: "24 180 Kč bez DPH CZLC4 -> Vratimov" nebo tabulka s trasami
+    linehaul_patterns = [
+        # Tabulkový formát: číslo před trasou
+        (r'([\d\s]+)\s*kč\s*bez\s*dph\s*czlc4\s*[–\->]+\s*vratimov', 'CZLC4', 'Vratimov', 'LKW'),
+        # Formát: trasa před číslem
+        (r'linehaul\s+czlc4\s*[–\->]+\s*vratimov[^0-9]*([\d\s]+)\s*kč', 'CZLC4', 'Vratimov', 'LKW'),
+        # Třídírna formát
+        (r'cztc1\s*[–\-]\s*depo\s+vratimov[^0-9]*dodávka[^0-9]*([\d\s]+)[,\.\-]*', 'CZTC1', 'Vratimov', 'Dodávka'),
+        (r'cztc1\s*[–\-]\s*depo\s+vratimov[^0-9]*solo[^0-9]*([\d\s]+)[,\.\-]*', 'CZTC1', 'Vratimov', 'Solo'),
+        (r'cztc1\s*[–\-]\s*depo\s+vratimov[^0-9]*kamion[^0-9]*([\d\s]+)[,\.\-]*', 'CZTC1', 'Vratimov', 'Kamion'),
+        (r'czlc4\s*[–\-]\s*depo\s+vratimov[^0-9]*dodávka[^0-9]*([\d\s]+)[,\.\-]*', 'CZLC4', 'Vratimov', 'Dodávka'),
+        (r'czlc4\s*[–\-]\s*depo\s+vratimov[^0-9]*solo[^0-9]*([\d\s]+)[,\.\-]*', 'CZLC4', 'Vratimov', 'Solo'),
+        (r'czlc4\s*[–\-]\s*depo\s+vratimov[^0-9]*kamion[^0-9]*([\d\s]+)[,\.\-]*', 'CZLC4', 'Vratimov', 'Kamion'),
+        # LKW/sólo/dodávka pro Nový Bydžov (různé formáty)
+        (r'lcu\s*[–\-]\s*depo\s+nový\s+bydžov[^0-9]*([\d\s]+)[,\.\-]*', 'LCU', 'Novy_Bydzov', 'LKW'),
+        (r'lcz/cztc1\s*[–\-]\s*depo\s+nový\s+bydžov[^0-9]*([\d\s]+)[,\.\-]*', 'LCZ_CZTC1', 'Novy_Bydzov', 'LKW'),
+        (r'([\d\s]+)[,\.\-]*\s*lcu\s*[–\-]\s*depo\s+nový\s+bydžov', 'LCU', 'Novy_Bydzov', 'LKW'),
+    ]
+    
+    seen_linehaul = set()
+    for pattern, from_code, to_code, vehicle in linehaul_patterns:
+        matches = re.findall(pattern, text_lower)
+        for match in matches:
+            try:
+                rate = int(match.replace(' ', '').replace('\xa0', ''))
+                key = (from_code, to_code, vehicle, rate)
+                if 1000 <= rate <= 100000 and key not in seen_linehaul:
+                    rates['linehaul_rates'].append({
+                        'from_code': from_code,
+                        'to_code': to_code,
+                        'vehicle_type': vehicle,
+                        'rate': rate
+                    })
+                    seen_linehaul.add(key)
+            except ValueError:
+                continue
+    
+    # ============ BONUS SAZBY ============
+    # Formát: "≥ 98 % + 35 600" nebo "97,51 – 97,99 % + 30 000"
+    bonus_patterns = [
+        (r'[≥>=]\s*98\s*%[^0-9]*\+\s*([\d\s]+)[,\.\-]*', 98.0, 100.0),
+        (r'97[,\.]51\s*[–\-]\s*97[,\.]99\s*%[^0-9]*\+\s*([\d\s]+)[,\.\-]*', 97.51, 97.99),
+        (r'97[,\.]01\s*[–\-]\s*97[,\.]50\s*%[^0-9]*\+\s*([\d\s]+)[,\.\-]*', 97.01, 97.50),
+        (r'96[,\.]51\s*[–\-]\s*97[,\.]00\s*%[^0-9]*\+\s*([\d\s]+)[,\.\-]*', 96.51, 97.00),
+        (r'96[,\.]01\s*[–\-]\s*96[,\.]50\s*%[^0-9]*\+\s*([\d\s]+)[,\.\-]*', 96.01, 96.50),
+        (r'[<]\s*96[,\.]?0?\s*%[^0-9]*\+\s*([\d\s]+)[,\.\-]*', 0.0, 96.0),
+    ]
+    
+    seen_bonus = set()
+    for pattern, quality_min, quality_max in bonus_patterns:
+        matches = re.findall(pattern, text_lower)
+        for match in matches:
+            try:
+                bonus = int(match.replace(' ', '').replace('\xa0', ''))
+                key = (quality_min, quality_max)
+                if bonus > 0 and key not in seen_bonus:
+                    rates['bonus_rates'].append({
+                        'quality_min': quality_min,
+                        'quality_max': quality_max,
+                        'bonus': bonus
+                    })
+                    seen_bonus.add(key)
+            except ValueError:
+                continue
     
     return rates
 
@@ -337,7 +451,9 @@ async def upload_contract(
     has_rates = (
         len(price_rates['fix_rates']) > 0 or
         len(price_rates['km_rates']) > 0 or
-        len(price_rates['depo_rates']) > 0
+        len(price_rates['depo_rates']) > 0 or
+        len(price_rates.get('linehaul_rates', [])) > 0 or
+        len(price_rates.get('bonus_rates', [])) > 0
     )
     
     if has_rates:
@@ -372,6 +488,24 @@ async def upload_contract(
                 rate_type=rate['rate_type'],
                 rate=Decimal(str(rate['rate']))
             ))
+        
+        for rate in price_rates.get('linehaul_rates', []):
+            db.add(LinehaulRate(
+                price_config_id=price_config.id,
+                from_code=rate['from_code'],
+                to_code=rate['to_code'],
+                vehicle_type=rate['vehicle_type'],
+                rate=Decimal(str(rate['rate']))
+            ))
+        
+        for rate in price_rates.get('bonus_rates', []):
+            db.add(BonusRate(
+                price_config_id=price_config.id,
+                quality_min=Decimal(str(rate['quality_min'])),
+                quality_max=Decimal(str(rate['quality_max'])),
+                bonus_amount=Decimal(str(rate['bonus'])),
+                total_with_bonus=Decimal('0')  # Placeholder
+            ))
     
     await db.commit()
     
@@ -388,7 +522,9 @@ async def upload_contract(
             'id': price_config.id,
             'fixRatesCount': len(price_rates['fix_rates']),
             'kmRatesCount': len(price_rates['km_rates']),
-            'depoRatesCount': len(price_rates['depo_rates'])
+            'depoRatesCount': len(price_rates['depo_rates']),
+            'linehaulRatesCount': len(price_rates.get('linehaul_rates', [])),
+            'bonusRatesCount': len(price_rates.get('bonus_rates', []))
         } if price_config else None
     }
 
@@ -469,7 +605,9 @@ async def upload_contract_pdf(
     has_rates = (
         len(price_rates['fix_rates']) > 0 or
         len(price_rates['km_rates']) > 0 or
-        len(price_rates['depo_rates']) > 0
+        len(price_rates['depo_rates']) > 0 or
+        len(price_rates.get('linehaul_rates', [])) > 0 or
+        len(price_rates.get('bonus_rates', [])) > 0
     )
     
     if has_rates:
@@ -504,6 +642,24 @@ async def upload_contract_pdf(
                 rate_type=rate['rate_type'],
                 rate=Decimal(str(rate['rate']))
             ))
+        
+        for rate in price_rates.get('linehaul_rates', []):
+            db.add(LinehaulRate(
+                price_config_id=price_config.id,
+                from_code=rate['from_code'],
+                to_code=rate['to_code'],
+                vehicle_type=rate['vehicle_type'],
+                rate=Decimal(str(rate['rate']))
+            ))
+        
+        for rate in price_rates.get('bonus_rates', []):
+            db.add(BonusRate(
+                price_config_id=price_config.id,
+                quality_min=Decimal(str(rate['quality_min'])),
+                quality_max=Decimal(str(rate['quality_max'])),
+                bonus_amount=Decimal(str(rate['bonus'])),
+                total_with_bonus=Decimal('0')
+            ))
     
     await db.commit()
     
@@ -528,7 +684,9 @@ async def upload_contract_pdf(
                 'type': price_config.type,
                 'fixRatesCount': len(price_rates['fix_rates']),
                 'kmRatesCount': len(price_rates['km_rates']),
-                'depoRatesCount': len(price_rates['depo_rates'])
+                'depoRatesCount': len(price_rates['depo_rates']),
+                'linehaulRatesCount': len(price_rates.get('linehaul_rates', [])),
+                'bonusRatesCount': len(price_rates.get('bonus_rates', []))
             } if price_config else None,
             'extractedRates': price_rates
         }
