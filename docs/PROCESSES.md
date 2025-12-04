@@ -1,8 +1,8 @@
 # Alza Cost Control - Procesní dokumentace
 
-> **Verze:** 3.0.0  
+> **Verze:** 3.9.0  
 > **Datum:** Prosinec 2025  
-> **Aktualizace:** Rozšíření o typy doprav a země
+> **Aktualizace:** Linehauly do obou dep (Vratimov i Nový Bydžov)
 
 ---
 
@@ -10,11 +10,12 @@
 
 1. [Přehled systému](#1-přehled-systému)
 2. [Typy doprav a země](#2-typy-doprav-a-země)
-3. [Procesy aplikace](#3-procesy-aplikace)
-4. [Procesy dopravy](#4-procesy-dopravy)
-5. [Entity a vztahy](#5-entity-a-vztahy)
-6. [Business pravidla](#6-business-pravidla)
-7. [Roadmapa](#7-roadmapa)
+3. [Depa a ceníky](#3-depa-a-ceníky)
+4. [AlzaBox BI modul](#4-alzabox-bi-modul)
+5. [Procesy aplikace](#5-procesy-aplikace)
+6. [Entity a vztahy](#6-entity-a-vztahy)
+7. [Business pravidla](#7-business-pravidla)
+8. [Roadmapa](#8-roadmapa)
 
 ---
 
@@ -26,12 +27,14 @@ Kontrola nákladů na dopravu pro Alzu - porovnání:
 - **Proofů** (co dopravce tvrdí, že jelo)  
 - **Faktur** (co dopravce účtuje)
 - **Ceníků** (za kolik to má být)
+- **Dojezdů** (kvalita doručení)
 
 ### Aktuální stav (MVP)
 - Jeden dopravce: **Drivecool**
 - Jeden typ dopravy: **Alzaboxy**
 - Jedna země: **Česko (CZ)**
-- Dvě depa: **Vratimov**, **Nový Bydžov**
+- Dvě depa: **Praha**, **Vratimov** (+ sklad Nový Bydžov)
+- **AlzaBox BI**: Analýza dojezdů s drill-down
 
 ---
 
@@ -41,317 +44,324 @@ Kontrola nákladů na dopravu pro Alzu - porovnání:
 
 | Kód | Typ dopravy | Popis | Status |
 |-----|-------------|-------|--------|
-| `ALZABOX` | Alzaboxy | Závoz samoobslužných boxů | ✅ MVP |
-| `BRANCH` | Pobočky | Závoz kamenných prodejen | 🔜 Plánováno |
-| `PARCEL` | Balíkovka | Doručení na adresu zákazníka | 🔜 Plánováno |
-| `TRANSFER` | Mezisklady | Převozy mezi sklady/depy | 🔜 Plánováno |
-| `RETURN` | Vratky | Svoz vratek od zákazníků | 🔜 Plánováno |
+| `ALZABOX` | Alzaboxy | Závoz samoobslužných boxů | ✅ MVP + BI |
+| `TRIDIRNA` | Třídírna | Linehaul do třídírny | ✅ MVP |
+| `BRANCH` | Pobočky | Závoz kamenných prodejen | 📜 Plánováno |
+| `PARCEL` | Balíkovka | Doručení na adresu | 📜 Plánováno |
+| `XL` | XL zásilky | Velké zásilky | 📜 Plánováno |
 
 ### 2.2 Země operací
 
 | Kód | Země | Měna | Status |
 |-----|------|------|--------|
 | `CZ` | 🇨🇿 Česko | CZK | ✅ MVP |
-| `SK` | 🇸🇰 Slovensko | EUR | 🔜 Plánováno |
-| `HU` | 🇭🇺 Maďarsko | HUF | 🔜 Plánováno |
-| `AT` | 🇦🇹 Rakousko | EUR | 🔜 Plánováno |
-| `DE` | 🇩🇪 Německo | EUR | 🔜 Plánováno |
-
-### 2.3 Matice dopravce × typ × země
-
-```
-Dopravce může operovat:
-- Více typů doprav (např. Alzaboxy + Pobočky)
-- Ve více zemích (např. CZ + SK)
-- S různými ceníky per typ × země
-```
-
-**Příklad budoucí struktury:**
-
-| Dopravce | Typ dopravy | Země | Ceník |
-|----------|-------------|------|-------|
-| Drivecool | ALZABOX | CZ | Dodatek 12 |
-| Drivecool | BRANCH | CZ | Dodatek 15 |
-| TransportSK | ALZABOX | SK | Smlouva SK-001 |
-| TransportSK | ALZABOX | HU | Smlouva HU-001 |
+| `SK` | 🇸🇰 Slovensko | EUR | 📜 Plánováno |
+| `HU` | 🇭🇺 Maďarsko | HUF | 📜 Plánováno |
 
 ---
 
-## 3. PROCESY APLIKACE
+## 3. EXPEDIČNÍ SKLADY A ROZVOZOVÁ DEPA
 
-### 3.1 Upload plánu tras (XLSX)
+### 3.1 Struktura logistiky (Drivecool)
 
-```mermaid
-flowchart TD
-    A[Uživatel nahraje XLSX] --> B[Parsování sheet 'Routes']
-    B --> C{Datum v názvu souboru?}
-    C -->|Ano| D[Extrakce valid_from]
-    C -->|Ne| E[Uživatel zadá ručně]
-    D --> F[Rozpoznání DPO/SD tras]
-    E --> F
-    F --> G[Spočítání linehaulů z LH-LH]
-    G --> H{Existuje plán pro same date?}
-    H -->|Ano| I[Přepsat starý plán]
-    H -->|Ne| J[Vytvořit nový plán]
-    I --> K[Aktualizovat valid_to předchozích plánů]
-    J --> K
-    K --> L[Uložit RoutePlan + RoutePlanRoute]
+```
+                    EXPEDIČNÍ SKLADY
+                          │
+        ┌─────────────────┴─────────────────┐
+        │                                   │
+        ▼                                   ▼
+  ┌───────────┐                       ┌───────────┐
+  │  CZTC1    │                       │  CZLC4    │
+  │  Úžice    │                       │ Chrášťany │
+  │(třídírna) │                       │           │
+  └─────┬─────┘                       └─────┬─────┘
+        │                                   │
+        │         LINEHAUL                  │
+        │    ┌────────┴────────┐            │
+        │    │                 │            │
+        │    ▼                 ▼            │
+        │ ┌───────┐      ┌───────────┐      │
+        └►│ DEPO  │      │   DEPO    │◄─────┘
+          │VRATIM.│      │ NOVÝ BYD. │
+          └───┬───┘      └─────┬─────┘
+              │                │
+              ▼                ▼
+        ┌───────────┐    ┌───────────┐
+        │ AlzaBoxy  │    │ AlzaBoxy  │
+        │ Morava    │    │ okolí NB  │
+        └───────────┘    └───────────┘
 ```
 
-**Klíčová logika:**
-- DPO trasa = začátek před 12:00
-- SD trasa = začátek od 12:00
-- LH-LH = 2 linehauly pro CELÝ batch (ne per trasa!)
-- `valid_to` se dopočítá automaticky podle dalšího plánu
+### 3.2 Expediční sklady vs Rozvozová depa
 
----
+| Typ | Název | Kód | Funkce |
+|-----|-------|-----|--------|
+| **Expediční sklad** | Úžice (Třídírna) | CZTC1 | Třídírna, výchozí bod linehaulů |
+| **Expediční sklad** | Chrášťany | CZLC4 | Hlavní sklad, expedice |
+| **Rozvozové depo** | Vratimov | - | Příjem linehaulů, třídění, rozvoz na Moravu |
+| **Rozvozové depo** | Nový Bydžov | - | Direct trasy + skladové služby |
 
-### 3.2 Upload proofu (XLSX)
+### 3.3 Linehaul sazby
 
-```mermaid
-flowchart TD
-    A[Uživatel nahraje XLSX + vybere dopravce + období] --> B[Parsování sheet 'Sumar']
-    B --> C[Hledání hodnot podle labelů]
-    C --> D[Extrakce totals: FIX, KM, Linehaul, DEPO, Penalty]
-    D --> E[Extrakce route details: DR, LH_DPO, LH_SD, LH_SD_SPOJENE]
-    E --> F[Extrakce depo details: Vratimov, Nový Bydžov]
-    F --> G{Existuje proof pro období?}
-    G -->|Ano| H[Smazat starý + vytvořit nový]
-    G -->|Ne| I[Vytvořit nový]
-    H --> J[Uložit Proof + details]
-    I --> J
+Linehauly mohou směřovat do **obou rozvozových dep** (Vratimov i Nový Bydžov).
+
+**Do depa Vratimov:**
+| Zdroj | Typ vozu | Palety | Sazba |
+|-------|----------|--------|-------|
+| CZTC1 (Úžice) | Dodávka | 8-10 | 9 100 Kč |
+| CZTC1 (Úžice) | Solo | 15-18 | 14 800 Kč |
+| CZTC1 (Úžice) | Kamion | 33 | 22 000 Kč |
+| CZLC4 (Chrášťany) | Dodávka | 8-10 | 10 100 Kč |
+| CZLC4 (Chrášťany) | Solo | 18-21 | 16 500 Kč |
+| CZLC4 (Chrášťany) | Kamion | 33 | 24 180 Kč |
+
+**Do depa Nový Bydžov:**
+| Zdroj | Typ vozu | Palety | Sazba |
+|-------|----------|--------|-------|
+| CZTC1 (Úžice) | Dodávka | 8-10 | TBD |
+| CZTC1 (Úžice) | Solo | 15-18 | TBD |
+| CZLC4 (Chrášťany) | Dodávka | 8-10 | TBD |
+| CZLC4 (Chrášťany) | Solo | 18-21 | TBD |
+
+### 3.4 Rozvozové sazby
+
+**Depo Vratimov (rozvoz dodávkami):**
+| Sazba | Hodnota |
+|-------|---------|
+| FIX | 2 500 Kč/trasa |
+| KM | 10,97 Kč/km |
+| DEPO | 850 Kč/hod |
+
+**Depo Nový Bydžov (direct trasy):**
+| Sazba | Hodnota |
+|-------|---------|
+| FIX | 3 200 Kč/trasa |
+| KM | 10,97 Kč/km |
+
+**Skladové služby (Nový Bydžov):**
+| Sazba | Hodnota |
+|-------|---------|
+| Sklad ALL IN | 410 000 Kč/měs |
+| Bonus ≥98% | +35 600 Kč |
+
+### 3.5 Platnost ceníků
+
+- Nový ceník **nahrazuje** starý pro stejný typ sazby
+- Zobrazuje se **pouze aktuálně platná** částka
+- Deduplikace podle klíče (typ sazby + parametry)
+
+```javascript
+// Příklad deduplikace
+const uniqueRates = deduplicateRates(rates, r => `${r.fromCode}_${r.vehicleType}`)
 ```
 
-**Dual-format podpora:**
-- Září 2025 (starý formát): 2 sloupce/den, bez DPO/SD rozdělení
-- Říjen 2025+ (nový formát): 4 sloupce/den, DPO/SD + depo rozdělení
+### 3.6 Zobrazení v aplikaci (Prices.jsx)
 
----
-
-### 3.3 Upload faktury (PDF)
-
-```mermaid
-flowchart TD
-    A[Uživatel nahraje PDF + vybere dopravce + období] --> B[Parsování PDF přes pdfplumber]
-    B --> C[Extrakce: číslo faktury, VS, data]
-    C --> D[Extrakce částek - 4 strategie]
-    D --> E[Detekce typu: FIX/KM/LINEHAUL/DEPO]
-    E --> F{Faktura již existuje?}
-    F -->|Ano| G[Chyba - duplicita]
-    F -->|Ne| H[Automatické párování s proofem]
-    H --> I[Uložit Invoice + InvoiceItem]
 ```
-
----
-
-### 3.4 Porovnání plán vs. proof
-
-```mermaid
-flowchart TD
-    A[Uživatel vybere období] --> B[Načtení aktivních plánů]
-    B --> C[Načtení proofu s denním rozpadem]
-    C --> D[Pro každý den v měsíci]
-    D --> E[Porovnání plán vs skutečnost]
-    E --> F[DPO: plánováno vs odjeto]
-    E --> G[SD: plánováno vs odjeto]
-    E --> H[Per depo: Vratimov, Bydžov]
-    F & G & H --> I[Výpočet rozdílů]
-    I --> J[Generování warnings pro dny s rozdílem]
-    J --> K[Výstup: Denní breakdown + součty]
-```
-
----
-
-## 4. PROCESY DOPRAVY
-
-### 4.1 Hlavní tok zboží (Alzaboxy CZ)
-
-```mermaid
-flowchart LR
-    subgraph SKLADY
-        A[CZLC4 Log. centrum]
-        B[CZTC1 Třídírna]
-    end
-    
-    subgraph LINEHAUL
-        C[2× Kamion LH-LH]
-    end
-    
-    subgraph DEPO
-        D[DEPO Vratimov]
-        E[DEPO Nový Bydžov]
-    end
-    
-    subgraph LAST_MILE
-        F[Dodávky]
-    end
-    
-    subgraph DORUCENI
-        G[AlzaBoxy]
-    end
-    
-    A --> C
-    B --> C
-    C --> D
-    C --> E
-    D --> F
-    E --> F
-    F --> G
+📦 AlzaBox (2 depa • 1 aktivní ceník)
+│
+├── 🏭 Depo Vratimov
+│   │   Linehaul z CZTC1/CZLC4 → třídění → rozvoz dodávkami
+│   │
+│   ├── LINEHAUL DO DEPA
+│   │   Z Úžice (CZTC1): Dodávka/Solo/Kamion
+│   │   Z Chrášťan (CZLC4): Dodávka/Solo/Kamion
+│   │
+│   └── ROZVOZ Z DEPA (dodávky)
+│       FIX: 2 500 Kč | KM: 10,97 Kč | DEPO: 850 Kč/h
+│
+└── 📦 Depo Nový Bydžov
+    │   Linehaul + Direct trasy + skladové služby
+    │
+    ├── LINEHAUL DO DEPA
+    │   Z Úžice (CZTC1): Dodávka/Solo/Kamion
+    │   Z Chrášťan (CZLC4): Dodávka/Solo/Kamion
+    │
+    ├── DIRECT TRASY
+    │   FIX: 3 200 Kč | KM: 10,97 Kč
+    │
+    └── SKLADOVÉ SLUŽBY
+        ALL IN: 410 000 Kč/měs | Bonus ≥98%: +35 600 Kč
 ```
 
 ---
 
-### 4.2 Typy rozvozů
+## 4. ALZABOX BI MODUL
 
-| Kód | Název | Popis | Časování |
-|-----|-------|-------|----------|
-| `DPO` | Ranní rozvoz | Do Půlnoci Objednáš | Rozvoz od 7:00 |
-| `SD` | Same Day | Objednávka ráno | Rozvoz od 16:00 |
-| `DR` | Direct Route | Přímý rozvoz ze skladu | Bez průjezdu DEPEM |
+### 4.1 Účel
+Sledování včasnosti dojezdů k AlzaBoxům s cílem **99% včasnost**.
 
----
+### 4.2 Drill-down struktura
 
-### 4.3 Struktura nákladů
-
-| Složka | Popis | Příklad sazby |
-|--------|-------|---------------|
-| FIX | Paušál za trasu | 2 500 - 3 200 Kč |
-| KM | Variabilní za km | 10,97 Kč/km |
-| Linehaul | Svoz ze skladu | 9 500 - 24 180 Kč |
-| DEPO | Nájem/provoz depa | 5 950 Kč/den nebo měsíční paušál |
-| Posily | Extra vozidla | 10 100 - 16 500 Kč |
-| Pokuty/Bonusy | Kvalita doručení | ±50 000 Kč |
-
----
-
-## 5. ENTITY A VZTAHY
-
-### 5.1 ER Diagram (aktuální)
-
-```mermaid
-erDiagram
-    Carrier ||--o{ Contract : has
-    Carrier ||--o{ Proof : has
-    Carrier ||--o{ Invoice : has
-    Carrier ||--o{ RoutePlan : has
-    
-    Proof ||--o{ ProofDailyDetail : contains
-    Proof ||--o{ Invoice : matched_to
-    
-    Invoice ||--o{ InvoiceItem : contains
-    
-    RoutePlan ||--o{ RoutePlanRoute : contains
-    
-    Carrier {
-        int id PK
-        string name
-        string ico
-        string dic
-    }
-    
-    Proof {
-        int id PK
-        int carrier_id FK
-        string period
-        decimal total_fix
-        decimal total_km
-        decimal total_linehaul
-        decimal total_depo
-        decimal grand_total
-    }
-    
-    RoutePlan {
-        int id PK
-        int carrier_id FK
-        string depot
-        string plan_type
-        datetime valid_from
-        datetime valid_to
-    }
+```
+Přehled (všechny trasy) 
+    ↓ klik na trasu
+Detail trasy (všechny boxy)
+    ↓ klik na box
+Detail boxu (historie, trend, % včas)
 ```
 
-### 5.2 Budoucí rozšíření entit
+### 4.3 Barevná škála
 
-```mermaid
-erDiagram
-    Carrier ||--o{ CarrierService : provides
-    CarrierService {
-        int carrier_id FK
-        string transport_type
-        string country
-        int price_config_id FK
-    }
-    
-    Proof {
-        string transport_type
-        string country
-    }
-    
-    Invoice {
-        string transport_type
-        string country
-    }
+| Barva | Rozsah | Význam |
+|-------|--------|--------|
+| 🟢 Zelená | ≥ 99% | Splňuje cíl |
+| 🟠 Oranžová | 95-98.9% | Varování |
+| 🔴 Červená | < 95% | Kritické |
+
+### 4.4 Metriky
+
+- **Včasnost**: % dojezdů před plánovaným časem
+- **Trend**: Graf vývoje za období
+- **Top problémové boxy**: Seřazené podle % včas
+
+---
+
+## 5. PROCESY APLIKACE
+
+### 5.1 Nahrání smlouvy (PDF)
+
+```
+1. Uživatel nahraje PDF smlouvy
+2. Systém validuje název (con + 5 číslic)
+3. Backend extrahuje:
+   - Číslo dodatku
+   - Datum platnosti
+   - Typ služby (AlzaBox/Třídírna/XL)
+   - FIX, KM, DEPO, Linehaul sazby
+4. Vytvoří se Contract + PriceConfig + sazby
+5. Ceníky se zobrazí per typ služby + depo
+```
+
+### 5.2 Import dojezdů (AlzaBox BI)
+
+```
+1. Uživatel nahraje XLSX s dojezdy
+2. Systém parsuje:
+   - Název boxu, trasa
+   - Plánovaný čas (string "HH:MM")
+   - Skutečný čas (datetime)
+3. Uloží do AlzaBoxDelivery
+4. BI dashboard zobrazí statistiky
+```
+
+### 5.3 Očekávaná fakturace
+
+```
+1. Systém načte plány tras
+2. Pro každou trasu aplikuje ceníky:
+   - FIX sazba (pokud existuje)
+   - KM sazba × km
+   - Linehaul (pokud applicable)
+3. Sečte celkovou očekávanou částku
+4. Porovná s fakturou dopravce
 ```
 
 ---
 
-## 6. BUSINESS PRAVIDLA
+## 6. ENTITY A VZTAHY
 
-### 6.1 Pravidla pro plánování
+### 6.1 Hlavní entity
 
-| # | Pravidlo |
-|---|----------|
-| P1 | Plán platí od `valid_from` do `valid_to` (nebo do dalšího plánu) |
-| P2 | Jeden měsíc může mít více plánů (např. 1.-14. a 15.-30.) |
-| P3 | Plány se dělí podle depa (Vratimov, Bydžov) a typu (DPO, SD, BOTH) |
+```
+Carrier (Dopravce)
+├── Contract[] (Smlouvy)
+│   └── PriceConfig (Ceník)
+│       ├── FixRate[]
+│       ├── KmRate[]
+│       ├── DepoRate[]
+│       ├── LinehaulRate[]
+│       └── BonusRate[]
+├── RoutePlan[] (Plány tras)
+├── Proof[] (Proofy)
+└── Invoice[] (Faktury)
 
-### 6.2 Pravidla pro linehaul
+AlzaBoxLocation (Box)
+└── AlzaBoxDelivery[] (Dojezdy)
+```
 
-| # | Pravidlo |
-|---|----------|
-| L1 | **LH-LH = 2 kamiony pro CELÝ batch, NE per trasa!** |
-| L2 | Různé sazby podle trasy: CZLC4→Vratimov vs CZTC1→Bydžov |
+### 6.2 Klíčové vztahy
 
-### 6.3 Pravidla pro fakturaci
-
-| # | Pravidlo |
-|---|----------|
-| F1 | Typicky 4-6 faktur za období: FIX, KM, LINEHAUL, DEPO, případně POSILY |
-| F2 | Všechny částky bez DPH |
-| F3 | Párování: Proof.grandTotal = Σ Invoice.totalWithoutVat |
-
----
-
-## 7. ROADMAPA
-
-### Fáze 1: MVP Alzaboxy CZ ✅
-- [x] Dopravce Drivecool
-- [x] Depa Vratimov + Nový Bydžov
-- [x] Upload proofů, faktur, plánů
-- [x] Porovnání plán vs proof
-- [x] Dashboard s přehledem
-
-### Fáze 2: Business Intelligence Alzaboxy 🔄
-- [ ] Import dat Alzaboxů (lokace, časy dojezdů)
-- [ ] Analýzy pokrytí a efektivity
-- [ ] Vizualizace na mapě
-- [ ] KPIs a metriky
-
-### Fáze 3: Více dopravců CZ
-- [ ] Podpora více dopravců pro Alzaboxy
-- [ ] Srovnávací analýzy dopravců
-
-### Fáze 4: Další typy doprav
-- [ ] Pobočky (BRANCH)
-- [ ] Balíkovka (PARCEL)
-- [ ] Mezisklady (TRANSFER)
-
-### Fáze 5: Mezinárodní rozšíření
-- [ ] Slovensko (SK)
-- [ ] Maďarsko (HU)
-- [ ] Rakousko (AT)
-- [ ] Německo (DE)
+| Entita | Vztah | Entita |
+|--------|-------|--------|
+| Carrier | 1:N | Contract |
+| Contract | 1:1 | PriceConfig |
+| PriceConfig | 1:N | FixRate, KmRate, DepoRate... |
+| Carrier | 1:N | RoutePlan |
+| AlzaBoxLocation | 1:N | AlzaBoxDelivery |
 
 ---
 
-*Dokument aktualizován pro Transport Tycoon v3.0*
+## 7. BUSINESS PRAVIDLA
+
+### 7.1 Validace smluv
+- Název souboru musí obsahovat `con` + min 5 číslic
+- IČO ve smlouvě musí odpovídat dopravci
+- Duplicitní smlouvy (stejné číslo) jsou odmítnuty
+
+### 7.2 Extrakce ceníků
+- Automatická detekce typu služby z textu
+- Sazby se párují k depům podle klíčových slov
+- KM sazby jsou sdílené mezi depy (pokud není specifikováno)
+
+### 7.3 Včasnost dojezdů
+- Cíl: 99% včasnost
+- Včasný = actual_time ≤ planned_time
+- Tolerance: žádná (striktní porovnání)
+
+---
+
+## 8. ROADMAPA
+
+### ✅ Hotovo (MVP)
+- [x] Správa dopravců
+- [x] Upload smluv s extrakcí ceníků
+- [x] Zobrazení ceníků per typ služby + depo
+- [x] AlzaBox BI s drill-down
+- [x] Očekávaná fakturace
+- [x] Autentizace (login)
+
+### 📜 Plánováno (Q1 2025)
+- [ ] Další dopravci
+- [ ] Další typy doprav (Pobočky, Balíkovka)
+- [ ] Automatické párování plánů s proofy
+- [ ] Export reportů
+
+### 🔮 Budoucnost
+- [ ] Multi-country (SK, HU)
+- [ ] Predikce nákladů
+- [ ] Integrace s ERP
+
+---
+
+## PŘÍLOHY
+
+### Aktuální ceníky (Drivecool)
+
+**AlzaBox (Dodatek č. 7):**
+| Položka | Sazba |
+|---------|-------|
+| DIRECT Praha | 3 200 Kč |
+| DIRECT Vratimov | 2 500 Kč |
+| Kč/km | 10,97 Kč |
+| DEPO hodina | 850 Kč |
+| Linehaul CZLC4 → Vratimov | 24 180 Kč |
+
+**Třídírna (Dodatek č. 8):**
+| Trasa | Typ vozu | Sazba |
+|-------|----------|-------|
+| CZTC1 → Vratimov | Dodávka | 9 100 Kč |
+| CZTC1 → Vratimov | Solo | 14 800 Kč |
+| CZTC1 → Vratimov | Kamion | 22 000 Kč |
+| CZLC4 → Vratimov | Dodávka | 10 100 Kč |
+| CZLC4 → Vratimov | Solo | 16 500 Kč |
+| CZLC4 → Vratimov | Kamion | 24 180 Kč |
+
+**Sklad (Dodatek č. 12):**
+| Položka | Sazba |
+|---------|-------|
+| Sklad ALL IN | 410 000 Kč/měs |
+
+---
+
+*Aktualizováno: Prosinec 2025 - v3.9.0*
