@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { cs } from 'date-fns/locale'
 import { 
   DollarSign, FileText, AlertTriangle, Building2, Truck, 
-  Package, Warehouse, ChevronDown, Loader2, Plus, Calendar
+  Package, Warehouse, ChevronDown, Loader2, Calendar, Trash2,
+  Upload, AlertCircle, CheckCircle
 } from 'lucide-react'
 import { prices, contracts, carriers } from '../lib/api'
 
 function formatCZK(amount) {
-  if (amount == null) return '—'
+  if (amount == null || isNaN(amount)) return '—'
   return new Intl.NumberFormat('cs-CZ', { 
     style: 'currency', 
     currency: 'CZK',
@@ -26,24 +27,19 @@ function formatDate(dateStr) {
   }
 }
 
-function PriceRow({ label, value, color = 'var(--color-primary)', dodatek, contractNumber }) {
-  const displayDodatek = contractNumber || dodatek
-  const isMissing = displayDodatek === '?'
+function PriceRow({ label, value, color = 'var(--color-primary)', contractNumber }) {
   return (
     <div className="flex justify-between items-center p-3 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
       <span style={{ color: 'var(--color-text-muted)' }}>{label}</span>
       <div className="flex items-center gap-2">
         <span className="font-semibold" style={{ color }}>{value}</span>
-        {displayDodatek && (
+        {contractNumber && (
           <span 
             className="text-xs px-1.5 py-0.5 rounded" 
-            style={{ 
-              backgroundColor: isMissing ? 'var(--color-orange-light)' : 'var(--color-border)', 
-              color: isMissing ? '#e67e22' : 'var(--color-text-light)' 
-            }}
-            title={isMissing ? 'Chybí ve smlouvách' : displayDodatek}
+            style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}
+            title={contractNumber}
           >
-            {isMissing ? '?' : displayDodatek.replace('Dodatek č. ', 'D')}
+            {contractNumber.replace('Dodatek č. ', 'D')}
           </span>
         )}
       </div>
@@ -62,10 +58,10 @@ function PriceSection({ title, children, color = 'var(--color-text-muted)' }) {
   )
 }
 
-function EmptyState({ message }) {
+function EmptyState({ message, icon: Icon = DollarSign }) {
   return (
     <div className="text-center py-12">
-      <DollarSign className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--color-text-muted)' }} />
+      <Icon className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--color-text-muted)' }} />
       <p style={{ color: 'var(--color-text-muted)' }}>{message}</p>
     </div>
   )
@@ -73,6 +69,8 @@ function EmptyState({ message }) {
 
 export default function Prices() {
   const [selectedCarrierId, setSelectedCarrierId] = useState(null)
+  const [deletingContractId, setDeletingContractId] = useState(null)
+  const queryClient = useQueryClient()
 
   // Načti seznam dopravců
   const { data: carrierList, isLoading: carriersLoading } = useQuery({
@@ -81,60 +79,46 @@ export default function Prices() {
   })
 
   // Načti ceníky pro vybraného dopravce
-  const { data: priceList, isLoading: pricesLoading, refetch: refetchPrices } = useQuery({
+  const { data: priceList, isLoading: pricesLoading } = useQuery({
     queryKey: ['prices', 'carrier', selectedCarrierId],
-    queryFn: async () => {
-      console.log('>>> API CALL: Fetching prices for carrier_id:', selectedCarrierId)
-      const result = await prices.getAll({ carrier_id: selectedCarrierId })
-      console.log('<<< API RESPONSE: Got', result?.length, 'prices:', result)
-      return result
-    },
+    queryFn: () => prices.getAll({ carrier_id: selectedCarrierId }),
     enabled: !!selectedCarrierId,
-    staleTime: 0,  // Vždy považuj data za stale
-    cacheTime: 0,  // Nekešuj
+    staleTime: 0,
   })
 
   // Načti smlouvy pro vybraného dopravce
-  const { data: contractList } = useQuery({
+  const { data: contractList, isLoading: contractsLoading } = useQuery({
     queryKey: ['contracts', 'carrier', selectedCarrierId],
-    queryFn: async () => {
-      console.log('>>> API CALL: Fetching contracts for carrier_id:', selectedCarrierId)
-      const result = await contracts.getAll(selectedCarrierId)
-      console.log('<<< API RESPONSE: Got', result?.length, 'contracts:', result)
-      return result
-    },
+    queryFn: () => contracts.getAll(selectedCarrierId),
     enabled: !!selectedCarrierId,
     staleTime: 0,
-    cacheTime: 0,
   })
 
-  // Auto-select první dopravce
+  // Mazání smlouvy
+  const deleteContractMutation = useMutation({
+    mutationFn: (contractId) => contracts.delete(contractId),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['contracts', 'carrier', selectedCarrierId])
+      setDeletingContractId(null)
+    },
+    onError: (error) => {
+      alert(`Chyba při mazání: ${error.response?.data?.detail || error.message}`)
+      setDeletingContractId(null)
+    }
+  })
+
+  // Auto-select prvního dopravce
   useEffect(() => {
     if (carrierList?.length > 0 && !selectedCarrierId) {
-      console.log('Auto-selecting first carrier:', carrierList[0].id, carrierList[0].name)
       setSelectedCarrierId(carrierList[0].id)
     }
   }, [carrierList, selectedCarrierId])
 
   const selectedCarrier = carrierList?.find(c => c.id === selectedCarrierId)
 
-  // Handler pro změnu dopravce
-  const handleCarrierChange = (e) => {
-    const newCarrierId = Number(e.target.value)
-    console.log('🔄 CARRIER CHANGE: from', selectedCarrierId, 'to', newCarrierId)
-    setSelectedCarrierId(newCarrierId)
-  }
+  // Pomocná funkce pro získání smlouvy podle ID
+  const getContract = (contractId) => contractList?.find(c => c.id === contractId)
 
-  // Debug log
-  useEffect(() => {
-    console.log('=== Prices Debug ===')
-    console.log('Selected carrier ID:', selectedCarrierId)
-    console.log('Selected carrier name:', selectedCarrier?.name)
-    console.log('Price configs count:', priceList?.length)
-    console.log('Price configs:', priceList?.map(p => ({ id: p.id, carrierId: p.carrierId, type: p.type })))
-    console.log('Contracts count:', contractList?.length)
-  }, [selectedCarrierId, selectedCarrier, priceList, contractList])
-  
   // Seskup ceníky podle typu
   const pricesByType = priceList?.reduce((acc, config) => {
     const type = config.type || 'general'
@@ -143,12 +127,22 @@ export default function Prices() {
     return acc
   }, {}) || {}
 
-  // Pomocná funkce pro získání smlouvy podle ID
-  const getContract = (contractId) => {
-    return contractList?.find(c => c.id === contractId)
+  const isLoading = carriersLoading || pricesLoading
+  const hasContracts = contractList?.length > 0
+  const hasPrices = priceList?.length > 0
+
+  // Handler pro změnu dopravce
+  const handleCarrierChange = (e) => {
+    setSelectedCarrierId(Number(e.target.value))
   }
 
-  const isLoading = carriersLoading || pricesLoading
+  // Handler pro mazání smlouvy
+  const handleDeleteContract = (contractId) => {
+    if (window.confirm('Opravdu chcete smazat tuto smlouvu? Ceníky zůstanou zachovány.')) {
+      setDeletingContractId(contractId)
+      deleteContractMutation.mutate(contractId)
+    }
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -204,22 +198,45 @@ export default function Prices() {
         </div>
       )}
 
-      {/* Žádný dopravce */}
-      {!isLoading && !selectedCarrierId && (
-        <div className="card">
-          <EmptyState message="Vyberte dopravce pro zobrazení ceníků" />
+      {/* Warning: Žádné smlouvy */}
+      {!isLoading && selectedCarrierId && !hasContracts && (
+        <div className="card p-5" style={{ borderLeft: '4px solid var(--color-orange)' }}>
+          <div className="flex items-start gap-4">
+            <AlertTriangle size={24} style={{ color: 'var(--color-orange)' }} className="shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium" style={{ color: 'var(--color-orange)' }}>
+                Žádné nahrané smlouvy
+              </p>
+              <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                Pro dopravce {selectedCarrier?.name} nejsou nahrané žádné smlouvy. 
+                Nahrajte smlouvy v záložce "Dokumenty" pro automatické vytvoření ceníků.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Žádné ceníky */}
-      {!isLoading && selectedCarrierId && priceList?.length === 0 && (
-        <div className="card">
-          <EmptyState message={`Dopravce ${selectedCarrier?.name || ''} nemá žádné ceníky. Nahrajte smlouvu pro vytvoření ceníku.`} />
+      {/* Info: Smlouvy bez ceníků */}
+      {!isLoading && selectedCarrierId && hasContracts && !hasPrices && (
+        <div className="card p-5" style={{ borderLeft: '4px solid var(--color-primary)' }}>
+          <div className="flex items-start gap-4">
+            <AlertCircle size={24} style={{ color: 'var(--color-primary)' }} className="shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium" style={{ color: 'var(--color-primary)' }}>
+                Smlouvy bez extrahovaných ceníků
+              </p>
+              <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                Máte {contractList.length} {contractList.length === 1 ? 'smlouvu' : 'smluv'}, 
+                ale nepodařilo se z nich extrahovat žádné sazby. 
+                Zkontrolujte formát PDF nebo přidejte ceníky ručně.
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Ceníky podle typu */}
-      {!isLoading && priceList?.length > 0 && (
+      {!isLoading && hasPrices && (
         <>
           {Object.entries(pricesByType).map(([type, configs]) => (
             <div key={type} className="card">
@@ -237,118 +254,124 @@ export default function Prices() {
                 {configs.map(config => {
                   const contract = getContract(config.contractId)
                   return (
-                  <div 
-                    key={config.id} 
-                    className="p-4 rounded-xl"
-                    style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
-                  >
-                    {/* Hlavička ceníku */}
-                    <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: '1px solid var(--color-border-light)' }}>
-                      <div className="flex items-center gap-3">
-                        <Calendar size={18} style={{ color: 'var(--color-primary)' }} />
-                        <div>
-                          <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
-                            {contract?.number || `Ceník #${config.id}`}
-                          </span>
-                          <span className="text-sm ml-2" style={{ color: 'var(--color-text-muted)' }}>
-                            od {formatDate(config.validFrom)}
-                            {config.validTo && ` do ${formatDate(config.validTo)}`}
-                          </span>
+                    <div 
+                      key={config.id} 
+                      className="p-4 rounded-xl"
+                      style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}
+                    >
+                      {/* Hlavička ceníku */}
+                      <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+                        <div className="flex items-center gap-3">
+                          <Calendar size={18} style={{ color: 'var(--color-primary)' }} />
+                          <div>
+                            <span className="font-medium" style={{ color: 'var(--color-text-dark)' }}>
+                              {contract?.number || `Ceník #${config.id}`}
+                            </span>
+                            {!contract && config.contractId && (
+                              <span className="text-xs ml-2 px-1.5 py-0.5 rounded" 
+                                style={{ backgroundColor: 'var(--color-orange-light)', color: '#e67e22' }}>
+                                Smlouva smazána
+                              </span>
+                            )}
+                            <span className="text-sm ml-2" style={{ color: 'var(--color-text-muted)' }}>
+                              od {formatDate(config.validFrom)}
+                              {config.validTo && ` do ${formatDate(config.validTo)}`}
+                            </span>
+                          </div>
                         </div>
+                        <span 
+                          className={`px-2 py-1 rounded text-xs font-medium ${config.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
+                        >
+                          {config.isActive ? 'Aktivní' : 'Neaktivní'}
+                        </span>
                       </div>
-                      <span 
-                        className={`px-2 py-1 rounded text-xs font-medium ${config.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}
-                      >
-                        {config.isActive ? 'Aktivní' : 'Neaktivní'}
-                      </span>
+
+                      {/* Sazby */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {/* FIX sazby */}
+                        {config.fixRates?.length > 0 && (
+                          <PriceSection title="FIX sazby" color="var(--color-purple)">
+                            {config.fixRates.map((rate, idx) => (
+                              <PriceRow 
+                                key={idx}
+                                label={rate.routeType || 'Standardní'}
+                                value={formatCZK(rate.rate)}
+                                color="var(--color-purple)"
+                                contractNumber={contract?.number}
+                              />
+                            ))}
+                          </PriceSection>
+                        )}
+
+                        {/* KM sazby */}
+                        {config.kmRates?.length > 0 && (
+                          <PriceSection title="Kilometrové sazby" color="var(--color-green)">
+                            {config.kmRates.map((rate, idx) => (
+                              <PriceRow 
+                                key={idx}
+                                label={rate.routeType || 'Standardní'}
+                                value={`${rate.rate} Kč/km`}
+                                color="var(--color-green)"
+                                contractNumber={contract?.number}
+                              />
+                            ))}
+                          </PriceSection>
+                        )}
+
+                        {/* DEPO sazby */}
+                        {config.depoRates?.length > 0 && (
+                          <PriceSection title="DEPO sazby" color="#0891b2">
+                            {config.depoRates.map((rate, idx) => (
+                              <PriceRow 
+                                key={idx}
+                                label={`${rate.depoName} (${rate.rateType})`}
+                                value={formatCZK(rate.rate)}
+                                color="#0891b2"
+                                contractNumber={contract?.number}
+                              />
+                            ))}
+                          </PriceSection>
+                        )}
+
+                        {/* Linehaul sazby */}
+                        {config.linehaulRates?.length > 0 && (
+                          <PriceSection title="Linehaul sazby" color="var(--color-red)">
+                            {config.linehaulRates.map((rate, idx) => (
+                              <PriceRow 
+                                key={idx}
+                                label={`${rate.fromCode || '?'} → ${rate.toCode || '?'} (${rate.vehicleType})`}
+                                value={formatCZK(rate.rate)}
+                                color="var(--color-red)"
+                                contractNumber={contract?.number}
+                              />
+                            ))}
+                          </PriceSection>
+                        )}
+
+                        {/* Bonus sazby */}
+                        {config.bonusRates?.length > 0 && (
+                          <PriceSection title="Bonusy" color="var(--color-green)">
+                            {config.bonusRates.map((rate, idx) => (
+                              <PriceRow 
+                                key={idx}
+                                label={`Kvalita ${rate.qualityMin}% - ${rate.qualityMax}%`}
+                                value={formatCZK(rate.totalWithBonus)}
+                                color="var(--color-green)"
+                                contractNumber={contract?.number}
+                              />
+                            ))}
+                          </PriceSection>
+                        )}
+                      </div>
+
+                      {/* Prázdný ceník */}
+                      {!config.fixRates?.length && !config.kmRates?.length && !config.depoRates?.length && 
+                       !config.linehaulRates?.length && !config.bonusRates?.length && (
+                        <p className="text-center py-4" style={{ color: 'var(--color-text-muted)' }}>
+                          Tento ceník nemá definované žádné sazby
+                        </p>
+                      )}
                     </div>
-
-                    {/* Sazby */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                      {/* FIX sazby */}
-                      {config.fixRates?.length > 0 && (
-                        <PriceSection title="FIX sazby" color="var(--color-purple)">
-                          {config.fixRates.map((rate, idx) => (
-                            <PriceRow 
-                              key={idx}
-                              label={rate.routeType || 'Standardní'}
-                              value={formatCZK(rate.rate)}
-                              color="var(--color-purple)"
-                              contractNumber={contract?.number}
-                            />
-                          ))}
-                        </PriceSection>
-                      )}
-
-                      {/* KM sazby */}
-                      {config.kmRates?.length > 0 && (
-                        <PriceSection title="Kilometrové sazby" color="var(--color-green)">
-                          {config.kmRates.map((rate, idx) => (
-                            <PriceRow 
-                              key={idx}
-                              label={rate.routeType || 'Standardní'}
-                              value={`${rate.rate} Kč/km`}
-                              color="var(--color-green)"
-                              contractNumber={contract?.number}
-                            />
-                          ))}
-                        </PriceSection>
-                      )}
-
-                      {/* DEPO sazby */}
-                      {config.depoRates?.length > 0 && (
-                        <PriceSection title="DEPO sazby" color="#0891b2">
-                          {config.depoRates.map((rate, idx) => (
-                            <PriceRow 
-                              key={idx}
-                              label={`${rate.depoName} (${rate.rateType})`}
-                              value={formatCZK(rate.rate)}
-                              color="#0891b2"
-                              contractNumber={contract?.number}
-                            />
-                          ))}
-                        </PriceSection>
-                      )}
-
-                      {/* Linehaul sazby */}
-                      {config.linehaulRates?.length > 0 && (
-                        <PriceSection title="Linehaul sazby" color="var(--color-red)">
-                          {config.linehaulRates.map((rate, idx) => (
-                            <PriceRow 
-                              key={idx}
-                              label={`${rate.fromCode || '?'} → ${rate.toCode || '?'} (${rate.vehicleType})`}
-                              value={formatCZK(rate.rate)}
-                              color="var(--color-red)"
-                              contractNumber={contract?.number}
-                            />
-                          ))}
-                        </PriceSection>
-                      )}
-
-                      {/* Bonus sazby */}
-                      {config.bonusRates?.length > 0 && (
-                        <PriceSection title="Bonusy" color="var(--color-green)">
-                          {config.bonusRates.map((rate, idx) => (
-                            <PriceRow 
-                              key={idx}
-                              label={`Kvalita ${rate.qualityMin}% - ${rate.qualityMax}%`}
-                              value={formatCZK(rate.totalWithBonus)}
-                              color="var(--color-green)"
-                              contractNumber={contract?.number}
-                            />
-                          ))}
-                        </PriceSection>
-                      )}
-                    </div>
-
-                    {/* Prázdný ceník */}
-                    {!config.fixRates?.length && !config.kmRates?.length && !config.depoRates?.length && 
-                     !config.linehaulRates?.length && !config.bonusRates?.length && (
-                      <p className="text-center py-4" style={{ color: 'var(--color-text-muted)' }}>
-                        Tento ceník nemá definované žádné sazby
-                      </p>
-                    )}
-                  </div>
                   )
                 })}
               </div>
@@ -357,58 +380,87 @@ export default function Prices() {
         </>
       )}
 
-      {/* Historie smluv */}
-      {!isLoading && contractList?.length > 0 && (
+      {/* Žádné ceníky - empty state */}
+      {!isLoading && selectedCarrierId && !hasPrices && hasContracts && (
+        <div className="card">
+          <EmptyState 
+            message={`Žádné ceníky pro dopravce ${selectedCarrier?.name || ''}`}
+            icon={DollarSign}
+          />
+        </div>
+      )}
+
+      {/* Legenda */}
+      {hasPrices && (
+        <div className="flex flex-wrap items-center gap-4 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+          <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Legenda:</span>
+          <div className="flex flex-wrap items-center gap-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="flex items-center gap-1">
+              <span className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>D7</span>
+              = Dodatek č. 7
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Aktivní</span>
+              = Aktuálně platný ceník
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-orange-light)', color: '#e67e22' }}>Smlouva smazána</span>
+              = Ceník zachován bez smlouvy
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Seznam smluv s možností mazání */}
+      {!isLoading && hasContracts && (
         <div className="card">
           <div className="card-header" style={{ backgroundColor: 'var(--color-primary-light)' }}>
             <h2 className="text-lg font-semibold flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
               <FileText size={22} />
-              Historie smluv a dodatků
+              Nahrané smlouvy ({contractList.length})
             </h2>
+            <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              Smazáním smlouvy se ceníky zachovají
+            </p>
           </div>
           <div className="p-6">
             <div className="space-y-2">
               {contractList.map(contract => (
                 <div 
                   key={contract.id} 
-                  className="grid grid-cols-[150px_100px_1fr] gap-4 p-3 rounded-lg items-center" 
+                  className="flex items-center justify-between p-3 rounded-lg" 
                   style={{ backgroundColor: 'var(--color-bg)' }}
                 >
-                  <span className="font-semibold" style={{ color: 'var(--color-primary)' }}>
-                    {contract.number || `Smlouva #${contract.id}`}
-                  </span>
-                  <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                    od {formatDate(contract.validFrom)}
-                  </span>
-                  <span className="text-sm" style={{ color: 'var(--color-text-dark)' }}>
-                    {contract.type || 'Obecná smlouva'}
-                    {contract.notes && ` – ${contract.notes}`}
-                  </span>
+                  <div className="flex items-center gap-4">
+                    <span className="font-semibold min-w-[120px]" style={{ color: 'var(--color-primary)' }}>
+                      {contract.number || `Smlouva #${contract.id}`}
+                    </span>
+                    <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                      od {formatDate(contract.validFrom)}
+                    </span>
+                    <span className="text-sm" style={{ color: 'var(--color-text-dark)' }}>
+                      {contract.type || 'Obecná smlouva'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleDeleteContract(contract.id)}
+                    disabled={deletingContractId === contract.id}
+                    className="p-2 rounded-lg hover:bg-red-50 transition-colors"
+                    style={{ color: 'var(--color-red)' }}
+                    title="Smazat smlouvu"
+                  >
+                    {deletingContractId === contract.id ? (
+                      <Loader2 size={18} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={18} />
+                    )}
+                  </button>
                 </div>
               ))}
             </div>
           </div>
         </div>
       )}
-
-      {/* Legenda */}
-      <div className="flex flex-wrap items-center gap-4 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-        <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Legenda:</span>
-        <div className="flex flex-wrap items-center gap-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-          <span className="flex items-center gap-1">
-            <span className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>D7</span>
-            = Dodatek č. 7
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-orange-light)', color: '#e67e22' }}>?</span>
-            = Chybí ve smlouvách
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">Aktivní</span>
-            = Aktuálně platný ceník
-          </span>
-        </div>
-      </div>
     </div>
   )
 }
