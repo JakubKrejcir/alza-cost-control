@@ -1,6 +1,6 @@
 """
 AlzaBox Router - Import dat a BI API (ASYNC verze)
-Rozšířeno o drill-down: Dopravce → Trasa → Box → Detail
+Verze: 3.10.1 - Opravený summary endpoint
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,55 +11,12 @@ from decimal import Decimal
 import openpyxl
 import io
 import logging
-import re
 
 from app.database import get_db
 from app.models import AlzaBox, AlzaBoxAssignment, AlzaBoxDelivery, Carrier
 
 router = APIRouter(prefix="/alzabox", tags=["alzabox"])
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# HELPER: Normalizace názvů dopravců
-# =============================================================================
-
-def normalize_carrier_name(name: str) -> str:
-    """
-    Normalizuje název dopravce pro porovnání.
-    Odstraní právní formy, mezery, převede na lowercase.
-    
-    Příklady:
-    - "Drive cool s.r.o." → "drivecool"
-    - "Drivecool" → "drivecool"
-    - "ABC Transport a.s." → "abctransport"
-    """
-    if not name:
-        return ""
-    
-    normalized = name.lower()
-    
-    # Odstraň právní formy
-    legal_forms = [
-        r'\s*s\.?\s*r\.?\s*o\.?\s*$',      # s.r.o., s. r. o.
-        r'\s*a\.?\s*s\.?\s*$',              # a.s., a. s.
-        r'\s*spol\.\s*s\s*r\.?\s*o\.?\s*$', # spol. s r.o.
-        r'\s*v\.?\s*o\.?\s*s\.?\s*$',       # v.o.s.
-        r'\s*k\.?\s*s\.?\s*$',              # k.s.
-        r'\s*s\.?\s*p\.?\s*$',              # s.p.
-        r'\s*z\.?\s*s\.?\s*$',              # z.s.
-    ]
-    
-    for pattern in legal_forms:
-        normalized = re.sub(pattern, '', normalized, flags=re.IGNORECASE)
-    
-    # Odstraň všechny mezery
-    normalized = re.sub(r'\s+', '', normalized)
-    
-    # Odstraň speciální znaky
-    normalized = re.sub(r'[^\w]', '', normalized)
-    
-    return normalized.strip()
 
 
 # =============================================================================
@@ -76,10 +33,20 @@ async def import_alzabox_locations(
         content = await file.read()
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
         
-        if 'LL_PS' not in wb.sheetnames:
-            raise HTTPException(status_code=400, detail="Sheet 'LL_PS' nenalezen")
+        # Flexibilní detekce sheetu
+        sheet = None
+        for name in ['LL_PS', 'Sheet1', 'Data', 'Boxy', 'AlzaBoxy', 'List1']:
+            if name in wb.sheetnames:
+                sheet = wb[name]
+                break
         
-        sheet = wb['LL_PS']
+        if not sheet:
+            sheet = wb.active
+        
+        if not sheet:
+            raise HTTPException(status_code=400, detail=f"Žádný sheet nenalezen. Dostupné: {wb.sheetnames}")
+        
+        logger.info(f"Importing locations from sheet: {sheet.title}")
         
         # Načti existující dopravce
         result = await db.execute(select(Carrier))
@@ -91,7 +58,6 @@ async def import_alzabox_locations(
         
         created = 0
         updated = 0
-        assignments_created = 0
         
         for row in range(2, sheet.max_row + 1):
             alza_id = sheet.cell(row=row, column=1).value
@@ -106,7 +72,6 @@ async def import_alzabox_locations(
             gps_lon = sheet.cell(row=row, column=11).value
             region = sheet.cell(row=row, column=12).value
             first_launch = sheet.cell(row=row, column=13).value
-            depot_name = sheet.cell(row=row, column=24).value
             
             if not code or not name:
                 continue
@@ -143,32 +108,15 @@ async def import_alzabox_locations(
                 await db.flush()
                 existing_boxes[code] = box
                 created += 1
-            
-            carrier_id = carriers.get(carrier_name) if carrier_name else None
-            
-            clean_depot = None
-            if depot_name and depot_name != '_DIRECT':
-                clean_depot = depot_name.split('(')[0].strip()
-            
-            assignment = AlzaBoxAssignment(
-                box_id=box.id,
-                carrier_id=carrier_id,
-                route_group=route_group,
-                depot_name=clean_depot,
-                valid_from=datetime.utcnow(),
-                created_at=datetime.utcnow()
-            )
-            db.add(assignment)
-            assignments_created += 1
         
         await db.commit()
         wb.close()
         
         return {
             "success": True,
+            "imported": created + updated,
             "boxes_created": created,
-            "boxes_updated": updated,
-            "assignments_created": assignments_created
+            "boxes_updated": updated
         }
         
     except Exception as e:
@@ -183,412 +131,165 @@ async def import_alzabox_deliveries(
     delivery_type: str = Query("DPO", description="Typ závozu: DPO, SD, THIRD"),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Import dojezdových časů z XLSX souboru.
-    
-    Podporované formáty:
-    1. Nový formát (2024+): 
-       - Sheet "Plan" nebo "Actual" (bez "Skutecnost")
-       - Řádek 2: datumy ve sloupcích 2+
-       - Col0: "HH:MM | popis -- ABxxxx" nebo název trasy
-       
-    2. Starý formát:
-       - Sheety "Plan" a "Skutecnost"
-       - Řádek 1: datumy ve sloupcích 4+
-       - Col0: route_name, Col1: box_code, Col2: info
-    """
+    """Import dojezdových časů z XLSX souboru."""
     try:
         content = await file.read()
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
         
-        # Detekce formátu souboru
-        is_new_format = 'Plan' in wb.sheetnames and 'Skutecnost' not in wb.sheetnames
+        # Flexibilní detekce sheetů
+        plan_sheet = None
+        actual_sheet = None
         
-        if is_new_format:
-            # NOVÝ FORMÁT - vše v jednom sloupci
-            return await _import_deliveries_new_format(wb, delivery_type, db)
-        else:
-            # STARÝ FORMÁT - separátní sloupce
-            return await _import_deliveries_old_format(wb, delivery_type, db)
+        for name in ['Plan', 'Plán', 'plan', 'PLAN']:
+            if name in wb.sheetnames:
+                plan_sheet = wb[name]
+                break
         
+        for name in ['Skutecnost', 'Skutečnost', 'Actual', 'skutecnost', 'SKUTECNOST']:
+            if name in wb.sheetnames:
+                actual_sheet = wb[name]
+                break
+        
+        if not plan_sheet or not actual_sheet:
+            available = ', '.join(wb.sheetnames)
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Sheety 'Plan' a 'Skutecnost' nenalezeny. Dostupné: {available}"
+            )
+        
+        logger.info(f"Using sheets: Plan={plan_sheet.title}, Actual={actual_sheet.title}")
+        
+        # Načti datumy ze sloupců
+        dates = []
+        for col in range(4, plan_sheet.max_column + 1):
+            date_val = plan_sheet.cell(row=1, column=col).value
+            if isinstance(date_val, datetime):
+                dates.append((col, date_val.date()))
+        
+        if not dates:
+            raise HTTPException(status_code=400, detail="Žádné datumy nenalezeny v hlavičce")
+        
+        logger.info(f"Found {len(dates)} dates")
+        
+        # Smaž existující záznamy pro období
+        min_date = min(d for _, d in dates)
+        max_date = max(d for _, d in dates)
+        
+        delete_stmt = delete(AlzaBoxDelivery).where(
+            and_(
+                AlzaBoxDelivery.delivery_type == delivery_type,
+                AlzaBoxDelivery.delivery_date >= datetime.combine(min_date, datetime.min.time()),
+                AlzaBoxDelivery.delivery_date <= datetime.combine(max_date, datetime.max.time())
+            )
+        )
+        result = await db.execute(delete_stmt)
+        await db.flush()
+        logger.info(f"Deleted {result.rowcount} existing records")
+        
+        # Načti boxy
+        result = await db.execute(select(AlzaBox))
+        boxes = {b.code: b.id for b in result.scalars().all()}
+        
+        # Načti plán
+        plan_data = {}
+        for row in range(3, plan_sheet.max_row + 1):
+            route_name = plan_sheet.cell(row=row, column=1).value
+            box_code = plan_sheet.cell(row=row, column=2).value
+            info = plan_sheet.cell(row=row, column=3).value
+            
+            if not box_code:
+                continue
+            
+            box_code = str(box_code).strip()
+            
+            planned_time = None
+            if info and '|' in str(info):
+                time_part = str(info).split('|')[0].strip()
+                if ':' in time_part and len(time_part) <= 6:
+                    planned_time = time_part
+            
+            plan_data[box_code] = {'route_name': route_name, 'planned_time': planned_time}
+        
+        # Načti skutečnost
+        actual_data = {}
+        for row in range(3, actual_sheet.max_row + 1):
+            box_code = actual_sheet.cell(row=row, column=2).value
+            
+            if not box_code:
+                continue
+            
+            box_code = str(box_code).strip()
+            actual_data[box_code] = {}
+            
+            for col, dt in dates:
+                val = actual_sheet.cell(row=row, column=col).value
+                if val and isinstance(val, datetime):
+                    actual_data[box_code][col] = val
+        
+        # Vytvoř záznamy
+        created = 0
+        skipped = 0
+        
+        for box_code, plan_info in plan_data.items():
+            if box_code not in boxes:
+                skipped += 1
+                continue
+            
+            box_id = boxes[box_code]
+            route_name = plan_info['route_name']
+            planned_time = plan_info['planned_time']
+            
+            if box_code not in actual_data:
+                continue
+            
+            for col, dt in dates:
+                if col not in actual_data[box_code]:
+                    continue
+                
+                actual_time = actual_data[box_code][col]
+                
+                delay_minutes = None
+                on_time = None
+                if planned_time:
+                    try:
+                        parts = planned_time.split(':')
+                        plan_min = int(parts[0]) * 60 + int(parts[1])
+                        actual_min = actual_time.hour * 60 + actual_time.minute
+                        delay_minutes = actual_min - plan_min
+                        on_time = delay_minutes <= 0
+                    except:
+                        pass
+                
+                delivery = AlzaBoxDelivery(
+                    box_id=box_id,
+                    delivery_date=datetime.combine(dt, actual_time.time()),
+                    delivery_type=delivery_type,
+                    route_name=route_name,
+                    planned_time=planned_time,
+                    actual_time=actual_time,
+                    delay_minutes=delay_minutes,
+                    on_time=on_time,
+                    created_at=datetime.utcnow()
+                )
+                db.add(delivery)
+                created += 1
+        
+        await db.commit()
+        wb.close()
+        
+        return {
+            "success": True,
+            "imported": created,
+            "skipped": skipped,
+            "dates_processed": len(dates)
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         await db.rollback()
         logger.error(f"Error importing deliveries: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-async def _import_deliveries_new_format(wb, delivery_type: str, db: AsyncSession):
-    """
-    Import z nového formátu:
-    - Sheet "Plan" nebo "Actual"
-    - Col0: "HH:MM | popis -- ABxxxx" nebo název trasy (bez "|")
-    - Sloupce 2+: actual times pro každý datum
-    """
-    sheet = wb['Plan'] if 'Plan' in wb.sheetnames else wb['Actual']
-    
-    # Načti datumy z řádku 2, sloupce 2+
-    dates = []
-    for col in range(2, sheet.max_column + 1):
-        date_val = sheet.cell(row=2, column=col).value
-        if isinstance(date_val, datetime):
-            dates.append((col, date_val.date()))
-    
-    if not dates:
-        raise HTTPException(status_code=400, detail="Nenalezeny žádné datumy v řádku 2")
-    
-    logger.info(f"Nalezeno {len(dates)} datumů: {dates[0][1]} až {dates[-1][1]}")
-    
-    # Smaž existující záznamy pro dané období
-    min_date = min(d for _, d in dates)
-    max_date = max(d for _, d in dates)
-    
-    delete_stmt = delete(AlzaBoxDelivery).where(
-        and_(
-            AlzaBoxDelivery.delivery_type == delivery_type,
-            AlzaBoxDelivery.delivery_date >= datetime.combine(min_date, datetime.min.time()),
-            AlzaBoxDelivery.delivery_date <= datetime.combine(max_date, datetime.max.time())
-        )
-    )
-    result = await db.execute(delete_stmt)
-    await db.flush()
-    logger.info(f"Smazáno {result.rowcount} existujících záznamů")
-    
-    # Načti mapování boxů z DB
-    result = await db.execute(select(AlzaBox))
-    boxes = {b.code: b.id for b in result.scalars().all()}
-    
-    # Načti mapování dopravců - s normalizací názvů
-    result = await db.execute(select(Carrier))
-    carriers_list = result.scalars().all()
-    carriers_by_normalized = {normalize_carrier_name(c.name): c.id for c in carriers_list}
-    
-    # Načti mapování route_name → carrier_id z RoutePlanRoute
-    route_to_carrier = {}
-    unmatched_carriers = set()
-    route_plans_sql = """
-    SELECT rpr."routeName", rpr."carrierName"
-    FROM "RoutePlanRoute" rpr
-    JOIN "RoutePlan" rp ON rp.id = rpr."routePlanId"
-    WHERE rp."validFrom" <= :max_date
-    AND (rp."validTo" IS NULL OR rp."validTo" >= :min_date)
-    ORDER BY rp."validFrom" DESC
-    """
-    result = await db.execute(text(route_plans_sql), {
-        "min_date": datetime.combine(min_date, datetime.min.time()),
-        "max_date": datetime.combine(max_date, datetime.max.time())
-    })
-    for row in result.fetchall():
-        route_name, carrier_name = row[0], row[1]
-        if route_name and route_name not in route_to_carrier and carrier_name:
-            normalized = normalize_carrier_name(carrier_name)
-            carrier_id = carriers_by_normalized.get(normalized)
-            if carrier_id:
-                route_to_carrier[route_name] = carrier_id
-            else:
-                unmatched_carriers.add(carrier_name)
-    
-    if unmatched_carriers:
-        logger.warning(f"Nepodařilo se namapovat dopravce: {unmatched_carriers}")
-    
-    logger.info(f"Načteno {len(route_to_carrier)} mapování route→carrier")
-    
-    # Parsuj data z sheetu
-    current_route = None
-    created = 0
-    unique_days = set()
-    skipped_no_box = 0
-    skipped_no_time = 0
-    
-    for row_idx in range(3, sheet.max_row + 1):
-        col0 = sheet.cell(row=row_idx, column=1).value
-        
-        if not col0 or not str(col0).strip():
-            continue
-        
-        col0_str = str(col0).strip()
-        
-        # Je to název trasy? (neobsahuje "|")
-        if '|' not in col0_str:
-            current_route = col0_str
-            continue
-        
-        # Je to box? Parsuj "HH:MM | popis -- ABxxxx" nebo "Trasa ČÍSLO | popis -- ABxxxx"
-        # Extrahuj planned_time
-        planned_time = None
-        
-        # Formát 1: "09:00 | popis" - HH:MM na začátku
-        time_match = re.match(r'^(\d{1,2}):(\d{2})', col0_str)
-        if time_match:
-            h, m = int(time_match.group(1)), int(time_match.group(2))
-            if 0 <= h <= 23 and 0 <= m <= 59:
-                planned_time = f"{h:02d}:{m:02d}"
-        
-        # Formát 2: "Pardubicko E 12 | popis" - číslo před "|" = hodina
-        if not planned_time and '|' in col0_str:
-            first_part = col0_str.split('|')[0].strip()
-            # Hledej číslo na konci první části
-            num_match = re.search(r'(\d{1,2})\s*$', first_part)
-            if num_match:
-                h = int(num_match.group(1))
-                if 0 <= h <= 23:
-                    planned_time = f"{h:02d}:00"
-        
-        # Extrahuj box_code z "-- ABxxxx"
-        box_code = None
-        box_match = re.search(r'--\s*(AB\d+)', col0_str)
-        if box_match:
-            box_code = box_match.group(1)
-        
-        if not box_code:
-            skipped_no_box += 1
-            continue
-        
-        if box_code not in boxes:
-            skipped_no_box += 1
-            continue
-        
-        box_id = boxes[box_code]
-        carrier_id = route_to_carrier.get(current_route) if current_route else None
-        
-        # Vytvoř delivery pro každý datum
-        for col, delivery_date in dates:
-            actual_time_val = sheet.cell(row=row_idx, column=col).value
-            
-            if not actual_time_val or not isinstance(actual_time_val, datetime):
-                skipped_no_time += 1
-                continue
-            
-            # Spočítej zpoždění
-            delay_minutes = None
-            on_time = None
-            if planned_time:
-                try:
-                    parts = planned_time.split(':')
-                    h, m = int(parts[0]), int(parts[1])
-                    planned_datetime = datetime.combine(delivery_date, datetime.min.time().replace(hour=h, minute=m))
-                    diff = (actual_time_val - planned_datetime).total_seconds() / 60
-                    delay_minutes = int(diff)
-                    on_time = diff <= 0
-                except:
-                    pass
-            
-            delivery = AlzaBoxDelivery(
-                box_id=box_id,
-                carrier_id=carrier_id,
-                delivery_date=datetime.combine(delivery_date, datetime.min.time()),
-                delivery_type=delivery_type,
-                route_name=current_route,
-                planned_time=planned_time,
-                actual_time=actual_time_val,
-                delay_minutes=delay_minutes,
-                on_time=on_time,
-                created_at=datetime.utcnow()
-            )
-            db.add(delivery)
-            created += 1
-            unique_days.add(delivery_date)
-    
-    await db.commit()
-    wb.close()
-    
-    return {
-        "success": True,
-        "format": "new",
-        "deliveries_created": created,
-        "days_processed": len(unique_days),
-        "routes_with_carrier": len(route_to_carrier),
-        "skipped_no_box": skipped_no_box,
-        "unmatched_carriers": list(unmatched_carriers) if unmatched_carriers else []
-    }
-
-
-async def _import_deliveries_old_format(wb, delivery_type: str, db: AsyncSession):
-    """Import ze starého formátu se sheety Plan a Skutecnost."""
-    if 'Plan' not in wb.sheetnames or 'Skutecnost' not in wb.sheetnames:
-        raise HTTPException(status_code=400, detail="Sheety 'Plan' a 'Skutecnost' nenalezeny")
-    
-    plan_sheet = wb['Plan']
-    actual_sheet = wb['Skutecnost']
-    
-    # Načti datumy ze sloupců (od sloupce 4)
-    dates = []
-    for col in range(4, plan_sheet.max_column + 1):
-        date_val = plan_sheet.cell(row=1, column=col).value
-        if isinstance(date_val, datetime):
-            dates.append((col, date_val.date()))
-    
-    if not dates:
-        raise HTTPException(status_code=400, detail="Nenalezeny žádné datumy")
-    
-    # Smaž existující záznamy pro dané období
-    min_date = min(d for _, d in dates)
-    max_date = max(d for _, d in dates)
-    
-    delete_stmt = delete(AlzaBoxDelivery).where(
-        and_(
-            AlzaBoxDelivery.delivery_type == delivery_type,
-            AlzaBoxDelivery.delivery_date >= datetime.combine(min_date, datetime.min.time()),
-            AlzaBoxDelivery.delivery_date <= datetime.combine(max_date, datetime.max.time())
-        )
-    )
-    result = await db.execute(delete_stmt)
-    await db.flush()
-    logger.info(f"Smazáno {result.rowcount} existujících záznamů")
-    
-    # Načti mapování boxů z DB
-    result = await db.execute(select(AlzaBox))
-    boxes = {b.code: b.id for b in result.scalars().all()}
-    
-    # Načti mapování dopravců - s normalizací názvů
-    result = await db.execute(select(Carrier))
-    carriers_list = result.scalars().all()
-    carriers_by_normalized = {normalize_carrier_name(c.name): c.id for c in carriers_list}
-    
-    # Načti mapování route_name → carrier_id z RoutePlanRoute
-    route_to_carrier = {}
-    unmatched_carriers = set()
-    route_plans_sql = """
-    SELECT rpr."routeName", rpr."carrierName"
-    FROM "RoutePlanRoute" rpr
-    JOIN "RoutePlan" rp ON rp.id = rpr."routePlanId"
-    WHERE rp."validFrom" <= :max_date
-    AND (rp."validTo" IS NULL OR rp."validTo" >= :min_date)
-    ORDER BY rp."validFrom" DESC
-    """
-    result = await db.execute(text(route_plans_sql), {
-        "min_date": datetime.combine(min_date, datetime.min.time()),
-        "max_date": datetime.combine(max_date, datetime.max.time())
-    })
-    for row in result.fetchall():
-        route_name, carrier_name = row[0], row[1]
-        if route_name and route_name not in route_to_carrier and carrier_name:
-            normalized = normalize_carrier_name(carrier_name)
-            carrier_id = carriers_by_normalized.get(normalized)
-            if carrier_id:
-                route_to_carrier[route_name] = carrier_id
-            else:
-                unmatched_carriers.add(carrier_name)
-    
-    if unmatched_carriers:
-        logger.warning(f"Nepodařilo se namapovat dopravce: {unmatched_carriers}")
-    
-    logger.info(f"Načteno {len(route_to_carrier)} mapování route→carrier")
-    
-    # Načti plánované časy z Plan sheetu
-    plan_data = {}
-    for row in range(3, plan_sheet.max_row + 1):
-        route_name = plan_sheet.cell(row=row, column=1).value
-        box_code = plan_sheet.cell(row=row, column=2).value
-        info = plan_sheet.cell(row=row, column=3).value
-        
-        if not box_code or not str(box_code).strip():
-            continue
-        
-        box_code = str(box_code).strip()
-        
-        # Parsuj plánovaný čas
-        planned_time = None
-        if info and '|' in str(info):
-            first_part = str(info).split('|')[0].strip()
-            
-            if ':' in first_part:
-                try:
-                    parts = first_part.split(':')
-                    if len(parts) >= 2:
-                        h = int(parts[0])
-                        m = int(parts[1])
-                        if 0 <= h <= 23 and 0 <= m <= 59:
-                            planned_time = f"{h:02d}:{m:02d}"
-                except (ValueError, IndexError):
-                    pass
-            
-            if not planned_time:
-                match = re.search(r'(\d{1,2})\s*$', first_part)
-                if match:
-                    h = int(match.group(1))
-                    if 0 <= h <= 23:
-                        planned_time = f"{h:02d}:00"
-        
-        plan_data[box_code] = {
-            'route_name': route_name,
-            'planned_time': planned_time
-        }
-    
-    # Načti skutečné časy ze Skutecnost sheetu
-    actual_data = {}
-    for row in range(3, actual_sheet.max_row + 1):
-        box_code = actual_sheet.cell(row=row, column=2).value
-        
-        if not box_code or not str(box_code).strip():
-            continue
-        
-        box_code = str(box_code).strip()
-        actual_data[box_code] = {}
-        
-        for col, dt in dates:
-            actual_time_val = actual_sheet.cell(row=row, column=col).value
-            if actual_time_val and isinstance(actual_time_val, datetime):
-                actual_data[box_code][col] = actual_time_val
-    
-    # Vytvoř delivery záznamy
-    created = 0
-    unique_days = set()
-    
-    for box_code, plan_info in plan_data.items():
-        if box_code not in boxes:
-            continue
-        
-        box_id = boxes[box_code]
-        route_name = plan_info['route_name']
-        planned_time_str = plan_info['planned_time']
-        carrier_id = route_to_carrier.get(route_name)
-        
-        for col, delivery_date in dates:
-            actual_time = actual_data.get(box_code, {}).get(col)
-            
-            if not actual_time:
-                continue
-            
-            delay_minutes = None
-            on_time = None
-            if planned_time_str:
-                try:
-                    parts = planned_time_str.split(':')
-                    h, m = int(parts[0]), int(parts[1])
-                    planned_datetime = datetime.combine(delivery_date, datetime.min.time().replace(hour=h, minute=m))
-                    diff = (actual_time - planned_datetime).total_seconds() / 60
-                    delay_minutes = int(diff)
-                    on_time = diff <= 0
-                except:
-                    pass
-            
-            delivery = AlzaBoxDelivery(
-                box_id=box_id,
-                carrier_id=carrier_id,
-                delivery_date=datetime.combine(delivery_date, datetime.min.time()),
-                delivery_type=delivery_type,
-                route_name=route_name,
-                planned_time=planned_time_str,
-                actual_time=actual_time,
-                delay_minutes=delay_minutes,
-                on_time=on_time,
-                created_at=datetime.utcnow()
-            )
-            db.add(delivery)
-            created += 1
-            unique_days.add(delivery_date)
-    
-    await db.commit()
-    wb.close()
-    
-    return {
-        "success": True,
-        "format": "old",
-        "deliveries_created": created,
-        "days_processed": len(unique_days),
-        "routes_with_carrier": len(route_to_carrier),
-        "unmatched_carriers": list(unmatched_carriers) if unmatched_carriers else []
-    }
 
 
 # =============================================================================
@@ -597,13 +298,13 @@ async def _import_deliveries_old_format(wb, delivery_type: str, db: AsyncSession
 
 @router.delete("/data/locations")
 async def delete_all_locations(db: AsyncSession = Depends(get_db)):
-    """Smaže všechny AlzaBoxy, assignments a deliveries"""
+    """Smaže všechny AlzaBoxy"""
     try:
-        await db.execute(text('DELETE FROM "AlzaBoxDelivery"'))
-        await db.execute(text('DELETE FROM "AlzaBoxAssignment"'))
-        await db.execute(text('DELETE FROM "AlzaBox"'))
+        await db.execute(delete(AlzaBoxDelivery))
+        await db.execute(delete(AlzaBoxAssignment))
+        result = await db.execute(delete(AlzaBox))
         await db.commit()
-        return {"success": True, "message": "Všechna data smazána"}
+        return {"success": True, "deleted": result.rowcount}
     except Exception as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -614,15 +315,14 @@ async def delete_deliveries(
     delivery_type: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Smaže dojezdy (volitelně jen určitý typ)"""
+    """Smaže dojezdy"""
     try:
         if delivery_type:
             result = await db.execute(
-                text('DELETE FROM "AlzaBoxDelivery" WHERE "deliveryType" = :dt'),
-                {"dt": delivery_type}
+                delete(AlzaBoxDelivery).where(AlzaBoxDelivery.delivery_type == delivery_type)
             )
         else:
-            result = await db.execute(text('DELETE FROM "AlzaBoxDelivery"'))
+            result = await db.execute(delete(AlzaBoxDelivery))
         await db.commit()
         return {"success": True, "deleted": result.rowcount}
     except Exception as e:
@@ -631,26 +331,29 @@ async def delete_deliveries(
 
 
 # =============================================================================
-# STATS ENDPOINTS (s carrier_id filtrem)
+# STATS ENDPOINTS
 # =============================================================================
 
 @router.get("/stats/summary")
-async def get_stats_summary(
+async def get_summary(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     delivery_type: Optional[str] = Query(None),
     carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Souhrnné statistiky"""
+    """Celkový přehled - počet boxů, dojezdů, včasnost"""
     try:
+        # Počet boxů
+        box_result = await db.execute(text('SELECT COUNT(*) FROM "AlzaBox"'))
+        total_boxes = box_result.scalar() or 0
+        
+        # Statistiky dojezdů
         sql = """
         SELECT 
             COUNT(*) as total,
             SUM(CASE WHEN "onTime" = true THEN 1 ELSE 0 END) as on_time,
-            AVG("delayMinutes") as avg_delay,
-            MAX("delayMinutes") as max_delay,
-            MIN("delayMinutes") as min_delay
+            AVG("delayMinutes") as avg_delay
         FROM "AlzaBoxDelivery"
         WHERE 1=1
         """
@@ -665,50 +368,45 @@ async def get_stats_summary(
         if delivery_type:
             sql += ' AND "deliveryType" = :delivery_type'
             params['delivery_type'] = delivery_type
-        if carrier_id:
-            sql += ' AND "carrierId" = :carrier_id'
-            params['carrier_id'] = carrier_id
         
         result = await db.execute(text(sql), params)
         row = result.fetchone()
         
-        total = row[0] or 0
+        total_deliveries = row[0] or 0
         on_time = row[1] or 0
-        avg_delay = float(row[2]) if row[2] else 0
-        max_delay = row[3] or 0
-        min_delay = row[4] or 0
+        on_time_rate = round(on_time / total_deliveries * 100, 1) if total_deliveries > 0 else 0
         
         return {
-            "totalDeliveries": total,
+            "total_boxes": total_boxes,
+            "total_deliveries": total_deliveries,
+            "on_time_rate": on_time_rate,
+            # Zachováme i staré názvy pro kompatibilitu
+            "totalDeliveries": total_deliveries,
             "onTimeDeliveries": on_time,
-            "onTimePct": round(on_time / total * 100, 1) if total > 0 else 0,
-            "avgDelayMinutes": round(avg_delay, 1),
-            "maxDelayMinutes": max_delay,
-            "earliestMinutes": abs(min_delay) if min_delay < 0 else 0
+            "onTimePct": on_time_rate
         }
     except Exception as e:
-        logger.error(f"Error in stats/summary: {e}")
+        logger.error(f"Error in summary: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats/by-carrier")
-async def get_stats_by_carrier(
+async def get_by_carrier(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    delivery_type: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Statistiky per dopravce (včetně nepřiřazených)"""
+    """Statistiky per dopravce"""
     try:
         sql = """
         SELECT 
-            d."carrierId",
-            COALESCE(c.name, 'Nepřiřazeno') as carrier_name,
-            COUNT(*) as total,
-            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time,
-            AVG(d."delayMinutes") as avg_delay
+            c.name,
+            c.id,
+            COUNT(d.id) as total,
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time
         FROM "AlzaBoxDelivery" d
-        LEFT JOIN "Carrier" c ON c.id = d."carrierId"
+        LEFT JOIN "AlzaBoxAssignment" a ON d."boxId" = a."boxId" AND a."validTo" IS NULL
+        LEFT JOIN "Carrier" c ON a."carrierId" = c.id
         WHERE 1=1
         """
         params = {}
@@ -719,37 +417,31 @@ async def get_stats_by_carrier(
         if end_date:
             sql += ' AND d."deliveryDate" <= :end_date'
             params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        if delivery_type:
-            sql += ' AND d."deliveryType" = :delivery_type'
-            params['delivery_type'] = delivery_type
         
-        sql += ' GROUP BY d."carrierId", c.name ORDER BY total DESC'
+        sql += ' GROUP BY c.id, c.name ORDER BY total DESC'
         
         result = await db.execute(text(sql), params)
         rows = result.fetchall()
         
         return [
             {
-                "carrierId": row[0],
-                "carrierName": row[1],
+                "carrierName": row[0] or "Nepřiřazeno",
+                "carrierId": row[1],
                 "totalDeliveries": row[2],
                 "onTimeDeliveries": row[3] or 0,
-                "lateDeliveries": row[2] - (row[3] or 0),
-                "onTimePct": round((row[3] or 0) / row[2] * 100, 1) if row[2] > 0 else 0,
-                "avgDelayMinutes": round(float(row[4]), 1) if row[4] else 0
+                "onTimePct": round((row[3] or 0) / row[2] * 100, 1) if row[2] > 0 else 0
             }
             for row in rows
         ]
     except Exception as e:
-        logger.error(f"Error in stats/by-carrier: {e}")
+        logger.error(f"Error in by-carrier: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats/by-route")
-async def get_stats_by_route(
+async def get_by_route(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    delivery_type: Optional[str] = Query(None),
     carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -757,29 +449,29 @@ async def get_stats_by_route(
     try:
         sql = """
         SELECT 
-            "routeName",
+            d."routeName",
             COUNT(*) as total,
-            SUM(CASE WHEN "onTime" = true THEN 1 ELSE 0 END) as on_time,
-            AVG("delayMinutes") as avg_delay
-        FROM "AlzaBoxDelivery"
-        WHERE "routeName" IS NOT NULL
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time
+        FROM "AlzaBoxDelivery" d
         """
+        
+        if carrier_id:
+            sql += ' JOIN "AlzaBoxAssignment" a ON d."boxId" = a."boxId" AND a."validTo" IS NULL'
+        
+        sql += ' WHERE d."routeName" IS NOT NULL'
         params = {}
         
         if start_date:
-            sql += ' AND "deliveryDate" >= :start_date'
+            sql += ' AND d."deliveryDate" >= :start_date'
             params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
         if end_date:
-            sql += ' AND "deliveryDate" <= :end_date'
+            sql += ' AND d."deliveryDate" <= :end_date'
             params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        if delivery_type:
-            sql += ' AND "deliveryType" = :delivery_type'
-            params['delivery_type'] = delivery_type
         if carrier_id:
-            sql += ' AND "carrierId" = :carrier_id'
+            sql += ' AND a."carrierId" = :carrier_id'
             params['carrier_id'] = carrier_id
         
-        sql += ' GROUP BY "routeName" ORDER BY "routeName"'
+        sql += ' GROUP BY d."routeName" ORDER BY d."routeName"'
         
         result = await db.execute(text(sql), params)
         rows = result.fetchall()
@@ -789,21 +481,19 @@ async def get_stats_by_route(
                 "routeName": row[0],
                 "totalDeliveries": row[1],
                 "onTimeDeliveries": row[2] or 0,
-                "onTimePct": round((row[2] or 0) / row[1] * 100, 1) if row[1] > 0 else 0,
-                "avgDelayMinutes": round(float(row[3]), 1) if row[3] else 0
+                "onTimePct": round((row[2] or 0) / row[1] * 100, 1) if row[1] > 0 else 0
             }
             for row in rows
         ]
     except Exception as e:
-        logger.error(f"Error in stats/by-route: {e}")
+        logger.error(f"Error in by-route: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats/by-day")
-async def get_stats_by_day(
+async def get_by_day(
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
-    delivery_type: Optional[str] = Query(None),
     carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
@@ -811,29 +501,29 @@ async def get_stats_by_day(
     try:
         sql = """
         SELECT 
-            DATE("deliveryDate") as date,
+            DATE(d."deliveryDate") as date,
             COUNT(*) as total,
-            SUM(CASE WHEN "onTime" = true THEN 1 ELSE 0 END) as on_time,
-            AVG("delayMinutes") as avg_delay
-        FROM "AlzaBoxDelivery"
-        WHERE 1=1
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time
+        FROM "AlzaBoxDelivery" d
         """
+        
+        if carrier_id:
+            sql += ' JOIN "AlzaBoxAssignment" a ON d."boxId" = a."boxId" AND a."validTo" IS NULL'
+        
+        sql += ' WHERE 1=1'
         params = {}
         
         if start_date:
-            sql += ' AND "deliveryDate" >= :start_date'
+            sql += ' AND d."deliveryDate" >= :start_date'
             params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
         if end_date:
-            sql += ' AND "deliveryDate" <= :end_date'
+            sql += ' AND d."deliveryDate" <= :end_date'
             params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        if delivery_type:
-            sql += ' AND "deliveryType" = :delivery_type'
-            params['delivery_type'] = delivery_type
         if carrier_id:
-            sql += ' AND "carrierId" = :carrier_id'
+            sql += ' AND a."carrierId" = :carrier_id'
             params['carrier_id'] = carrier_id
         
-        sql += ' GROUP BY DATE("deliveryDate") ORDER BY DATE("deliveryDate")'
+        sql += ' GROUP BY DATE(d."deliveryDate") ORDER BY date'
         
         result = await db.execute(text(sql), params)
         rows = result.fetchall()
@@ -843,64 +533,46 @@ async def get_stats_by_day(
                 "date": str(row[0]),
                 "totalDeliveries": row[1],
                 "onTimeDeliveries": row[2] or 0,
-                "onTimePct": round((row[2] or 0) / row[1] * 100, 1) if row[1] > 0 else 0,
-                "avgDelayMinutes": round(float(row[3]), 1) if row[3] else 0
+                "onTimePct": round((row[2] or 0) / row[1] * 100, 1) if row[1] > 0 else 0
             }
             for row in rows
         ]
     except Exception as e:
-        logger.error(f"Error in stats/by-day: {e}")
+        logger.error(f"Error in by-day: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# =============================================================================
-# DRILL-DOWN ENDPOINTS
-# =============================================================================
-
 @router.get("/stats/by-box")
-async def get_stats_by_box(
+async def get_by_box(
     route_name: Optional[str] = Query(None),
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
-    delivery_type: Optional[str] = Query(None),
     carrier_id: Optional[int] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Statistiky per box (pro drill-down z trasy)"""
+    """Statistiky per box"""
     try:
         sql = """
         SELECT 
-            d."boxId",
-            b.code,
-            b.name,
-            b.city,
-            COUNT(*) as total,
-            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time,
-            AVG(d."delayMinutes") as avg_delay,
-            MAX(d."delayMinutes") as max_delay
-        FROM "AlzaBoxDelivery" d
-        JOIN "AlzaBox" b ON b.id = d."boxId"
-        WHERE 1=1
+            b.id, b.code, b.name, b.city,
+            COUNT(d.id) as total,
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time
+        FROM "AlzaBox" b
+        JOIN "AlzaBoxDelivery" d ON b.id = d."boxId"
         """
+        
+        if carrier_id:
+            sql += ' JOIN "AlzaBoxAssignment" a ON b.id = a."boxId" AND a."validTo" IS NULL'
+        
+        sql += ' WHERE 1=1'
         params = {}
         
         if route_name:
             sql += ' AND d."routeName" = :route_name'
             params['route_name'] = route_name
-        if start_date:
-            sql += ' AND d."deliveryDate" >= :start_date'
-            params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
-        if end_date:
-            sql += ' AND d."deliveryDate" <= :end_date'
-            params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        if delivery_type:
-            sql += ' AND d."deliveryType" = :delivery_type'
-            params['delivery_type'] = delivery_type
         if carrier_id:
-            sql += ' AND d."carrierId" = :carrier_id'
+            sql += ' AND a."carrierId" = :carrier_id'
             params['carrier_id'] = carrier_id
         
-        sql += ' GROUP BY d."boxId", b.code, b.name, b.city ORDER BY on_time ASC, total DESC'
+        sql += ' GROUP BY b.id, b.code, b.name, b.city ORDER BY b.code'
         
         result = await db.execute(text(sql), params)
         rows = result.fetchall()
@@ -913,159 +585,65 @@ async def get_stats_by_box(
                 "city": row[3],
                 "totalDeliveries": row[4],
                 "onTimeDeliveries": row[5] or 0,
-                "onTimePct": round((row[5] or 0) / row[4] * 100, 1) if row[4] > 0 else 0,
-                "avgDelayMinutes": round(float(row[6]), 1) if row[6] else 0,
-                "maxDelayMinutes": row[7] or 0
+                "onTimePct": round((row[5] or 0) / row[4] * 100, 1) if row[4] > 0 else 0
             }
             for row in rows
         ]
     except Exception as e:
-        logger.error(f"Error in stats/by-box: {e}")
+        logger.error(f"Error in by-box: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/box/{box_id}/detail")
-async def get_box_detail(
-    box_id: int,
-    start_date: Optional[str] = Query(None),
-    end_date: Optional[str] = Query(None),
-    delivery_type: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db)
-):
-    """Detail boxu s historií doručení"""
+async def get_box_detail(box_id: int, db: AsyncSession = Depends(get_db)):
+    """Detail boxu"""
     try:
-        # Info o boxu
-        box_sql = """
-        SELECT 
-            b.id, b.code, b.name, b.city, b.region, b.country,
-            b."gpsLat", b."gpsLon", b."sourceWarehouse",
-            a."carrierId", c.name as carrier_name, a."routeGroup", a."depotName"
-        FROM "AlzaBox" b
-        LEFT JOIN "AlzaBoxAssignment" a ON a."boxId" = b.id
-        LEFT JOIN "Carrier" c ON c.id = a."carrierId"
-        WHERE b.id = :box_id
-        ORDER BY a."validFrom" DESC
-        LIMIT 1
-        """
-        result = await db.execute(text(box_sql), {"box_id": box_id})
-        box_row = result.fetchone()
+        # Box info
+        result = await db.execute(text(
+            'SELECT id, code, name, city, region FROM "AlzaBox" WHERE id = :id'
+        ), {"id": box_id})
+        box = result.fetchone()
         
-        if not box_row:
+        if not box:
             raise HTTPException(status_code=404, detail="Box nenalezen")
         
-        # Statistiky
-        stats_sql = """
-        SELECT 
-            COUNT(*) as total,
-            SUM(CASE WHEN "onTime" = true THEN 1 ELSE 0 END) as on_time,
-            AVG("delayMinutes") as avg_delay
-        FROM "AlzaBoxDelivery"
-        WHERE "boxId" = :box_id
-        """
-        params = {"box_id": box_id}
+        # Dopravce
+        result = await db.execute(text("""
+            SELECT c.id, c.name FROM "Carrier" c
+            JOIN "AlzaBoxAssignment" a ON c.id = a."carrierId"
+            WHERE a."boxId" = :id AND a."validTo" IS NULL LIMIT 1
+        """), {"id": box_id})
+        carrier = result.fetchone()
         
-        if start_date:
-            stats_sql += ' AND "deliveryDate" >= :start_date'
-            params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
-        if end_date:
-            stats_sql += ' AND "deliveryDate" <= :end_date'
-            params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
-        if delivery_type:
-            stats_sql += ' AND "deliveryType" = :delivery_type'
-            params['delivery_type'] = delivery_type
+        # Dojezdy
+        result = await db.execute(text("""
+            SELECT "deliveryDate", "routeName", "plannedTime", "actualTime", "delayMinutes", "onTime"
+            FROM "AlzaBoxDelivery" WHERE "boxId" = :id
+            ORDER BY "deliveryDate" DESC LIMIT 50
+        """), {"id": box_id})
+        deliveries = result.fetchall()
         
-        result = await db.execute(text(stats_sql), params)
-        stats_row = result.fetchone()
-        
-        # Historie doručení
-        history_sql = """
-        SELECT 
-            "deliveryDate", "deliveryType", "routeName",
-            "plannedTime", "actualTime", "delayMinutes", "onTime"
-        FROM "AlzaBoxDelivery"
-        WHERE "boxId" = :box_id
-        """
-        
-        if start_date:
-            history_sql += ' AND "deliveryDate" >= :start_date'
-        if end_date:
-            history_sql += ' AND "deliveryDate" <= :end_date'
-        if delivery_type:
-            history_sql += ' AND "deliveryType" = :delivery_type'
-        
-        history_sql += ' ORDER BY "deliveryDate" DESC LIMIT 100'
-        
-        result = await db.execute(text(history_sql), params)
-        history_rows = result.fetchall()
-        
-        # Trend per den (pro graf)
-        trend_sql = """
-        SELECT 
-            DATE("deliveryDate") as date,
-            AVG("delayMinutes") as avg_delay,
-            COUNT(*) as total,
-            SUM(CASE WHEN "onTime" = true THEN 1 ELSE 0 END) as on_time
-        FROM "AlzaBoxDelivery"
-        WHERE "boxId" = :box_id
-        """
-        
-        if start_date:
-            trend_sql += ' AND "deliveryDate" >= :start_date'
-        if end_date:
-            trend_sql += ' AND "deliveryDate" <= :end_date'
-        if delivery_type:
-            trend_sql += ' AND "deliveryType" = :delivery_type'
-        
-        trend_sql += ' GROUP BY DATE("deliveryDate") ORDER BY DATE("deliveryDate")'
-        
-        result = await db.execute(text(trend_sql), params)
-        trend_rows = result.fetchall()
-        
-        total = stats_row[0] or 0
-        on_time = stats_row[1] or 0
+        total = len(deliveries)
+        on_time = sum(1 for d in deliveries if d[5])
         
         return {
-            "box": {
-                "id": box_row[0],
-                "code": box_row[1],
-                "name": box_row[2],
-                "city": box_row[3],
-                "region": box_row[4],
-                "country": box_row[5],
-                "gpsLat": float(box_row[6]) if box_row[6] else None,
-                "gpsLon": float(box_row[7]) if box_row[7] else None,
-                "sourceWarehouse": box_row[8],
-                "carrierId": box_row[9],
-                "carrierName": box_row[10],
-                "routeGroup": box_row[11],
-                "depotName": box_row[12]
-            },
+            "box": {"id": box[0], "code": box[1], "name": box[2], "city": box[3], "region": box[4]},
+            "carrier": {"id": carrier[0], "name": carrier[1]} if carrier else None,
             "stats": {
                 "totalDeliveries": total,
                 "onTimeDeliveries": on_time,
-                "onTimePct": round(on_time / total * 100, 1) if total > 0 else 0,
-                "avgDelayMinutes": round(float(stats_row[2]), 1) if stats_row[2] else 0
+                "onTimePct": round(on_time / total * 100, 1) if total > 0 else 0
             },
-            "history": [
+            "deliveries": [
                 {
-                    "date": str(row[0].date()) if row[0] else None,
-                    "deliveryType": row[1],
-                    "routeName": row[2],
-                    "plannedTime": row[3],  # String "HH:MM"
-                    "actualTime": row[4].strftime("%H:%M") if row[4] else None,
-                    "delayMinutes": row[5],
-                    "onTime": row[6]
+                    "date": str(d[0].date()) if d[0] else None,
+                    "routeName": d[1],
+                    "plannedTime": d[2],
+                    "actualTime": str(d[3].time()) if d[3] else None,
+                    "delayMinutes": d[4],
+                    "onTime": d[5]
                 }
-                for row in history_rows
-            ],
-            "trend": [
-                {
-                    "date": str(row[0]),
-                    "avgDelayMinutes": round(float(row[1]), 1) if row[1] else 0,
-                    "totalDeliveries": row[2],
-                    "onTimePct": round((row[3] or 0) / row[2] * 100, 1) if row[2] > 0 else 0
-                }
-                for row in trend_rows
+                for d in deliveries
             ]
         }
     except HTTPException:
@@ -1075,154 +653,27 @@ async def get_box_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/carriers")
-async def get_alzabox_carriers(db: AsyncSession = Depends(get_db)):
-    """Seznam dopravců s AlzaBoxy a jejich statistikami"""
-    try:
-        sql = """
-        SELECT 
-            c.id,
-            c.name,
-            COUNT(DISTINCT d."boxId") as box_count,
-            COUNT(d.id) as delivery_count,
-            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time_count
-        FROM "Carrier" c
-        JOIN "AlzaBoxDelivery" d ON d."carrierId" = c.id
-        GROUP BY c.id, c.name
-        ORDER BY delivery_count DESC
-        """
-        result = await db.execute(text(sql))
-        rows = result.fetchall()
-        
-        return [
-            {
-                "id": row[0],
-                "name": row[1],
-                "boxCount": row[2],
-                "deliveryCount": row[3],
-                "onTimePct": round((row[4] or 0) / row[3] * 100, 1) if row[3] > 0 else 0
-            }
-            for row in rows
-        ]
-    except Exception as e:
-        logger.error(f"Error in carriers: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/diagnostics/carrier-mapping")
-async def get_carrier_mapping_diagnostics(db: AsyncSession = Depends(get_db)):
-    """
-    Diagnostika mapování názvů dopravců.
-    Porovnává názvy v tabulce Carrier s názvy v RoutePlanRoute.
-    """
-    try:
-        # Načti dopravce z Carrier tabulky
-        result = await db.execute(text('SELECT id, name FROM "Carrier"'))
-        carriers = {row[1]: row[0] for row in result.fetchall()}
-        carriers_normalized = {normalize_carrier_name(name): name for name in carriers.keys()}
-        
-        # Načti unikátní názvy dopravců z RoutePlanRoute
-        result = await db.execute(text('SELECT DISTINCT "carrierName" FROM "RoutePlanRoute" WHERE "carrierName" IS NOT NULL'))
-        route_plan_carriers = [row[0] for row in result.fetchall()]
-        
-        # Porovnej
-        matched = []
-        unmatched = []
-        
-        for rp_carrier in route_plan_carriers:
-            normalized = normalize_carrier_name(rp_carrier)
-            if normalized in carriers_normalized:
-                matched.append({
-                    "routePlanName": rp_carrier,
-                    "carrierName": carriers_normalized[normalized],
-                    "normalizedAs": normalized,
-                    "carrierId": carriers[carriers_normalized[normalized]]
-                })
-            else:
-                unmatched.append({
-                    "routePlanName": rp_carrier,
-                    "normalizedAs": normalized,
-                    "suggestion": "Přidej dopravce do Carrier tabulky nebo uprav název"
-                })
-        
-        return {
-            "totalCarriers": len(carriers),
-            "totalRoutePlanCarriers": len(route_plan_carriers),
-            "matched": matched,
-            "unmatched": unmatched,
-            "hasIssues": len(unmatched) > 0
-        }
-    except Exception as e:
-        logger.error(f"Error in carrier mapping diagnostics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# =============================================================================
-# METADATA ENDPOINTS
-# =============================================================================
-
 @router.get("/boxes")
-async def get_alzaboxes(
-    country: Optional[str] = None,
-    region: Optional[str] = None,
-    carrier_id: Optional[int] = None,
+async def get_boxes(
     limit: int = Query(100, le=5000),
     offset: int = 0,
     db: AsyncSession = Depends(get_db)
 ):
-    """Seznam AlzaBoxů"""
+    """Seznam boxů"""
     try:
-        base_where = 'WHERE b."isActive" = true'
-        params = {}
-        
-        if country:
-            base_where += ' AND b.country = :country'
-            params['country'] = country
-        if region:
-            base_where += ' AND b.region = :region'
-            params['region'] = region
-        if carrier_id:
-            base_where += ' AND a."carrierId" = :carrier_id'
-            params['carrier_id'] = carrier_id
-        
-        # Count
-        count_sql = f"""
-        SELECT COUNT(DISTINCT b.id) 
-        FROM "AlzaBox" b
-        LEFT JOIN "AlzaBoxAssignment" a ON a."boxId" = b.id
-        {base_where}
-        """
-        result = await db.execute(text(count_sql), params)
+        result = await db.execute(text('SELECT COUNT(*) FROM "AlzaBox"'))
         total = result.scalar()
         
-        # Data
-        sql = f"""
-        SELECT DISTINCT b.id, b.code, b.name, b.country, b.city, b.region, b."gpsLat", b."gpsLon"
-        FROM "AlzaBox" b
-        LEFT JOIN "AlzaBoxAssignment" a ON a."boxId" = b.id
-        {base_where}
-        LIMIT :limit OFFSET :offset
-        """
-        params['limit'] = limit
-        params['offset'] = offset
-        
-        result = await db.execute(text(sql), params)
+        result = await db.execute(text(
+            'SELECT id, code, name, country, city, region FROM "AlzaBox" LIMIT :limit OFFSET :offset'
+        ), {"limit": limit, "offset": offset})
         rows = result.fetchall()
         
         return {
             "total": total,
             "boxes": [
-                {
-                    "id": row[0],
-                    "code": row[1],
-                    "name": row[2],
-                    "country": row[3],
-                    "city": row[4],
-                    "region": row[5],
-                    "gpsLat": float(row[6]) if row[6] else None,
-                    "gpsLon": float(row[7]) if row[7] else None
-                }
-                for row in rows
+                {"id": r[0], "code": r[1], "name": r[2], "country": r[3], "city": r[4], "region": r[5]}
+                for r in rows
             ]
         }
     except Exception as e:
@@ -1230,50 +681,81 @@ async def get_alzaboxes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/countries")
-async def get_countries(db: AsyncSession = Depends(get_db)):
-    """Seznam zemí s počty boxů"""
+@router.get("/routes")
+async def get_routes(carrier_id: Optional[int] = Query(None), db: AsyncSession = Depends(get_db)):
+    """Seznam tras"""
     try:
-        sql = """
-        SELECT country, COUNT(*) as count 
-        FROM "AlzaBox" 
-        WHERE "isActive" = true 
-        GROUP BY country
-        ORDER BY count DESC
-        """
-        result = await db.execute(text(sql))
+        sql = 'SELECT DISTINCT "routeName" FROM "AlzaBoxDelivery" WHERE "routeName" IS NOT NULL'
+        params = {}
+        
+        if carrier_id:
+            sql = """
+            SELECT DISTINCT d."routeName" FROM "AlzaBoxDelivery" d
+            JOIN "AlzaBoxAssignment" a ON d."boxId" = a."boxId" AND a."validTo" IS NULL
+            WHERE d."routeName" IS NOT NULL AND a."carrierId" = :carrier_id
+            """
+            params['carrier_id'] = carrier_id
+        
+        sql += ' ORDER BY "routeName"'
+        
+        result = await db.execute(text(sql), params)
         rows = result.fetchall()
         
-        return [{"country": row[0], "boxCount": row[1]} for row in rows]
+        return [{"routeName": r[0]} for r in rows]
+    except Exception as e:
+        logger.error(f"Error in routes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/carriers")
+async def get_carriers(db: AsyncSession = Depends(get_db)):
+    """Seznam dopravců s AlzaBox přiřazeními"""
+    try:
+        result = await db.execute(text("""
+            SELECT DISTINCT c.id, c.name FROM "Carrier" c
+            JOIN "AlzaBoxAssignment" a ON c.id = a."carrierId"
+            WHERE a."validTo" IS NULL ORDER BY c.name
+        """))
+        rows = result.fetchall()
+        return [{"id": r[0], "name": r[1]} for r in rows]
+    except Exception as e:
+        logger.error(f"Error in carriers: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/countries")
+async def get_countries(db: AsyncSession = Depends(get_db)):
+    """Seznam zemí"""
+    try:
+        result = await db.execute(text(
+            'SELECT country, COUNT(*) FROM "AlzaBox" GROUP BY country ORDER BY COUNT(*) DESC'
+        ))
+        rows = result.fetchall()
+        return [{"country": r[0], "boxCount": r[1]} for r in rows]
     except Exception as e:
         logger.error(f"Error in countries: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/routes")
-async def get_routes(
-    carrier_id: Optional[int] = Query(None),
-    db: AsyncSession = Depends(get_db)
-):
-    """Seznam tras"""
+@router.get("/diagnostics/carrier-mapping")
+async def get_diagnostics(db: AsyncSession = Depends(get_db)):
+    """Diagnostika mapování"""
     try:
-        sql = """
-        SELECT "routeName", COUNT(DISTINCT "boxId") as box_count
-        FROM "AlzaBoxDelivery"
-        WHERE "routeName" IS NOT NULL
-        """
-        params = {}
-        
-        if carrier_id:
-            sql += ' AND "carrierId" = :carrier_id'
-            params['carrier_id'] = carrier_id
-        
-        sql += ' GROUP BY "routeName" ORDER BY "routeName"'
-        
-        result = await db.execute(text(sql), params)
+        result = await db.execute(text("""
+            SELECT c.name, COUNT(a.id), COUNT(DISTINCT a."boxId")
+            FROM "AlzaBoxAssignment" a
+            LEFT JOIN "Carrier" c ON a."carrierId" = c.id
+            WHERE a."validTo" IS NULL
+            GROUP BY c.name ORDER BY COUNT(a.id) DESC
+        """))
         rows = result.fetchall()
         
-        return [{"routeName": row[0], "boxCount": row[1]} for row in rows]
+        return {
+            "assignments": [
+                {"carrierName": r[0] or "Nepřiřazeno", "count": r[1], "uniqueBoxes": r[2]}
+                for r in rows
+            ]
+        }
     except Exception as e:
-        logger.error(f"Error in routes: {e}")
+        logger.error(f"Error in diagnostics: {e}")
         raise HTTPException(status_code=500, detail=str(e))

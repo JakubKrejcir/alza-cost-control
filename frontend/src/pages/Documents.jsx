@@ -223,42 +223,42 @@ export default function Documents() {
   // AlzaBox upload mutations - GLOBÁLNÍ (bez dopravce)
   const uploadAlzaboxLocationsMutation = useMutation({
     mutationFn: (file) => alzabox.importLocations(file),
-    onSuccess: (data, variables) => {
+    onSuccess: (data, file) => {
       setUploadResults(prev => [...prev, { 
         type: 'alzabox-locations', 
-        fileName: variables.name, 
+        fileName: file?.name || 'soubor', 
         success: true,
         message: `Nahráno ${data.imported || 0} boxů`
       }])
       queryClient.invalidateQueries(['alzabox-summary-global'])
     },
-    onError: (error, variables) => {
+    onError: (error, file) => {
       setUploadResults(prev => [...prev, { 
         type: 'alzabox-locations', 
-        fileName: variables.name, 
+        fileName: file?.name || 'soubor', 
         success: false,
-        message: error.response?.data?.detail || 'Chyba při nahrávání'
+        message: error.response?.data?.detail || error.message || 'Chyba při nahrávání'
       }])
     }
   })
 
   const uploadAlzaboxDeliveriesMutation = useMutation({
     mutationFn: (file) => alzabox.importDeliveries(file),
-    onSuccess: (data, variables) => {
+    onSuccess: (data, file) => {
       setUploadResults(prev => [...prev, { 
         type: 'alzabox-deliveries', 
-        fileName: variables.name, 
+        fileName: file?.name || 'soubor', 
         success: true,
         message: `Nahráno ${data.imported || 0} dojezdů${data.unmatched_carriers?.length ? ` (${data.unmatched_carriers.length} nenamapovaných dopravců)` : ''}`
       }])
       queryClient.invalidateQueries(['alzabox-summary-global'])
     },
-    onError: (error, variables) => {
+    onError: (error, file) => {
       setUploadResults(prev => [...prev, { 
         type: 'alzabox-deliveries', 
-        fileName: variables.name, 
+        fileName: file?.name || 'soubor', 
         success: false,
-        message: error.response?.data?.detail || 'Chyba při nahrávání'
+        message: error.response?.data?.detail || error.message || 'Chyba při nahrávání'
       }])
     }
   })
