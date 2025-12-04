@@ -13,7 +13,7 @@ import logging
 
 from app.database import get_db
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Heslo z environment variable
@@ -112,9 +112,9 @@ async def get_login_logs(
     """Získání logů přihlášení."""
     
     result = await db.execute(text('''
-        SELECT id, ip_address, user_agent, success, created_at
+        SELECT id, email, "loginAt", "ipAddress", "userAgent"
         FROM "LoginLog"
-        ORDER BY created_at DESC
+        ORDER BY "loginAt" DESC
         LIMIT :limit
     '''), {"limit": limit})
     
@@ -122,10 +122,10 @@ async def get_login_logs(
     for row in result.fetchall():
         logs.append({
             "id": row[0],
-            "ip_address": row[1],
-            "user_agent": row[2][:50] if row[2] else None,  # Zkrátit UA
-            "success": row[3],
-            "created_at": row[4].isoformat() if row[4] else None
+            "email": row[1],
+            "login_at": row[2].isoformat() if row[2] else None,
+            "ip_address": row[3],
+            "user_agent": row[4][:50] if row[4] else None,
         })
     
     return {"logs": logs}
@@ -135,13 +135,13 @@ async def log_login_attempt(db: AsyncSession, ip: str, user_agent: str, success:
     """Uložení pokusu o přihlášení do DB."""
     try:
         await db.execute(text('''
-            INSERT INTO "LoginLog" (ip_address, user_agent, success, created_at)
-            VALUES (:ip, :ua, :success, :created_at)
+            INSERT INTO "LoginLog" (email, "loginAt", "ipAddress", "userAgent")
+            VALUES (:email, :login_at, :ip, :ua)
         '''), {
+            "email": "app_user" if success else "failed_attempt",
+            "login_at": datetime.utcnow(),
             "ip": ip,
             "ua": user_agent[:255] if user_agent else None,
-            "success": success,
-            "created_at": datetime.utcnow()
         })
         await db.commit()
     except Exception as e:

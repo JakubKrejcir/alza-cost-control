@@ -1,9 +1,8 @@
 """
 API Key Authentication Middleware
-Přidej tento soubor do backend/app/middleware.py
 """
 import os
-from fastapi import Request, HTTPException
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -15,6 +14,9 @@ PUBLIC_PATHS = [
     "/docs",
     "/redoc",
     "/openapi.json",
+    "/api/auth/login",
+    "/api/auth/verify",
+    "/api/auth/logout",
 ]
 
 
