@@ -140,6 +140,26 @@ function DepotCard({ depot, priceData, color }) {
   )
 }
 
+// Pomocná funkce pro extrakci depa z route_type
+function extractDepot(routeType) {
+  if (!routeType) return null
+  
+  // Vzory jako "DIRECT Praha", "DIRECT Vratimov", "DPO Nový Bydžov"
+  const patterns = [
+    /DIRECT\s+(\w+)/i,
+    /DPO\s+(\w+)/i,
+    /SD\s+(\w+)/i,
+    /(\w+)\s*-/,
+  ]
+  
+  for (const pattern of patterns) {
+    const match = routeType.match(pattern)
+    if (match) return match[1]
+  }
+  
+  return routeType
+}
+
 export default function Prices() {
   // Použij globální CarrierContext (dopravce je vybrán v hlavičce)
   const { selectedCarrierId, carrierList } = useCarrier()
@@ -176,11 +196,11 @@ export default function Prices() {
     })
     
     priceList.forEach(priceConfig => {
-      const dodatek = contractMap[priceConfig.contract_id || priceConfig.contractId] || '?'
+      const dodatek = contractMap[priceConfig.contract_id || priceConfig.contractId] || '?';
       
       // FIX rates
-      (priceConfig.fix_rates || priceConfig.fixRates || []).forEach(rate => {
-        // Určení depa z route_type nebo defaultně
+      const fixRatesData = priceConfig.fix_rates || priceConfig.fixRates || [];
+      fixRatesData.forEach(rate => {
         const depot = extractDepot(rate.route_type || rate.routeType) || 'Ostatní'
         if (!result[depot]) result[depot] = { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [] }
         
@@ -194,7 +214,8 @@ export default function Prices() {
       })
       
       // KM rates
-      (priceConfig.km_rates || priceConfig.kmRates || []).forEach(rate => {
+      const kmRatesData = priceConfig.km_rates || priceConfig.kmRates || [];
+      kmRatesData.forEach(rate => {
         const depot = rate.depot || rate.area || 'Ostatní'
         if (!result[depot]) result[depot] = { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [] }
         
@@ -205,7 +226,8 @@ export default function Prices() {
       })
       
       // Linehaul rates
-      (priceConfig.linehaul_rates || priceConfig.linehaulRates || []).forEach(rate => {
+      const linehaulRatesData = priceConfig.linehaul_rates || priceConfig.linehaulRates || [];
+      linehaulRatesData.forEach(rate => {
         const depot = rate.to_code || rate.toCode || rate.to_depot || 'Ostatní'
         if (!result[depot]) result[depot] = { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [] }
         
@@ -219,7 +241,8 @@ export default function Prices() {
       })
       
       // Depo rates
-      (priceConfig.depo_rates || priceConfig.depoRates || []).forEach(rate => {
+      const depoRatesData = priceConfig.depo_rates || priceConfig.depoRates || [];
+      depoRatesData.forEach(rate => {
         const depot = rate.depot || rate.depot_name || rate.depotName || 'Ostatní'
         if (!result[depot]) result[depot] = { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [] }
         
@@ -234,26 +257,6 @@ export default function Prices() {
     
     return result
   }, [priceList, contractList])
-  
-  // Pomocná funkce pro extrakci depa z route_type
-  function extractDepot(routeType) {
-    if (!routeType) return null
-    
-    // Vzory jako "DIRECT Praha", "DIRECT Vratimov", "DPO Nový Bydžov"
-    const patterns = [
-      /DIRECT\s+(\w+)/i,
-      /DPO\s+(\w+)/i,
-      /SD\s+(\w+)/i,
-      /(\w+)\s*-/,
-    ]
-    
-    for (const pattern of patterns) {
-      const match = routeType.match(pattern)
-      if (match) return match[1]
-    }
-    
-    return routeType
-  }
   
   // Barvy pro depa
   const depotColors = {
