@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { cs } from 'date-fns/locale'
@@ -83,23 +83,42 @@ export default function Prices() {
   // Načti ceníky pro vybraného dopravce
   const { data: priceList, isLoading: pricesLoading } = useQuery({
     queryKey: ['prices', selectedCarrierId],
-    queryFn: () => prices.getAll({ carrier_id: selectedCarrierId }),
+    queryFn: () => {
+      console.log('Fetching prices for carrier:', selectedCarrierId)
+      return prices.getAll({ carrier_id: selectedCarrierId })
+    },
     enabled: !!selectedCarrierId
   })
 
   // Načti smlouvy pro vybraného dopravce
   const { data: contractList } = useQuery({
     queryKey: ['contracts', selectedCarrierId],
-    queryFn: () => contracts.getAll(selectedCarrierId),
+    queryFn: () => {
+      console.log('Fetching contracts for carrier:', selectedCarrierId)
+      return contracts.getAll(selectedCarrierId)
+    },
     enabled: !!selectedCarrierId
   })
 
   // Auto-select první dopravce
-  if (carrierList?.length > 0 && !selectedCarrierId) {
-    setSelectedCarrierId(carrierList[0].id)
-  }
+  useEffect(() => {
+    if (carrierList?.length > 0 && !selectedCarrierId) {
+      console.log('Auto-selecting first carrier:', carrierList[0].id, carrierList[0].name)
+      setSelectedCarrierId(carrierList[0].id)
+    }
+  }, [carrierList, selectedCarrierId])
 
   const selectedCarrier = carrierList?.find(c => c.id === selectedCarrierId)
+
+  // Debug log
+  useEffect(() => {
+    console.log('=== Prices Debug ===')
+    console.log('Selected carrier ID:', selectedCarrierId)
+    console.log('Selected carrier name:', selectedCarrier?.name)
+    console.log('Price configs count:', priceList?.length)
+    console.log('Price configs:', priceList?.map(p => ({ id: p.id, carrierId: p.carrierId, type: p.type })))
+    console.log('Contracts count:', contractList?.length)
+  }, [selectedCarrierId, selectedCarrier, priceList, contractList])
   
   // Seskup ceníky podle typu
   const pricesByType = priceList?.reduce((acc, config) => {
