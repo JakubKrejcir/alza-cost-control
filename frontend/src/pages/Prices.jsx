@@ -46,6 +46,208 @@ function getServiceConfig(type) {
   return SERVICE_TYPE_CONFIG[type] || SERVICE_TYPE_CONFIG['general']
 }
 
+// Detekce depa z názvu trasy nebo sazby
+function detectDepot(rate, rateType = 'other') {
+  const text = `${rate.routeType || ''} ${rate.depoName || ''} ${rate.fromCode || ''} ${rate.toCode || ''} ${rate.description || ''}`.toLowerCase()
+  
+  // FIX sazby - podle routeType
+  if (rateType === 'fix') {
+    if (text.includes('praha')) return 'Praha'
+    if (text.includes('vratimov')) return 'Vratimov'
+  }
+  
+  // KM sazby - "standard" platí pro všechna depa, vrátíme null pro speciální handling
+  if (rateType === 'km' && (text.includes('standard') || !text.trim())) {
+    return null // Sdílená sazba
+  }
+  
+  // DEPO sazby
+  if (rateType === 'depo') {
+    if (text.includes('sklad') || text.includes('all_in') || text.includes('all in') || text.includes('skladník') || text.includes('brigádník')) return 'Nový Bydžov'
+    if (text.includes('vratimov') || text.includes('hourly') || text.includes('hodin')) return 'Vratimov'
+  }
+  
+  // Linehaul - podle cílového depa
+  if (rateType === 'linehaul') {
+    if (text.includes('nový bydžov') || text.includes('novy_bydzov') || text.includes('bydžov') || text.includes('lcu')) return 'Nový Bydžov'
+    if (text.includes('vratimov')) return 'Vratimov'
+  }
+  
+  // Bonus sazby - globální pro Nový Bydžov (tam jsou definovány)
+  if (rateType === 'bonus') {
+    return 'Nový Bydžov'
+  }
+  
+  // Obecná detekce
+  if (text.includes('praha') || text.includes('direct_praha')) return 'Praha'
+  if (text.includes('nový bydžov') || text.includes('novy_bydzov') || text.includes('bydžov')) return 'Nový Bydžov'
+  if (text.includes('vratimov') || text.includes('czlc4') || text.includes('cztc1')) return 'Vratimov'
+  
+  return null // Neznámé
+}
+
+// Konfigurace dep
+const DEPOT_CONFIG = {
+  'Praha': { color: '#ef4444', icon: '🏙️' },
+  'Vratimov': { color: '#3b82f6', icon: '🏭' },
+  'Nový Bydžov': { color: '#10b981', icon: '📦' },
+  'Ostatní': { color: '#6b7280', icon: '📍' },
+}
+
+function DepotSection({ depot, fixRates, kmRates, depoRates, linehaulRates, bonusRates }) {
+  const depotConfig = DEPOT_CONFIG[depot] || DEPOT_CONFIG['Ostatní']
+  
+  const hasRates = fixRates.length > 0 || kmRates.length > 0 || 
+                   depoRates.length > 0 || linehaulRates.length > 0 || bonusRates.length > 0
+  
+  if (!hasRates) return null
+
+  return (
+    <div className="border rounded-lg overflow-hidden" style={{ borderColor: depotConfig.color + '40' }}>
+      {/* Depot header */}
+      <div 
+        className="px-4 py-2 flex items-center gap-2"
+        style={{ backgroundColor: depotConfig.color + '10' }}
+      >
+        <span className="text-lg">{depotConfig.icon}</span>
+        <span className="font-semibold" style={{ color: depotConfig.color }}>
+          Depo {depot}
+        </span>
+      </div>
+      
+      {/* Rates */}
+      <div className="p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* FIX sazby */}
+          {fixRates.length > 0 && (
+            <div className="space-y-2">
+              <h5 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#8b5cf6' }}>
+                <DollarSign size={14} />
+                FIX sazby
+              </h5>
+              {fixRates.map((rate, idx) => (
+                <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>
+                    {rate.routeType?.replace('DIRECT_', '').replace('_', ' ') || 'Standardní'}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-semibold" style={{ color: '#8b5cf6' }}>{formatCZK(rate.rate)}</span>
+                    {rate.contractLabel && (
+                      <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>
+                        {rate.contractLabel}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* KM sazby */}
+          {kmRates.length > 0 && (
+            <div className="space-y-2">
+              <h5 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#10b981' }}>
+                <MapPin size={14} />
+                Km sazby
+              </h5>
+              {kmRates.map((rate, idx) => (
+                <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>{rate.routeType || 'Standardní'}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-semibold" style={{ color: '#10b981' }}>{rate.rate} Kč/km</span>
+                    {rate.contractLabel && (
+                      <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>
+                        {rate.contractLabel}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* DEPO sazby */}
+          {depoRates.length > 0 && (
+            <div className="space-y-2">
+              <h5 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#0891b2' }}>
+                <Warehouse size={14} />
+                Sklad / DEPO
+              </h5>
+              {depoRates.map((rate, idx) => (
+                <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>
+                    {rate.depoName?.replace(/_/g, ' ')}
+                    <span className="text-xs ml-1">({rate.rateType === 'hourly' ? '/hod' : rate.rateType === 'monthly' ? '/měs' : '/' + rate.rateType})</span>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-semibold" style={{ color: '#0891b2' }}>{formatCZK(rate.rate)}</span>
+                    {rate.contractLabel && (
+                      <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>
+                        {rate.contractLabel}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Linehaul sazby */}
+          {linehaulRates.length > 0 && (
+            <div className="space-y-2">
+              <h5 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#ef4444' }}>
+                <Truck size={14} />
+                Linehaul
+              </h5>
+              {linehaulRates.map((rate, idx) => (
+                <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>
+                    {rate.fromCode} → {rate.toCode}
+                    <span className="text-xs ml-1">({rate.vehicleType})</span>
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-semibold" style={{ color: '#ef4444' }}>{formatCZK(rate.rate)}</span>
+                    {rate.contractLabel && (
+                      <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>
+                        {rate.contractLabel}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Bonus sazby */}
+          {bonusRates.length > 0 && (
+            <div className="space-y-2">
+              <h5 className="text-xs font-semibold flex items-center gap-1" style={{ color: '#f59e0b' }}>
+                <Award size={14} />
+                Bonusy
+              </h5>
+              {bonusRates.map((rate, idx) => (
+                <div key={idx} className="flex justify-between items-center p-2 rounded text-sm" style={{ backgroundColor: 'var(--color-bg)' }}>
+                  <span style={{ color: 'var(--color-text-muted)' }}>
+                    {rate.qualityMin >= 98 ? '≥' : ''}{rate.qualityMin}% - {rate.qualityMax}%
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-semibold" style={{ color: '#f59e0b' }}>+{formatCZK(rate.bonusAmount)}</span>
+                    {rate.contractLabel && (
+                      <span className="text-xs px-1 rounded" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>
+                        {rate.contractLabel}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ServiceCard({ type, configs, contractList }) {
   const serviceConfig = getServiceConfig(type)
   const Icon = serviceConfig.icon
@@ -78,11 +280,51 @@ function ServiceCard({ type, configs, contractList }) {
     })
   })
 
+  // Seskupit sazby podle depa
+  const depots = ['Praha', 'Vratimov', 'Nový Bydžov']
+  const ratesByDepot = {}
+  
+  // Najdi které depo má FIX sazby (pro sdílení KM sazeb)
+  const depotsWithFixRates = new Set(
+    allFixRates.map(r => detectDepot(r, 'fix')).filter(Boolean)
+  )
+  
+  depots.forEach(depot => {
+    // FIX sazby - přesné přiřazení
+    const fixRates = allFixRates.filter(r => detectDepot(r, 'fix') === depot)
+    
+    // KM sazby - sdílené mezi depy které mají FIX sazby
+    let kmRates = allKmRates.filter(r => detectDepot(r, 'km') === depot)
+    // Pokud je KM sazba sdílená (null), přidej ji do dep s FIX sazbami
+    if (depotsWithFixRates.has(depot)) {
+      const sharedKmRates = allKmRates.filter(r => detectDepot(r, 'km') === null)
+      kmRates = [...kmRates, ...sharedKmRates]
+    }
+    
+    // DEPO sazby
+    const depoRates = allDepoRates.filter(r => detectDepot(r, 'depo') === depot)
+    
+    // Linehaul sazby
+    const linehaulRates = allLinehaulRates.filter(r => detectDepot(r, 'linehaul') === depot)
+    
+    // Bonus sazby
+    const bonusRates = allBonusRates.filter(r => detectDepot(r, 'bonus') === depot)
+    
+    ratesByDepot[depot] = { fixRates, kmRates, depoRates, linehaulRates, bonusRates }
+  })
+
   const hasAnyRates = allFixRates.length > 0 || allKmRates.length > 0 || 
                       allDepoRates.length > 0 || allLinehaulRates.length > 0 || 
                       allBonusRates.length > 0
 
   if (!hasAnyRates) return null
+  
+  // Najdi depa s nějakými sazbami
+  const activeDepots = depots.filter(depot => {
+    const d = ratesByDepot[depot]
+    return d.fixRates.length > 0 || d.kmRates.length > 0 || d.depoRates.length > 0 || 
+           d.linehaulRates.length > 0 || d.bonusRates.length > 0
+  })
 
   return (
     <div className="card overflow-hidden">
@@ -97,202 +339,29 @@ function ServiceCard({ type, configs, contractList }) {
         >
           <Icon size={22} style={{ color: serviceConfig.color }} />
         </div>
-        <div>
+        <div className="flex-1">
           <h2 className="text-lg font-semibold" style={{ color: serviceConfig.color }}>
             {serviceConfig.label}
           </h2>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {configs.length} {configs.length === 1 ? 'ceník' : 'ceníky'}
+            {activeDepots.length} {activeDepots.length === 1 ? 'depo' : 'depa'} • {configs.length} {configs.length === 1 ? 'ceník' : 'ceníky'}
           </p>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          
-          {/* FIX sazby */}
-          {allFixRates.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2" style={{ color: '#8b5cf6' }}>
-                <DollarSign size={16} />
-                FIX sazby za trasu
-              </h4>
-              <div className="space-y-2">
-                {allFixRates.map((rate, idx) => (
-                  <div 
-                    key={idx}
-                    className="flex justify-between items-center p-3 rounded-lg"
-                    style={{ backgroundColor: 'var(--color-bg)' }}
-                  >
-                    <span style={{ color: 'var(--color-text-muted)' }}>
-                      {rate.routeType?.replace('DIRECT_', 'Direct ') || 'Standardní'}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold" style={{ color: '#8b5cf6' }}>
-                        {formatCZK(rate.rate)}
-                      </span>
-                      {rate.contractLabel && (
-                        <span 
-                          className="text-xs px-1.5 py-0.5 rounded"
-                          style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}
-                        >
-                          {rate.contractLabel}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* KM sazby */}
-          {allKmRates.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2" style={{ color: '#10b981' }}>
-                <MapPin size={16} />
-                Kilometrové sazby
-              </h4>
-              <div className="space-y-2">
-                {allKmRates.map((rate, idx) => (
-                  <div 
-                    key={idx}
-                    className="flex justify-between items-center p-3 rounded-lg"
-                    style={{ backgroundColor: 'var(--color-bg)' }}
-                  >
-                    <span style={{ color: 'var(--color-text-muted)' }}>
-                      {rate.routeType || 'Standardní'}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold" style={{ color: '#10b981' }}>
-                        {rate.rate} Kč/km
-                      </span>
-                      {rate.contractLabel && (
-                        <span 
-                          className="text-xs px-1.5 py-0.5 rounded"
-                          style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}
-                        >
-                          {rate.contractLabel}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* DEPO sazby */}
-          {allDepoRates.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2" style={{ color: '#0891b2' }}>
-                <Warehouse size={16} />
-                DEPO / Sklad
-              </h4>
-              <div className="space-y-2">
-                {allDepoRates.map((rate, idx) => (
-                  <div 
-                    key={idx}
-                    className="flex justify-between items-center p-3 rounded-lg"
-                    style={{ backgroundColor: 'var(--color-bg)' }}
-                  >
-                    <span style={{ color: 'var(--color-text-muted)' }}>
-                      {rate.depoName?.replace('_', ' ')} 
-                      <span className="text-xs ml-1">({rate.rateType === 'hourly' ? 'hod' : rate.rateType === 'monthly' ? 'měs' : rate.rateType})</span>
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold" style={{ color: '#0891b2' }}>
-                        {formatCZK(rate.rate)}
-                      </span>
-                      {rate.contractLabel && (
-                        <span 
-                          className="text-xs px-1.5 py-0.5 rounded"
-                          style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}
-                        >
-                          {rate.contractLabel}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Linehaul sazby */}
-          {allLinehaulRates.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2" style={{ color: '#ef4444' }}>
-                <Truck size={16} />
-                Linehaul
-              </h4>
-              <div className="space-y-2">
-                {allLinehaulRates.map((rate, idx) => (
-                  <div 
-                    key={idx}
-                    className="flex justify-between items-center p-3 rounded-lg"
-                    style={{ backgroundColor: 'var(--color-bg)' }}
-                  >
-                    <span style={{ color: 'var(--color-text-muted)' }}>
-                      {rate.fromCode} → {rate.toCode}
-                      <span className="text-xs ml-1">({rate.vehicleType})</span>
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold" style={{ color: '#ef4444' }}>
-                        {formatCZK(rate.rate)}
-                      </span>
-                      {rate.contractLabel && (
-                        <span 
-                          className="text-xs px-1.5 py-0.5 rounded"
-                          style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}
-                        >
-                          {rate.contractLabel}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Bonus sazby */}
-          {allBonusRates.length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-sm font-semibold flex items-center gap-2" style={{ color: '#f59e0b' }}>
-                <Award size={16} />
-                Bonusy za kvalitu
-              </h4>
-              <div className="space-y-2">
-                {allBonusRates.map((rate, idx) => (
-                  <div 
-                    key={idx}
-                    className="flex justify-between items-center p-3 rounded-lg"
-                    style={{ backgroundColor: 'var(--color-bg)' }}
-                  >
-                    <span style={{ color: 'var(--color-text-muted)' }}>
-                      {rate.qualityMin >= 98 ? '≥' : ''}{rate.qualityMin}% - {rate.qualityMax}%
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold" style={{ color: '#f59e0b' }}>
-                        +{formatCZK(rate.bonusAmount)}
-                      </span>
-                      {rate.contractLabel && (
-                        <span 
-                          className="text-xs px-1.5 py-0.5 rounded"
-                          style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}
-                        >
-                          {rate.contractLabel}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+      {/* Content - Depot sections */}
+      <div className="p-6 space-y-4">
+        {activeDepots.map(depot => (
+          <DepotSection
+            key={depot}
+            depot={depot}
+            fixRates={ratesByDepot[depot].fixRates}
+            kmRates={ratesByDepot[depot].kmRates}
+            depoRates={ratesByDepot[depot].depoRates}
+            linehaulRates={ratesByDepot[depot].linehaulRates}
+            bonusRates={ratesByDepot[depot].bonusRates}
+          />
+        ))}
       </div>
     </div>
   )
@@ -510,14 +579,22 @@ export default function Prices() {
       {/* Legenda */}
       {hasPrices && (
         <div className="flex flex-wrap items-center gap-4 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-          <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Legenda:</span>
+          <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Depa:</span>
           <div className="flex flex-wrap items-center gap-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            <span className="flex items-center gap-1">
+              <span className="text-base">🏙️</span> Praha
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-base">🏭</span> Vratimov
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="text-base">📦</span> Nový Bydžov
+            </span>
+            <span>•</span>
             <span className="flex items-center gap-1">
               <span className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--color-border)', color: 'var(--color-text-light)' }}>D7</span>
               = Dodatek č. 7
             </span>
-            <span>•</span>
-            <span>Sazby jsou automaticky extrahovány ze smluv</span>
           </div>
         </div>
       )}
