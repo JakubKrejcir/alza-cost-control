@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { DollarSign, Building2, Truck, Package, Warehouse, ChevronDown, FileText } from 'lucide-react'
-import { prices, carriers, contracts } from '../lib/api'
+import { DollarSign, Building2, Truck, Package, Warehouse, FileText, AlertCircle } from 'lucide-react'
+import { prices, contracts } from '../lib/api'
+import { useCarrier } from '../lib/CarrierContext'
 
 // Formátování měny
 function formatCZK(amount) {
@@ -17,15 +18,16 @@ function formatCZK(amount) {
 function PriceRow({ label, value, dodatek, unit = '' }) {
   return (
     <div className="flex justify-between items-center py-2 px-3 rounded-lg hover:bg-white/50 transition-colors">
-      <span className="text-gray-600">{label}</span>
+      <span style={{ color: 'var(--color-text-muted)' }}>{label}</span>
       <div className="flex items-center gap-3">
-        <span className="font-semibold text-gray-900">
+        <span className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>
           {typeof value === 'number' ? formatCZK(value) : value}
-          {unit && <span className="text-gray-500 font-normal ml-1">{unit}</span>}
+          {unit && <span className="font-normal ml-1" style={{ color: 'var(--color-text-muted)' }}>{unit}</span>}
         </span>
         {dodatek && (
           <span 
-            className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700"
+            className="text-xs px-2 py-0.5 rounded-full"
+            style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}
             title={`Dodatek č. ${dodatek}`}
           >
             D{dodatek}
@@ -46,7 +48,7 @@ function ServiceSection({ title, icon: Icon, color, children }) {
         {Icon && <Icon size={16} />}
         {title}
       </h4>
-      <div className="bg-gray-50 rounded-lg divide-y divide-gray-100">
+      <div className="rounded-lg divide-y" style={{ backgroundColor: 'var(--color-bg)', borderColor: 'var(--color-border-light)' }}>
         {children}
       </div>
     </div>
@@ -58,9 +60,9 @@ function DepotCard({ depot, priceData, color }) {
   const { fixRates, kmRates, linehaulRates, depoRates } = priceData
   
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div className="card overflow-hidden">
       {/* Header */}
-      <div className="px-6 py-4 border-b" style={{ backgroundColor: `${color}15` }}>
+      <div className="px-6 py-4 border-b" style={{ backgroundColor: `${color}15`, borderColor: 'var(--color-border)' }}>
         <h3 className="text-lg font-semibold flex items-center gap-2" style={{ color }}>
           <Building2 size={20} />
           {depot}
@@ -129,7 +131,7 @@ function DepotCard({ depot, priceData, color }) {
         
         {/* Prázdný stav */}
         {fixRates.length === 0 && kmRates.length === 0 && linehaulRates.length === 0 && depoRates.length === 0 && (
-          <div className="text-center py-8 text-gray-400">
+          <div className="text-center py-8" style={{ color: 'var(--color-text-light)' }}>
             Žádné ceny pro toto depo
           </div>
         )}
@@ -139,13 +141,13 @@ function DepotCard({ depot, priceData, color }) {
 }
 
 export default function Prices() {
-  const [selectedCarrierId, setSelectedCarrierId] = useState(null)
+  // Použij globální CarrierContext (dopravce je vybrán v hlavičce)
+  const { selectedCarrierId, carrierList } = useCarrier()
   
-  // Načti dopravce
-  const { data: carrierList } = useQuery({
-    queryKey: ['carriers'],
-    queryFn: () => carriers.getAll()
-  })
+  // Vybraný dopravce
+  const selectedCarrier = useMemo(() => {
+    return carrierList?.find(c => c.id === Number(selectedCarrierId))
+  }, [carrierList, selectedCarrierId])
   
   // Načti smlouvy pro vybraného dopravce (pro čísla dodatků)
   const { data: contractList } = useQuery({
@@ -160,11 +162,6 @@ export default function Prices() {
     queryFn: () => prices.getAll({ carrier_id: selectedCarrierId, active: 'true' }),
     enabled: !!selectedCarrierId
   })
-  
-  // Vybraný dopravce
-  const selectedCarrier = useMemo(() => {
-    return carrierList?.find(c => c.id === selectedCarrierId)
-  }, [carrierList, selectedCarrierId])
   
   // Zpracuj data - seskup podle depa
   const pricesByDepot = useMemo(() => {
@@ -260,11 +257,11 @@ export default function Prices() {
   
   // Barvy pro depa
   const depotColors = {
-    'Vratimov': '#8b5cf6',
+    'Vratimov': 'var(--color-purple)',
     'Nový Bydžov': '#0891b2',
-    'Praha': '#10b981',
-    'Brno': '#f59e0b',
-    'default': '#6b7280'
+    'Praha': 'var(--color-green)',
+    'Brno': 'var(--color-orange)',
+    'default': 'var(--color-text-muted)'
   }
   
   const getDepotColor = (depot) => {
@@ -276,47 +273,44 @@ export default function Prices() {
   
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header s výběrem dopravce */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-gray-900">Správa ceníků</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {selectedCarrier ? `${selectedCarrier.name} – přehled sazeb ze smluv` : 'Vyberte dopravce'}
-          </p>
-        </div>
-        
-        {/* Dropdown dopravce */}
-        <div className="relative">
-          <select
-            value={selectedCarrierId || ''}
-            onChange={(e) => setSelectedCarrierId(e.target.value ? Number(e.target.value) : null)}
-            className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-2 pr-10 text-gray-900 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 cursor-pointer min-w-[200px]"
-          >
-            <option value="">Vyberte dopravce...</option>
-            {carrierList?.map(carrier => (
-              <option key={carrier.id} value={carrier.id}>
-                {carrier.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
-        </div>
+      {/* Header - bez dropdownu (používá se globální z Layout) */}
+      <div>
+        <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>Správa ceníků</h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+          {selectedCarrier ? `${selectedCarrier.name} – přehled sazeb ze smluv` : 'Přehled sazeb podle typu služby'}
+        </p>
       </div>
       
       {/* Prázdný stav - není vybrán dopravce */}
       {!selectedCarrierId && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-          <DollarSign className="mx-auto text-gray-300 mb-4" size={48} />
-          <h2 className="text-lg font-medium text-gray-600 mb-2">Vyberte dopravce</h2>
-          <p className="text-gray-400">Pro zobrazení ceníků vyberte dopravce z menu výše</p>
+        <div className="card p-12 text-center">
+          <DollarSign className="mx-auto mb-4" size={48} style={{ color: 'var(--color-text-light)' }} />
+          <h2 className="text-lg font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>Vyberte dopravce</h2>
+          <p style={{ color: 'var(--color-text-light)' }}>Pro zobrazení ceníků vyberte dopravce v hlavičce stránky</p>
         </div>
       )}
       
       {/* Loading */}
       {selectedCarrierId && isLoading && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-4"></div>
-          <p className="text-gray-500">Načítám ceníky...</p>
+        <div className="card p-12 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 mx-auto mb-4" style={{ borderColor: 'var(--color-primary)' }}></div>
+          <p style={{ color: 'var(--color-text-muted)' }}>Načítám ceníky...</p>
+        </div>
+      )}
+      
+      {/* Smlouvy bez extrahovaných ceníků */}
+      {selectedCarrierId && !isLoading && contractList?.length > 0 && Object.keys(pricesByDepot).length === 0 && (
+        <div className="card p-6" style={{ borderLeft: '4px solid var(--color-primary)' }}>
+          <div className="flex items-start gap-3">
+            <AlertCircle size={24} style={{ color: 'var(--color-primary)' }} />
+            <div>
+              <p className="font-medium" style={{ color: 'var(--color-primary)' }}>Smlouvy bez extrahovaných ceníků</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                Máte {contractList.length} smlouvu, ale nepodařilo se z nich extrahovat žádné sazby. 
+                Zkontrolujte formát PDF nebo přidejte ceníky ručně.
+              </p>
+            </div>
+          </div>
         </div>
       )}
       
@@ -324,11 +318,22 @@ export default function Prices() {
       {selectedCarrierId && !isLoading && (
         <>
           {Object.keys(pricesByDepot).length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-              <Package className="mx-auto text-gray-300 mb-4" size={48} />
-              <h2 className="text-lg font-medium text-gray-600 mb-2">Žádné ceníky</h2>
-              <p className="text-gray-400">Pro tohoto dopravce nejsou definovány žádné aktivní ceníky</p>
-            </div>
+            <>
+              {/* Nahrané smlouvy */}
+              {contractList && contractList.length > 0 && (
+                <div className="card">
+                  <div className="card-header">
+                    <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+                      <FileText size={20} style={{ color: 'var(--color-primary)' }} />
+                      Nahrané smlouvy ({contractList.length})
+                    </h3>
+                    <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                      Smazáním smlouvy se ceníky zachovají
+                    </p>
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {Object.entries(pricesByDepot).map(([depot, data]) => (
@@ -343,20 +348,22 @@ export default function Prices() {
           )}
           
           {/* Legenda */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4 flex flex-wrap items-center gap-4">
-            <span className="text-sm font-medium text-gray-700">Legenda:</span>
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs">D7</span>
-              <span>= Dodatek č. 7</span>
+          {Object.keys(pricesByDepot).length > 0 && (
+            <div className="p-4 rounded-lg flex flex-wrap items-center gap-4" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+              <span className="text-sm font-medium" style={{ color: 'var(--color-text-dark)' }}>Legenda:</span>
+              <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                <span className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>D7</span>
+                <span>= Dodatek č. 7</span>
+              </div>
             </div>
-          </div>
+          )}
           
           {/* Historie dodatků */}
           {contractList && contractList.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-              <div className="px-6 py-4 border-b bg-gray-50">
-                <h2 className="text-lg font-semibold flex items-center gap-2 text-gray-900">
-                  <FileText size={20} className="text-blue-500" />
+            <div className="card overflow-hidden">
+              <div className="card-header">
+                <h2 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+                  <FileText size={20} style={{ color: 'var(--color-primary)' }} />
                   Historie dodatků ke smlouvě
                 </h2>
               </div>
@@ -368,17 +375,18 @@ export default function Prices() {
                     .map(contract => (
                       <div 
                         key={contract.id} 
-                        className="flex items-center gap-4 p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors"
+                        className="flex items-center gap-4 p-3 rounded-lg transition-colors"
+                        style={{ backgroundColor: 'var(--color-bg)' }}
                       >
-                        <span className="font-semibold text-blue-600 w-24">
+                        <span className="font-semibold w-24" style={{ color: 'var(--color-primary)' }}>
                           Dodatek {contract.amendment_number || contract.amendmentNumber}
                         </span>
-                        <span className="text-sm text-gray-500 w-28">
+                        <span className="text-sm w-28" style={{ color: 'var(--color-text-muted)' }}>
                           od {contract.valid_from || contract.validFrom 
                             ? new Date(contract.valid_from || contract.validFrom).toLocaleDateString('cs-CZ')
                             : '?'}
                         </span>
-                        <span className="text-sm text-gray-700 flex-1">
+                        <span className="text-sm flex-1" style={{ color: 'var(--color-text-dark)' }}>
                           {contract.type || contract.description || '—'}
                         </span>
                       </div>

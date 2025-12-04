@@ -20,8 +20,8 @@ import { useCarrier } from '../lib/CarrierContext'
 
 const navItems = [
   { path: '/dashboard', label: 'Fakturace', icon: LayoutDashboard, needsCarrier: true, needsPeriod: true },
-  { path: '/expected-billing', label: 'Očekávaná fakturace', icon: Calculator, needsCarrier: false, needsPeriod: false },
-  { path: '/prices', label: 'Ceníky', icon: DollarSign, needsCarrier: false, needsPeriod: false },
+  { path: '/expected-billing', label: 'Očekávaná fakturace', icon: Calculator, needsCarrier: true, needsPeriod: true },
+  { path: '/prices', label: 'Ceníky', icon: DollarSign, needsCarrier: true, needsPeriod: false },
   { path: '/upload', label: 'Dokumenty', icon: FileText, needsCarrier: true, needsPeriod: true },
   { path: '/alzabox', label: 'AlzaBox BI', icon: Package, needsCarrier: false, needsPeriod: false },
   { path: '/carriers', label: 'Dopravci', icon: Truck, needsCarrier: false, needsPeriod: false },

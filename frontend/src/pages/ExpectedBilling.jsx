@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { 
-  Calculator, ChevronDown, Loader2, AlertTriangle, 
+  Calculator, Loader2, AlertTriangle, 
   FileText, Truck, MapPin, Building2, Receipt, TrendingUp
 } from 'lucide-react'
-import { carriers } from '../lib/api'
 import api from '../lib/api'
+import { useCarrier } from '../lib/CarrierContext'
 
 function formatCZK(amount) {
   if (amount == null || isNaN(amount)) return '—'
@@ -57,29 +57,28 @@ function BreakdownRow({ label, quantity, rate, total, color = 'var(--color-text-
 }
 
 export default function ExpectedBilling() {
-  const [selectedCarrierId, setSelectedCarrierId] = useState(null)
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear())
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1)
-
-  // Načti dopravce
-  const { data: carrierList, isLoading: carriersLoading } = useQuery({
-    queryKey: ['carriers'],
-    queryFn: carriers.getAll
-  })
-
-  // Auto-select prvního dopravce
-  useEffect(() => {
-    if (carrierList?.length > 0 && !selectedCarrierId) {
-      setSelectedCarrierId(carrierList[0].id)
+  // Použij globální CarrierContext (dopravce a období je vybráno v hlavičce)
+  const { selectedCarrierId, carrierList, selectedPeriod } = useCarrier()
+  
+  // Parsuj období z formátu "MM/YYYY" na year a month
+  const { selectedYear, selectedMonth } = useMemo(() => {
+    if (!selectedPeriod) {
+      return { 
+        selectedYear: new Date().getFullYear(), 
+        selectedMonth: new Date().getMonth() + 1 
+      }
     }
-  }, [carrierList, selectedCarrierId])
+    const [month, year] = selectedPeriod.split('/')
+    return {
+      selectedYear: parseInt(year),
+      selectedMonth: parseInt(month)
+    }
+  }, [selectedPeriod])
 
-  // Načti dostupná období
-  const { data: periodsData } = useQuery({
-    queryKey: ['billing-periods', selectedCarrierId],
-    queryFn: () => api.get(`/expected-billing/periods?carrier_id=${selectedCarrierId}`).then(r => r.data),
-    enabled: !!selectedCarrierId
-  })
+  // Vybraný dopravce
+  const selectedCarrier = useMemo(() => {
+    return carrierList?.find(c => c.id === Number(selectedCarrierId))
+  }, [carrierList, selectedCarrierId])
 
   // Vypočítej očekávanou fakturaci
   const { data: billingData, isLoading: billingLoading, error: billingError } = useQuery({
@@ -94,99 +93,29 @@ export default function ExpectedBilling() {
     enabled: !!selectedCarrierId && !!selectedYear && !!selectedMonth
   })
 
-  const selectedCarrier = carrierList?.find(c => c.id === selectedCarrierId)
-
-  // Generuj roky a měsíce pro dropdown
-  const years = []
-  const currentYear = new Date().getFullYear()
-  for (let y = currentYear; y >= currentYear - 2; y--) {
-    years.push(y)
-  }
-  
-  const months = [
-    { value: 1, label: 'Leden' },
-    { value: 2, label: 'Únor' },
-    { value: 3, label: 'Březen' },
-    { value: 4, label: 'Duben' },
-    { value: 5, label: 'Květen' },
-    { value: 6, label: 'Červen' },
-    { value: 7, label: 'Červenec' },
-    { value: 8, label: 'Srpen' },
-    { value: 9, label: 'Září' },
-    { value: 10, label: 'Říjen' },
-    { value: 11, label: 'Listopad' },
-    { value: 12, label: 'Prosinec' },
-  ]
-
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-4">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>
-            Očekávaná fakturace
-          </h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
-            Výpočet na základě plánovacích souborů a ceníků
-          </p>
-        </div>
-
-        {/* Filtry */}
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* Dopravce */}
-          <div className="relative">
-            <select
-              value={selectedCarrierId || ''}
-              onChange={(e) => setSelectedCarrierId(Number(e.target.value))}
-              className="input pr-10 min-w-[180px] appearance-none"
-              disabled={carriersLoading}
-            >
-              {carriersLoading ? (
-                <option>Načítám...</option>
-              ) : (
-                carrierList?.map(carrier => (
-                  <option key={carrier.id} value={carrier.id}>{carrier.name}</option>
-                ))
-              )}
-            </select>
-            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ color: 'var(--color-text-muted)' }} />
-          </div>
-
-          {/* Měsíc */}
-          <div className="relative">
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              className="input pr-10 min-w-[120px] appearance-none"
-            >
-              {months.map(m => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ color: 'var(--color-text-muted)' }} />
-          </div>
-
-          {/* Rok */}
-          <div className="relative">
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="input pr-10 min-w-[100px] appearance-none"
-            >
-              {years.map(y => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-            <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ color: 'var(--color-text-muted)' }} />
-          </div>
-        </div>
+      {/* Header - bez dropdownů (používá se globální z Layout) */}
+      <div>
+        <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+          Očekávaná fakturace
+        </h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+          Výpočet na základě plánovacích souborů a ceníků
+        </p>
       </div>
 
+      {/* Prázdný stav - není vybrán dopravce */}
+      {!selectedCarrierId && (
+        <div className="card p-12 text-center">
+          <Calculator className="mx-auto mb-4" size={48} style={{ color: 'var(--color-text-light)' }} />
+          <h2 className="text-lg font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>Vyberte dopravce</h2>
+          <p style={{ color: 'var(--color-text-light)' }}>Pro zobrazení očekávané fakturace vyberte dopravce a období v hlavičce stránky</p>
+        </div>
+      )}
+
       {/* Loading */}
-      {billingLoading && (
+      {selectedCarrierId && billingLoading && (
         <div className="card p-12 text-center">
           <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" style={{ color: 'var(--color-primary)' }} />
           <p style={{ color: 'var(--color-text-muted)' }}>Počítám očekávanou fakturaci...</p>
@@ -194,7 +123,7 @@ export default function ExpectedBilling() {
       )}
 
       {/* Error */}
-      {billingError && (
+      {selectedCarrierId && billingError && (
         <div className="card p-6" style={{ borderLeft: '4px solid var(--color-red)' }}>
           <div className="flex items-center gap-3">
             <AlertTriangle size={24} style={{ color: 'var(--color-red)' }} />
@@ -209,7 +138,7 @@ export default function ExpectedBilling() {
       )}
 
       {/* No data */}
-      {billingData && !billingData.success && (
+      {selectedCarrierId && billingData && !billingData.success && (
         <div className="card p-6" style={{ borderLeft: '4px solid var(--color-orange)' }}>
           <div className="flex items-center gap-3">
             <AlertTriangle size={24} style={{ color: 'var(--color-orange)' }} />
@@ -224,7 +153,7 @@ export default function ExpectedBilling() {
       )}
 
       {/* Results */}
-      {billingData?.success && (
+      {selectedCarrierId && billingData?.success && (
         <>
           {/* Souhrn */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
