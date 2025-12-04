@@ -325,50 +325,6 @@ export default function Documents() {
     }
   })
 
-  // AlzaBox delete mutations
-  const deleteAlzaboxLocationsMutation = useMutation({
-    mutationFn: () => alzabox.deleteLocations(),
-    onSuccess: (data) => {
-      setUploadResults(prev => [...prev, { 
-        type: 'alzabox-locations', 
-        fileName: 'Smazání dat', 
-        success: true,
-        message: data.message
-      }])
-      queryClient.invalidateQueries(['alzabox-countries'])
-      queryClient.invalidateQueries(['alzabox'])
-    },
-    onError: (error) => {
-      setUploadResults(prev => [...prev, { 
-        type: 'alzabox-locations', 
-        fileName: 'Smazání dat', 
-        success: false,
-        message: error.response?.data?.detail || 'Chyba při mazání'
-      }])
-    }
-  })
-
-  const deleteAlzaboxDeliveriesMutation = useMutation({
-    mutationFn: (deliveryType) => alzabox.deleteDeliveries(deliveryType),
-    onSuccess: (data) => {
-      setUploadResults(prev => [...prev, { 
-        type: 'alzabox-deliveries', 
-        fileName: 'Smazání dat', 
-        success: true,
-        message: data.message
-      }])
-      queryClient.invalidateQueries(['alzabox'])
-    },
-    onError: (error) => {
-      setUploadResults(prev => [...prev, { 
-        type: 'alzabox-deliveries', 
-        fileName: 'Smazání dat', 
-        success: false,
-        message: error.response?.data?.detail || 'Chyba při mazání'
-      }])
-    }
-  })
-
   // File handling
   const handleFiles = useCallback((files) => {
     if (!selectedCarrierId && activeTab !== 'alzabox') {
@@ -383,7 +339,11 @@ export default function Documents() {
       // Rozpoznání typu souboru
       if (ext === 'pdf') {
         // PDF - rozlišit fakturu vs smlouvu
-        if (fileName.includes('smlouva') || fileName.includes('contract') || fileName.includes('ramcova')) {
+        // Smlouva = obsahuje "con" (case insensitive) a má alespoň 5 číslic
+        const hasConKeyword = fileName.includes('con')
+        const digitCount = (fileName.match(/\d/g) || []).length
+        
+        if (hasConKeyword && digitCount >= 5) {
           uploadContractMutation.mutate({ file, carrierId: selectedCarrierId })
         } else {
           uploadInvoiceMutation.mutate({ file, carrierId: selectedCarrierId, period: selectedPeriod })
@@ -597,7 +557,7 @@ export default function Documents() {
             </div>
             <div className="flex items-center gap-1.5">
               <FileSignature size={16} className="text-blue-400" />
-              *smlouva*.pdf = Smlouva
+              *con*12345*.pdf = Smlouva
             </div>
           </div>
         </div>
@@ -799,21 +759,7 @@ export default function Documents() {
           {/* AlzaBox Stats */}
           {alzaboxCountries && alzaboxCountries.length > 0 && (
             <div className="card p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold">Naimportované AlzaBoxy</h3>
-                <button
-                  onClick={() => {
-                    if (confirm('Opravdu smazat VŠECHNY AlzaBoxy a jejich záznamy? Tato akce je nevratná!')) {
-                      deleteAlzaboxLocationsMutation.mutate()
-                    }
-                  }}
-                  disabled={deleteAlzaboxLocationsMutation.isPending}
-                  className="btn btn-sm bg-red-500/20 text-red-400 hover:bg-red-500/30 flex items-center gap-2"
-                >
-                  <Trash2 size={16} />
-                  {deleteAlzaboxLocationsMutation.isPending ? 'Mažu...' : 'Smazat vše'}
-                </button>
-              </div>
+              <h3 className="font-semibold mb-4">Naimportované AlzaBoxy</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {alzaboxCountries.map(c => (
                   <div 
@@ -839,49 +785,6 @@ export default function Documents() {
               </div>
             </div>
           )}
-
-          {/* AlzaBox Deliveries Management */}
-          <div className="card p-6">
-            <h3 className="font-semibold mb-4">Správa dojezdových dat</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {[
-                { value: 'DPO', label: 'DPO (ranní)', color: 'blue' },
-                { value: 'SD', label: 'SD (odpolední)', color: 'orange' },
-                { value: 'THIRD', label: '3. závoz', color: 'purple' }
-              ].map(({ value, label, color }) => (
-                <div key={value} className={`p-4 rounded-lg bg-${color}-500/10 border border-${color}-500/20`}>
-                  <div className="flex items-center justify-between">
-                    <span className={`font-medium text-${color}-400`}>{label}</span>
-                    <button
-                      onClick={() => {
-                        if (confirm(`Smazat všechny dojezdy typu ${value}?`)) {
-                          deleteAlzaboxDeliveriesMutation.mutate(value)
-                        }
-                      }}
-                      disabled={deleteAlzaboxDeliveriesMutation.isPending}
-                      className="p-2 text-gray-400 hover:text-red-400 hover:bg-red-500/10 rounded"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 pt-4 border-t border-white/10">
-              <button
-                onClick={() => {
-                  if (confirm('Smazat VŠECHNY dojezdy (DPO, SD, 3. závoz)?')) {
-                    deleteAlzaboxDeliveriesMutation.mutate(null)
-                  }
-                }}
-                disabled={deleteAlzaboxDeliveriesMutation.isPending}
-                className="btn btn-sm bg-red-500/20 text-red-400 hover:bg-red-500/30 flex items-center gap-2"
-              >
-                <Trash2 size={16} />
-                {deleteAlzaboxDeliveriesMutation.isPending ? 'Mažu...' : 'Smazat všechny dojezdy'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -1112,7 +1015,7 @@ export default function Documents() {
             <div className="p-8 text-center text-gray-500">
               <FileSignature className="w-12 h-12 mx-auto mb-3 opacity-50" />
               <p>Žádné smlouvy</p>
-              <p className="text-sm mt-1">Nahrajte PDF soubory obsahující "smlouva" v názvu</p>
+              <p className="text-sm mt-1">Nahrajte PDF soubory obsahující "con" v názvu a alespoň 5 číslic</p>
             </div>
           ) : (
             <div className="divide-y divide-white/5">
