@@ -81,23 +81,31 @@ export default function Prices() {
   })
 
   // Načti ceníky pro vybraného dopravce
-  const { data: priceList, isLoading: pricesLoading } = useQuery({
-    queryKey: ['prices', selectedCarrierId],
-    queryFn: () => {
-      console.log('Fetching prices for carrier:', selectedCarrierId)
-      return prices.getAll({ carrier_id: selectedCarrierId })
+  const { data: priceList, isLoading: pricesLoading, refetch: refetchPrices } = useQuery({
+    queryKey: ['prices', 'carrier', selectedCarrierId],
+    queryFn: async () => {
+      console.log('>>> API CALL: Fetching prices for carrier_id:', selectedCarrierId)
+      const result = await prices.getAll({ carrier_id: selectedCarrierId })
+      console.log('<<< API RESPONSE: Got', result?.length, 'prices:', result)
+      return result
     },
-    enabled: !!selectedCarrierId
+    enabled: !!selectedCarrierId,
+    staleTime: 0,  // Vždy považuj data za stale
+    cacheTime: 0,  // Nekešuj
   })
 
   // Načti smlouvy pro vybraného dopravce
   const { data: contractList } = useQuery({
-    queryKey: ['contracts', selectedCarrierId],
-    queryFn: () => {
-      console.log('Fetching contracts for carrier:', selectedCarrierId)
-      return contracts.getAll(selectedCarrierId)
+    queryKey: ['contracts', 'carrier', selectedCarrierId],
+    queryFn: async () => {
+      console.log('>>> API CALL: Fetching contracts for carrier_id:', selectedCarrierId)
+      const result = await contracts.getAll(selectedCarrierId)
+      console.log('<<< API RESPONSE: Got', result?.length, 'contracts:', result)
+      return result
     },
-    enabled: !!selectedCarrierId
+    enabled: !!selectedCarrierId,
+    staleTime: 0,
+    cacheTime: 0,
   })
 
   // Auto-select první dopravce
@@ -109,6 +117,13 @@ export default function Prices() {
   }, [carrierList, selectedCarrierId])
 
   const selectedCarrier = carrierList?.find(c => c.id === selectedCarrierId)
+
+  // Handler pro změnu dopravce
+  const handleCarrierChange = (e) => {
+    const newCarrierId = Number(e.target.value)
+    console.log('🔄 CARRIER CHANGE: from', selectedCarrierId, 'to', newCarrierId)
+    setSelectedCarrierId(newCarrierId)
+  }
 
   // Debug log
   useEffect(() => {
@@ -156,7 +171,7 @@ export default function Prices() {
           <div className="relative">
             <select
               value={selectedCarrierId || ''}
-              onChange={(e) => setSelectedCarrierId(Number(e.target.value))}
+              onChange={handleCarrierChange}
               className="input pr-10 min-w-[200px] appearance-none"
               disabled={carriersLoading}
             >
