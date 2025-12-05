@@ -550,7 +550,8 @@ async def get_contract(contract_id: int, db: AsyncSession = Depends(get_db)):
     return contract
 
 
-@router.post("/upload-pdf")
+@router.post("/upload")
+@router.post("/upload-pdf")  # Alias
 async def upload_contract_pdf(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db)
