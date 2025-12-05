@@ -1,6 +1,6 @@
 """
 Pydantic schemas for request/response validation
-All Response classes use camelCase for JavaScript frontend compatibility
+Updated: 2025-12-05 - Added depot_id, route_category, from_warehouse_id fields
 """
 from datetime import datetime
 from decimal import Decimal
@@ -27,6 +27,7 @@ class CamelModel(BaseModel):
 # =============================================================================
 # CARRIER SCHEMAS
 # =============================================================================
+
 class CarrierBase(BaseModel):
     name: str
     ico: Optional[str] = None
@@ -65,21 +66,64 @@ class CarrierWithCounts(CarrierResponse):
 
 
 # =============================================================================
-# DEPOT SCHEMAS
+# WAREHOUSE SCHEMAS (NEW)
 # =============================================================================
+
+class WarehouseBase(BaseModel):
+    code: str
+    name: str
+    location: Optional[str] = None
+    latitude: Optional[Decimal] = None
+    longitude: Optional[Decimal] = None
+    warehouse_type: Optional[str] = 'MAIN'
+    is_active: bool = True
+
+
+class WarehouseCreate(WarehouseBase):
+    pass
+
+
+class WarehouseResponse(CamelModel):
+    id: int
+    code: str
+    name: str
+    location: Optional[str] = None
+    latitude: Optional[Decimal] = None
+    longitude: Optional[Decimal] = None
+    warehouse_type: Optional[str] = None
+    is_active: bool = True
+    created_at: datetime
+
+
+# =============================================================================
+# DEPOT SCHEMAS (UPDATED)
+# =============================================================================
+
 class DepotBase(BaseModel):
     name: str
     code: Optional[str] = None
     type: Optional[str] = None
     address: Optional[str] = None
+    # NEW FIELDS
+    latitude: Optional[Decimal] = None
+    longitude: Optional[Decimal] = None
+    region: Optional[str] = None
+    depot_type: Optional[str] = 'DISTRIBUTION'
 
 
 class DepotCreate(DepotBase):
     carrier_id: int
 
 
-class DepotUpdate(DepotBase):
-    pass
+class DepotUpdate(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    type: Optional[str] = None
+    address: Optional[str] = None
+    latitude: Optional[Decimal] = None
+    longitude: Optional[Decimal] = None
+    region: Optional[str] = None
+    depot_type: Optional[str] = None
 
 
 class DepotResponse(CamelModel):
@@ -89,12 +133,18 @@ class DepotResponse(CamelModel):
     code: Optional[str] = None
     type: Optional[str] = None
     address: Optional[str] = None
+    # NEW FIELDS
+    latitude: Optional[Decimal] = None
+    longitude: Optional[Decimal] = None
+    region: Optional[str] = None
+    depot_type: Optional[str] = None
     created_at: datetime
 
 
 # =============================================================================
 # CONTRACT SCHEMAS
 # =============================================================================
+
 class ContractBase(BaseModel):
     number: str
     type: Optional[str] = None
@@ -130,34 +180,50 @@ class ContractResponse(CamelModel):
 
 
 # =============================================================================
-# PRICE CONFIG SCHEMAS
+# PRICE CONFIG SCHEMAS (UPDATED)
 # =============================================================================
+
 class FixRateBase(BaseModel):
     route_type: str
     rate: Decimal
+    # NEW FIELDS
+    depot_id: Optional[int] = None
+    route_category: Optional[str] = None
 
 
 class FixRateResponse(CamelModel):
     id: int
     route_type: str
     rate: Decimal
+    # NEW FIELDS
+    depot_id: Optional[int] = None
+    route_category: Optional[str] = None
+    # Nested depot info
+    depot: Optional[DepotResponse] = None
 
 
 class KmRateBase(BaseModel):
     route_type: Optional[str] = None
     rate: Decimal
+    # NEW FIELDS
+    depot_id: Optional[int] = None
 
 
 class KmRateResponse(CamelModel):
     id: int
     route_type: Optional[str] = None
     rate: Decimal
+    # NEW FIELDS
+    depot_id: Optional[int] = None
+    depot: Optional[DepotResponse] = None
 
 
 class DepoRateBase(BaseModel):
     depo_name: str
     rate_type: str
     rate: Decimal
+    # NEW FIELDS
+    depot_id: Optional[int] = None
 
 
 class DepoRateResponse(CamelModel):
@@ -165,6 +231,9 @@ class DepoRateResponse(CamelModel):
     depo_name: str
     rate_type: str
     rate: Decimal
+    # NEW FIELDS
+    depot_id: Optional[int] = None
+    depot: Optional[DepotResponse] = None
 
 
 class LinehaulRateBase(BaseModel):
@@ -176,6 +245,10 @@ class LinehaulRateBase(BaseModel):
     rate: Decimal
     is_posila: bool = False
     description: Optional[str] = None
+    # NEW FIELDS
+    from_warehouse_id: Optional[int] = None
+    pallet_capacity_min: Optional[int] = None
+    pallet_capacity_max: Optional[int] = None
 
 
 class LinehaulRateResponse(CamelModel):
@@ -188,6 +261,12 @@ class LinehaulRateResponse(CamelModel):
     rate: Decimal
     is_posila: bool = False
     description: Optional[str] = None
+    # NEW FIELDS
+    from_warehouse_id: Optional[int] = None
+    pallet_capacity_min: Optional[int] = None
+    pallet_capacity_max: Optional[int] = None
+    # Nested info
+    from_warehouse: Optional[WarehouseResponse] = None
 
 
 class BonusRateBase(BaseModel):
@@ -195,6 +274,8 @@ class BonusRateBase(BaseModel):
     quality_max: Decimal
     bonus_amount: Decimal
     total_with_bonus: Decimal
+    # NEW FIELDS
+    depot_id: Optional[int] = None
 
 
 class BonusRateResponse(CamelModel):
@@ -203,9 +284,14 @@ class BonusRateResponse(CamelModel):
     quality_max: Decimal
     bonus_amount: Decimal
     total_with_bonus: Decimal
+    # NEW FIELDS
+    depot_id: Optional[int] = None
+    depot: Optional[DepotResponse] = None
 
 
 class PriceConfigBase(BaseModel):
+    carrier_id: int
+    contract_id: Optional[int] = None
     type: str
     valid_from: datetime
     valid_to: Optional[datetime] = None
@@ -213,8 +299,6 @@ class PriceConfigBase(BaseModel):
 
 
 class PriceConfigCreate(PriceConfigBase):
-    carrier_id: int
-    contract_id: Optional[int] = None
     fix_rates: Optional[List[FixRateBase]] = None
     km_rates: Optional[List[KmRateBase]] = None
     depo_rates: Optional[List[DepoRateBase]] = None
@@ -241,8 +325,10 @@ class PriceConfigResponse(CamelModel):
     type: str
     valid_from: datetime
     valid_to: Optional[datetime] = None
-    is_active: bool = True
+    is_active: bool
     created_at: datetime
+    carrier: Optional[CarrierResponse] = None
+    contract: Optional[ContractResponse] = None
     fix_rates: List[FixRateResponse] = []
     km_rates: List[KmRateResponse] = []
     depo_rates: List[DepoRateResponse] = []
@@ -251,8 +337,61 @@ class PriceConfigResponse(CamelModel):
 
 
 # =============================================================================
-# INVOICE SCHEMAS (needed for ProofDetailResponse)
+# PROOF SCHEMAS
 # =============================================================================
+
+class ProofBase(BaseModel):
+    carrier_id: int
+    depot_id: Optional[int] = None
+    period: str
+    period_date: datetime
+
+
+class ProofCreate(ProofBase):
+    file_name: Optional[str] = None
+    file_url: Optional[str] = None
+
+
+class ProofUpdate(BaseModel):
+    status: Optional[str] = None
+    total_fix: Optional[Decimal] = None
+    total_km: Optional[Decimal] = None
+    total_linehaul: Optional[Decimal] = None
+    total_depo: Optional[Decimal] = None
+    total_bonus: Optional[Decimal] = None
+    total_penalty: Optional[Decimal] = None
+    grand_total: Optional[Decimal] = None
+
+
+class ProofResponse(CamelModel):
+    id: int
+    carrier_id: int
+    depot_id: Optional[int] = None
+    period: str
+    period_date: datetime
+    file_name: Optional[str] = None
+    file_url: Optional[str] = None
+    status: str
+    total_fix: Optional[Decimal] = None
+    total_km: Optional[Decimal] = None
+    total_linehaul: Optional[Decimal] = None
+    total_depo: Optional[Decimal] = None
+    total_bonus: Optional[Decimal] = None
+    total_penalty: Optional[Decimal] = None
+    grand_total: Optional[Decimal] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProofDetailResponse(ProofResponse):
+    carrier: Optional[CarrierResponse] = None
+    depot: Optional[DepotResponse] = None
+
+
+# =============================================================================
+# INVOICE SCHEMAS
+# =============================================================================
+
 class InvoiceItemBase(BaseModel):
     item_type: str
     description: Optional[str] = None
@@ -267,6 +406,8 @@ class InvoiceItemResponse(CamelModel):
 
 
 class InvoiceBase(BaseModel):
+    carrier_id: int
+    proof_id: Optional[int] = None
     invoice_number: str
     period: str
     issue_date: Optional[datetime] = None
@@ -274,22 +415,15 @@ class InvoiceBase(BaseModel):
     total_without_vat: Optional[Decimal] = None
     vat_amount: Optional[Decimal] = None
     total_with_vat: Optional[Decimal] = None
-    status: str = "pending"
 
 
 class InvoiceCreate(InvoiceBase):
-    carrier_id: int
-    proof_id: Optional[int] = None
     items: Optional[List[InvoiceItemBase]] = None
 
 
 class InvoiceUpdate(BaseModel):
-    proof_id: Optional[int] = None
     status: Optional[str] = None
-    total_without_vat: Optional[Decimal] = None
-    vat_amount: Optional[Decimal] = None
-    total_with_vat: Optional[Decimal] = None
-    items: Optional[List[InvoiceItemBase]] = None
+    proof_id: Optional[int] = None
 
 
 class InvoiceResponse(CamelModel):
@@ -303,7 +437,7 @@ class InvoiceResponse(CamelModel):
     total_without_vat: Optional[Decimal] = None
     vat_amount: Optional[Decimal] = None
     total_with_vat: Optional[Decimal] = None
-    status: str = "pending"
+    status: str
     file_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -311,133 +445,158 @@ class InvoiceResponse(CamelModel):
 
 
 class InvoiceParsedData(BaseModel):
-    """Data extracted from invoice PDF - internal use"""
     invoice_number: Optional[str] = None
-    variable_symbol: Optional[str] = None
+    period: Optional[str] = None
     issue_date: Optional[datetime] = None
     due_date: Optional[datetime] = None
-    tax_date: Optional[datetime] = None
     total_without_vat: Optional[Decimal] = None
     vat_amount: Optional[Decimal] = None
     total_with_vat: Optional[Decimal] = None
-    item_type: Optional[str] = None
-    period: Optional[str] = None
-    supplier_ico: Optional[str] = None
-    supplier_dic: Optional[str] = None
-    customer_ico: Optional[str] = None
-    customer_dic: Optional[str] = None
+    items: List[InvoiceItemBase] = []
 
 
 # =============================================================================
-# PROOF SCHEMAS
+# ROUTE PLAN SCHEMAS
 # =============================================================================
-class ProofRouteDetailResponse(CamelModel):
+
+class RoutePlanRouteBase(BaseModel):
+    route_name: str
+    carrier_name: Optional[str] = None
+    stops_count: int = 0
+    start_location: Optional[str] = None
+    max_capacity: Optional[Decimal] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    total_distance_km: Optional[Decimal] = None
+    work_time: Optional[str] = None
+    dr_lh: Optional[str] = None
+    depot: Optional[str] = None
+    plan_type: Optional[str] = None
+
+
+class RoutePlanRouteResponse(CamelModel):
     id: int
-    route_type: str
-    count: int
-    rate: Decimal
-    amount: Decimal
+    route_name: str
+    carrier_name: Optional[str] = None
+    stops_count: int
+    start_location: Optional[str] = None
+    max_capacity: Optional[Decimal] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    total_distance_km: Optional[Decimal] = None
+    work_time: Optional[str] = None
+    dr_lh: Optional[str] = None
+    depot: Optional[str] = None
+    plan_type: Optional[str] = None
 
 
-class ProofLinehaulDetailResponse(CamelModel):
-    id: int
-    description: str
-    from_code: Optional[str] = None
-    to_code: Optional[str] = None
-    vehicle_type: Optional[str] = None
-    days: Optional[int] = None
-    per_day: Optional[int] = None
-    rate: Decimal
-    total: Decimal
-
-
-class ProofDepoDetailResponse(CamelModel):
-    id: int
-    depo_name: str
-    rate_type: str
-    days: Optional[int] = None
-    rate: Decimal
-    amount: Decimal
-
-
-class ProofBase(BaseModel):
-    period: str
-    status: str = "pending"
-    total_fix: Optional[Decimal] = None
-    total_km: Optional[Decimal] = None
-    total_linehaul: Optional[Decimal] = None
-    total_depo: Optional[Decimal] = None
-    total_bonus: Optional[Decimal] = None
-    total_penalty: Optional[Decimal] = None
-    total_posily: Optional[Decimal] = None
-    grand_total: Optional[Decimal] = None
-
-
-class ProofCreate(ProofBase):
+class RoutePlanBase(BaseModel):
     carrier_id: int
-    depot_id: Optional[int] = None
-
-
-class ProofUpdate(BaseModel):
-    status: Optional[str] = None
-
-
-class ProofResponse(CamelModel):
-    id: int
-    carrier_id: int
-    depot_id: Optional[int] = None
-    period: str
-    period_date: datetime
-    status: str = "pending"
-    total_fix: Optional[Decimal] = None
-    total_km: Optional[Decimal] = None
-    total_linehaul: Optional[Decimal] = None
-    total_depo: Optional[Decimal] = None
-    total_bonus: Optional[Decimal] = None
-    total_penalty: Optional[Decimal] = None
-    total_posily: Optional[Decimal] = None
-    grand_total: Optional[Decimal] = None
+    valid_from: datetime
+    valid_to: Optional[datetime] = None
     file_name: Optional[str] = None
-    file_url: Optional[str] = None
+    plan_type: str = "BOTH"
+    depot: str = "BOTH"
+
+
+class RoutePlanCreate(RoutePlanBase):
+    routes: Optional[List[RoutePlanRouteBase]] = None
+
+
+class RoutePlanResponse(CamelModel):
+    id: int
+    carrier_id: int
+    valid_from: datetime
+    valid_to: Optional[datetime] = None
+    file_name: Optional[str] = None
+    plan_type: str
+    depot: str
+    total_routes: int
+    total_km: Optional[Decimal] = None
+    total_stops: int
+    total_duration_minutes: int
+    vratimov_dpo_count: int
+    vratimov_sd_count: int
+    bydzov_dpo_count: int
+    bydzov_sd_count: int
     created_at: datetime
     updated_at: datetime
+    routes: List[RoutePlanRouteResponse] = []
 
 
-class ProofAnalysisResponse(CamelModel):
+# =============================================================================
+# ALZABOX SCHEMAS
+# =============================================================================
+
+class AlzaBoxResponse(CamelModel):
     id: int
-    proof_id: int
-    status: str
-    errors_json: Optional[str] = None
-    warnings_json: Optional[str] = None
-    ok_json: Optional[str] = None
-    diff_fix: Optional[Decimal] = None
-    diff_km: Optional[Decimal] = None
-    diff_linehaul: Optional[Decimal] = None
-    diff_depo: Optional[Decimal] = None
-    missing_rates_json: Optional[str] = None
+    box_id: str
+    name: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    zip_code: Optional[str] = None
+    country: str
+    region: Optional[str] = None
+    gps_lat: Optional[Decimal] = None
+    gps_lon: Optional[Decimal] = None
+    is_active: bool
+
+
+class DeliveryStatsResponse(CamelModel):
+    stats_date: datetime
+    delivery_type: str
+    route_name: Optional[str] = None
+    carrier_id: Optional[int] = None
+    total_boxes: int
+    delivered_on_time: int
+    delivered_late: int
+    on_time_pct: Optional[Decimal] = None
+
+
+# =============================================================================
+# START LOCATION MAPPING SCHEMAS (NEW)
+# =============================================================================
+
+class StartLocationMappingBase(BaseModel):
+    plan_name: str
+    location_type: str  # 'WAREHOUSE' or 'DEPOT'
+    warehouse_id: Optional[int] = None
+    depot_id: Optional[int] = None
+    route_category: str  # 'DIRECT_SKLAD' or 'DIRECT_DEPO'
+
+
+class StartLocationMappingCreate(StartLocationMappingBase):
+    pass
+
+
+class StartLocationMappingResponse(CamelModel):
+    id: int
+    plan_name: str
+    location_type: str
+    warehouse_id: Optional[int] = None
+    depot_id: Optional[int] = None
+    route_category: str
     created_at: datetime
-
-
-class ProofDetailResponse(ProofResponse):
-    """Full proof detail including all related data"""
-    route_details: List[ProofRouteDetailResponse] = []
-    linehaul_details: List[ProofLinehaulDetailResponse] = []
-    depo_details: List[ProofDepoDetailResponse] = []
-    invoices: List[InvoiceResponse] = []
-    analyses: List[ProofAnalysisResponse] = []
+    warehouse: Optional[WarehouseResponse] = None
+    depot: Optional[DepotResponse] = None
 
 
 # =============================================================================
-# DASHBOARD SCHEMAS
+# ROUTE NAME MAPPING SCHEMAS (NEW)
 # =============================================================================
-class DashboardSummary(CamelModel):
+
+class RouteNameMappingBase(BaseModel):
+    route_prefix: str
+    depot_id: int
+
+
+class RouteNameMappingCreate(RouteNameMappingBase):
+    pass
+
+
+class RouteNameMappingResponse(CamelModel):
     id: int
-    carrier: str
-    period: str
-    proof_total: Decimal
-    invoiced_total: Decimal
-    invoice_count: int
-    remaining_to_invoice: Decimal
-    status: str
-    errors: int
-    warnings: int
+    route_prefix: str
+    depot_id: int
+    created_at: datetime
+    depot: Optional[DepotResponse] = None

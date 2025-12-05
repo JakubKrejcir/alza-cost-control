@@ -1,8 +1,9 @@
 """
 Expected Billing API Router
 Výpočet očekávané fakturace na základě plánovacích souborů a ceníků
+Updated: 2025-12-05 - Využívá depot_id, route_category, from_warehouse_id
 """
-from typing import Optional
+from typing import Optional, Dict, List
 from datetime import datetime, date
 from decimal import Decimal
 from calendar import monthrange
@@ -14,11 +15,50 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models import (
     Carrier, RoutePlan, RoutePlanRoute, 
-    PriceConfig, FixRate, KmRate, DepoRate, LinehaulRate
+    PriceConfig, FixRate, KmRate, DepoRate, LinehaulRate,
+    Depot, Warehouse  # NEW
 )
 
 router = APIRouter()
 
+
+# =============================================================================
+# KONFIGURACE - MAPOVÁNÍ
+# =============================================================================
+
+START_LOCATION_TO_CATEGORY = {
+    'Depo Chrášťany': 'DIRECT_SKLAD',
+    'Třídírna': 'DIRECT_SKLAD',
+    'Depo Drivecool': 'DIRECT_DEPO',
+    'Depo Nový Bydžov': 'DIRECT_DEPO',
+    'Depo GEM': 'DIRECT_DEPO',
+    'Depo Hosín': 'DIRECT_DEPO',
+    'Depo_Západ': 'DIRECT_DEPO',
+}
+
+START_LOCATION_TO_DEPOT = {
+    'Depo Drivecool': 'VRATIMOV',
+    'Depo Nový Bydžov': 'NOVY_BYDZOV',
+    'Depo GEM': 'BRNO',
+    'Depo Hosín': 'CESKE_BUDEJOVICE',
+    'Depo_Západ': 'RAKOVNIK',
+}
+
+ROUTE_PREFIX_TO_DEPOT = {
+    'Moravskoslezsko': 'VRATIMOV',
+    'Hradecko': 'NOVY_BYDZOV',
+    'Liberecko': 'NOVY_BYDZOV',
+    'Pardubicko': 'NOVY_BYDZOV',
+    'Ústecko': 'NOVY_BYDZOV',
+    'Morava': 'BRNO',
+    'Jižní Čechy': 'CESKE_BUDEJOVICE',
+    'Západní Čechy': 'RAKOVNIK',
+}
+
+
+# =============================================================================
+# HELPER FUNKCE
+# =============================================================================
 
 def get_working_days_in_month(year: int, month: int) -> int:
     """Spočítá pracovní dny (Po-Pá) v měsíci"""
@@ -26,10 +66,205 @@ def get_working_days_in_month(year: int, month: int) -> int:
     working_days = 0
     for day in range(1, last_day + 1):
         d = date(year, month, day)
-        if d.weekday() < 5:  # Po-Pá
+        if d.weekday() < 5:
             working_days += 1
     return working_days
 
+
+def detect_route_category(start_location: str, dr_lh: str) -> str:
+    """Určuje kategorii trasy podle startovního místa a DR/LH"""
+    if start_location in START_LOCATION_TO_CATEGORY:
+        return START_LOCATION_TO_CATEGORY[start_location]
+    
+    # Fallback podle DR/LH
+    if dr_lh:
+        dr_lh_upper = dr_lh.upper()
+        if 'LH' in dr_lh_upper:
+            return 'DIRECT_DEPO'
+        elif 'DR' in dr_lh_upper:
+            return 'DIRECT_SKLAD'
+    
+    return 'DIRECT_SKLAD'  # Default
+
+
+def detect_depot_code(start_location: str, route_name: str) -> Optional[str]:
+    """Detekuje kód depa ze startovního místa nebo názvu trasy"""
+    # Z start_location
+    if start_location in START_LOCATION_TO_DEPOT:
+        return START_LOCATION_TO_DEPOT[start_location]
+    
+    # Z route_name
+    if route_name:
+        route_upper = route_name.upper()
+        for prefix, depot in ROUTE_PREFIX_TO_DEPOT.items():
+            if prefix.upper() in route_upper:
+                return depot
+    
+    return None
+
+
+def count_trips(dr_lh: str) -> int:
+    """Spočítá počet jízd z DR/LH sloupce"""
+    if not dr_lh:
+        return 1
+    
+    dr_lh_upper = dr_lh.upper()
+    
+    # Počítej DR a LH
+    dr_count = dr_lh_upper.count('DR')
+    lh_count = dr_lh_upper.count('LH')
+    
+    return max(dr_count, lh_count, 1)
+
+
+def has_linehaul(dr_lh: str) -> bool:
+    """Zjistí, zda trasa má linehaul"""
+    if not dr_lh:
+        return False
+    return 'LH' in dr_lh.upper()
+
+
+def count_linehauls(dr_lh: str) -> int:
+    """Spočítá počet linehaulů"""
+    if not dr_lh:
+        return 0
+    return dr_lh.upper().count('LH')
+
+
+# =============================================================================
+# NOVÉ FUNKCE PRO VYHLEDÁVÁNÍ SAZEB
+# =============================================================================
+
+def find_fix_rate(
+    fix_rates: List[FixRate],
+    route_category: str,
+    depot_code: Optional[str]
+) -> Optional[Decimal]:
+    """
+    Najde FIX sazbu podle kategorie a depa.
+    Priorita:
+    1. route_category + depot_id match
+    2. route_category match
+    3. route_type text match (fallback)
+    """
+    # Priorita 1: Přesná shoda category + depot
+    for rate in fix_rates:
+        if rate.route_category == route_category:
+            if depot_code and rate.depot:
+                if rate.depot.code == depot_code:
+                    return rate.rate
+    
+    # Priorita 2: Shoda category
+    for rate in fix_rates:
+        if rate.route_category == route_category:
+            return rate.rate
+    
+    # Priorita 3: Fallback na route_type text
+    if route_category == 'DIRECT_SKLAD':
+        search_terms = ['PRAHA', 'DIRECT_Praha']
+    else:
+        search_terms = [depot_code or 'VRATIMOV', 'DIRECT_']
+    
+    for rate in fix_rates:
+        rt = (rate.route_type or '').upper()
+        for term in search_terms:
+            if term.upper() in rt:
+                return rate.rate
+    
+    # Fallback: první dostupná
+    if fix_rates:
+        return fix_rates[0].rate
+    
+    return None
+
+
+def find_km_rate(
+    km_rates: List[KmRate],
+    depot_code: Optional[str]
+) -> Optional[Decimal]:
+    """
+    Najde KM sazbu, prioritně podle depa.
+    """
+    # Priorita 1: Podle depot
+    if depot_code:
+        for rate in km_rates:
+            if rate.depot and rate.depot.code == depot_code:
+                return rate.rate
+    
+    # Priorita 2: První dostupná
+    if km_rates:
+        return km_rates[0].rate
+    
+    return None
+
+
+def find_linehaul_rate(
+    linehaul_rates: List[LinehaulRate],
+    to_depot_code: Optional[str],
+    vehicle_type: str = 'KAMION'
+) -> Optional[Decimal]:
+    """
+    Najde linehaul sazbu podle cílového depa a typu vozidla.
+    """
+    # Priorita 1: Přesná shoda to_code + vehicle_type
+    if to_depot_code:
+        for rate in linehaul_rates:
+            if rate.to_code == to_depot_code and rate.vehicle_type == vehicle_type:
+                return rate.rate
+    
+    # Priorita 2: Shoda to_code
+    if to_depot_code:
+        for rate in linehaul_rates:
+            if rate.to_code == to_depot_code:
+                return rate.rate
+    
+    # Priorita 3: Podle vehicle_type
+    for rate in linehaul_rates:
+        if rate.vehicle_type == vehicle_type:
+            return rate.rate
+    
+    # Fallback: průměr
+    if linehaul_rates:
+        return sum(r.rate for r in linehaul_rates) / len(linehaul_rates)
+    
+    return None
+
+
+def find_depo_rates(
+    depo_rates: List[DepoRate],
+    depot_code: Optional[str]
+) -> Dict[str, dict]:
+    """
+    Najde DEPO sazby, prioritně podle depot_id.
+    """
+    result = {}
+    
+    for rate in depo_rates:
+        # Pokud má depot_id, použij kód depa jako klíč
+        if rate.depot:
+            key = rate.depot.code
+        else:
+            key = rate.depo_name
+        
+        # Filtruj podle depot_code pokud je zadán
+        if depot_code:
+            if rate.depot and rate.depot.code != depot_code:
+                continue
+            elif not rate.depot and depot_code.lower() not in rate.depo_name.lower():
+                continue
+        
+        result[key] = {
+            'rate': rate.rate,
+            'rate_type': rate.rate_type,
+            'depo_name': rate.depo_name,
+        }
+    
+    return result
+
+
+# =============================================================================
+# HLAVNÍ ENDPOINT
+# =============================================================================
 
 @router.get("/calculate")
 async def calculate_expected_billing(
@@ -41,14 +276,10 @@ async def calculate_expected_billing(
     """
     Vypočítá očekávanou fakturaci pro dopravce za daný měsíc.
     
-    Logika:
-    1. Načte plánovací soubory platné pro daný měsíc
-    2. Načte aktivní ceníky
-    3. Spočítá:
-       - FIX za trasy (DPO + SD) × počet pracovních dnů
-       - KM × celkové km
-       - Linehaul × počet linehaulů × pracovní dny
-       - DEPO (denní nebo měsíční paušál)
+    NOVÁ LOGIKA:
+    1. Načte plánovací soubory a detekuje route_category a depot pro každou trasu
+    2. Páruje s ceníky podle route_category a depot_id
+    3. Počítá FIX × trips, KM × distance × trips, Linehaul × linehauls
     """
     
     # Ověř dopravce
@@ -64,10 +295,10 @@ async def calculate_expected_billing(
     _, last_day = monthrange(year, month)
     month_end = date(year, month, last_day)
     
-    # Pracovní dny v měsíci
+    # Pracovní dny
     working_days = get_working_days_in_month(year, month)
     
-    # Načti plánovací soubory platné pro daný měsíc
+    # Načti plánovací soubory
     plans_result = await db.execute(
         select(RoutePlan)
         .options(selectinload(RoutePlan.routes))
@@ -94,14 +325,14 @@ async def calculate_expected_billing(
             "workingDays": working_days
         }
     
-    # Načti aktivní ceníky
+    # Načti aktivní ceníky s relationships
     price_configs_result = await db.execute(
         select(PriceConfig)
         .options(
-            selectinload(PriceConfig.fix_rates),
-            selectinload(PriceConfig.km_rates),
-            selectinload(PriceConfig.depo_rates),
-            selectinload(PriceConfig.linehaul_rates),
+            selectinload(PriceConfig.fix_rates).selectinload(FixRate.depot),
+            selectinload(PriceConfig.km_rates).selectinload(KmRate.depot),
+            selectinload(PriceConfig.depo_rates).selectinload(DepoRate.depot),
+            selectinload(PriceConfig.linehaul_rates).selectinload(LinehaulRate.from_warehouse),
         )
         .where(
             and_(
@@ -118,165 +349,175 @@ async def calculate_expected_billing(
     price_configs = price_configs_result.scalars().all()
     
     # Agreguj sazby ze všech aktivních ceníků
-    fix_rates = {}  # route_type -> rate
-    km_rate = Decimal('0')
-    depo_rates = {}  # depo_name -> {rate, rate_type}
-    linehaul_rates = {}  # vehicle_type -> rate
+    all_fix_rates = []
+    all_km_rates = []
+    all_depo_rates = []
+    all_linehaul_rates = []
     
     for config in price_configs:
-        for rate in config.fix_rates:
-            fix_rates[rate.route_type] = rate.rate
-        for rate in config.km_rates:
-            if rate.rate > km_rate:
-                km_rate = rate.rate
-        for rate in config.depo_rates:
-            depo_rates[rate.depo_name] = {
-                'rate': rate.rate,
-                'rate_type': rate.rate_type
-            }
-        for rate in config.linehaul_rates:
-            key = f"{rate.from_code or '?'}->{rate.to_code or '?'}_{rate.vehicle_type}"
-            linehaul_rates[key] = rate.rate
+        all_fix_rates.extend(config.fix_rates)
+        all_km_rates.extend(config.km_rates)
+        all_depo_rates.extend(config.depo_rates)
+        all_linehaul_rates.extend(config.linehaul_rates)
     
-    # Agreguj data z plánů
-    total_dpo_routes = 0
-    total_sd_routes = 0
+    # === VÝPOČET PO TRASÁCH ===
+    
+    routes_breakdown = []
+    totals = {
+        'fix': Decimal('0'),
+        'km': Decimal('0'),
+        'linehaul': Decimal('0'),
+        'depo': Decimal('0'),
+    }
+    
+    # Agregace per depot
+    per_depot = {}
+    
+    # Agregace pro DPO/SD
+    dpo_routes = 0
+    sd_routes = 0
+    dpo_linehauls = 0
+    sd_linehauls = 0
     total_km = Decimal('0')
-    total_dpo_linehaul = 0
-    total_sd_linehaul = 0
-    vratimov_days = 0
-    bydzov_days = 0
     
-    plan_details = []
+    # Depo dny (pro DEPO sazby)
+    depot_days = {}
     
     for plan in plans:
-        # Spočítej kolik dnů z měsíce pokrývá tento plán
-        plan_start = plan.valid_from.date() if isinstance(plan.valid_from, datetime) else plan.valid_from
-        plan_end = plan.valid_to.date() if plan.valid_to else month_end
-        if isinstance(plan_end, datetime):
-            plan_end = plan_end.date()
-        
-        # Ořízni na měsíc
-        effective_start = max(plan_start, month_start)
-        effective_end = min(plan_end, month_end)
-        
-        if effective_start > effective_end:
-            continue
-        
-        # Pracovní dny v tomto rozsahu
-        plan_working_days = 0
-        current = effective_start
-        from datetime import timedelta
-        while current <= effective_end:
-            if current.weekday() < 5:
-                plan_working_days += 1
-            current += timedelta(days=1)
-        
-        if plan_working_days == 0:
-            continue
-        
-        # Přičti trasy × pracovní dny
-        total_dpo_routes += (plan.dpo_routes_count or 0) * plan_working_days
-        total_sd_routes += (plan.sd_routes_count or 0) * plan_working_days
-        
-        # Linehauly × pracovní dny
-        total_dpo_linehaul += (plan.dpo_linehaul_count or 0) * plan_working_days
-        total_sd_linehaul += (plan.sd_linehaul_count or 0) * plan_working_days
-        
-        # KM - celkem za období
-        plan_km = Decimal(str(plan.total_distance_km or 0))
-        total_km += plan_km * plan_working_days
-        
-        # DEPO dny
-        if plan.depot in ('VRATIMOV', 'BOTH'):
-            vratimov_days = max(vratimov_days, plan_working_days)
-        if plan.depot in ('BYDZOV', 'BOTH'):
-            bydzov_days = max(bydzov_days, plan_working_days)
-        
-        plan_details.append({
-            'id': plan.id,
-            'fileName': plan.file_name,
-            'validFrom': plan_start.isoformat(),
-            'validTo': plan_end.isoformat() if plan.valid_to else None,
-            'effectiveStart': effective_start.isoformat(),
-            'effectiveEnd': effective_end.isoformat(),
-            'workingDays': plan_working_days,
-            'depot': plan.depot,
-            'dpoRoutes': plan.dpo_routes_count or 0,
-            'sdRoutes': plan.sd_routes_count or 0,
-            'dpoLinehaul': plan.dpo_linehaul_count or 0,
-            'sdLinehaul': plan.sd_linehaul_count or 0,
-            'totalKm': float(plan.total_distance_km or 0),
-        })
+        for route in plan.routes:
+            # Detekce kategorie a depa
+            route_category = detect_route_category(
+                route.start_location or '',
+                route.dr_lh or ''
+            )
+            depot_code = detect_depot_code(
+                route.start_location or '',
+                route.route_name or ''
+            )
+            
+            # Počet jízd
+            trips = count_trips(route.dr_lh)
+            
+            # DPO/SD rozlišení
+            plan_type = (route.plan_type or plan.plan_type or '').upper()
+            if 'DPO' in plan_type:
+                dpo_routes += trips
+            elif 'SD' in plan_type:
+                sd_routes += trips
+            else:
+                # Default podle času
+                if route.start_time and route.start_time < '12:00':
+                    dpo_routes += trips
+                else:
+                    sd_routes += trips
+            
+            # Linehauly
+            if has_linehaul(route.dr_lh):
+                lh_count = count_linehauls(route.dr_lh)
+                if 'DPO' in plan_type or (route.start_time and route.start_time < '12:00'):
+                    dpo_linehauls += lh_count
+                else:
+                    sd_linehauls += lh_count
+            
+            # KM
+            route_km = Decimal(str(route.total_distance_km or 0))
+            total_km += route_km * trips
+            
+            # Depo dny
+            if depot_code:
+                if depot_code not in depot_days:
+                    depot_days[depot_code] = set()
+                # Každý pracovní den kde je trasa
+                depot_days[depot_code].add(depot_code)
+            
+            # === HLEDÁNÍ SAZEB ===
+            
+            # FIX
+            fix_rate = find_fix_rate(all_fix_rates, route_category, depot_code)
+            fix_cost = (fix_rate or Decimal('0')) * trips
+            
+            # KM
+            km_rate = find_km_rate(all_km_rates, depot_code)
+            km_cost = (km_rate or Decimal('0')) * route_km * trips
+            
+            # Linehaul
+            linehaul_cost = Decimal('0')
+            if has_linehaul(route.dr_lh):
+                lh_rate = find_linehaul_rate(all_linehaul_rates, depot_code)
+                linehaul_cost = (lh_rate or Decimal('0')) * count_linehauls(route.dr_lh)
+            
+            # Přičti k totals
+            totals['fix'] += fix_cost
+            totals['km'] += km_cost
+            totals['linehaul'] += linehaul_cost
+            
+            # Per depot agregace
+            if depot_code:
+                if depot_code not in per_depot:
+                    per_depot[depot_code] = {
+                        'routes': 0,
+                        'trips': 0,
+                        'km': Decimal('0'),
+                        'fix': Decimal('0'),
+                        'km_cost': Decimal('0'),
+                        'linehaul': Decimal('0'),
+                    }
+                per_depot[depot_code]['routes'] += 1
+                per_depot[depot_code]['trips'] += trips
+                per_depot[depot_code]['km'] += route_km * trips
+                per_depot[depot_code]['fix'] += fix_cost
+                per_depot[depot_code]['km_cost'] += km_cost
+                per_depot[depot_code]['linehaul'] += linehaul_cost
+            
+            routes_breakdown.append({
+                'routeName': route.route_name,
+                'startLocation': route.start_location,
+                'drLh': route.dr_lh,
+                'routeCategory': route_category,
+                'depotCode': depot_code,
+                'trips': trips,
+                'km': float(route_km),
+                'fixRate': float(fix_rate) if fix_rate else None,
+                'kmRate': float(km_rate) if km_rate else None,
+                'fixCost': float(fix_cost),
+                'kmCost': float(km_cost),
+                'linehaulCost': float(linehaul_cost),
+                'totalCost': float(fix_cost + km_cost + linehaul_cost),
+            })
     
-    # === VÝPOČET FAKTURACE ===
-    
-    # 1. FIX za trasy
-    # Hledáme sazby podle typu
-    dpo_fix_rate = fix_rates.get('DPO') or fix_rates.get('DIRECT_DPO') or fix_rates.get('DROP_Dopoledne') or Decimal('0')
-    sd_fix_rate = fix_rates.get('SD') or fix_rates.get('DIRECT_SD') or fix_rates.get('DROP_Odpoledne') or Decimal('0')
-    
-    # Pokud nemáme specifické, zkusíme obecné
-    if dpo_fix_rate == 0:
-        for key, rate in fix_rates.items():
-            if 'DPO' in key.upper() or 'DIRECT' in key.upper():
-                dpo_fix_rate = rate
-                break
-    if sd_fix_rate == 0:
-        for key, rate in fix_rates.items():
-            if 'SD' in key.upper():
-                sd_fix_rate = rate
-                break
-    
-    fix_dpo_total = dpo_fix_rate * total_dpo_routes
-    fix_sd_total = sd_fix_rate * total_sd_routes
-    fix_total = fix_dpo_total + fix_sd_total
-    
-    # 2. KM
-    km_total = km_rate * total_km
-    
-    # 3. Linehaul
-    # Použijeme průměrnou sazbu nebo první nalezenou
-    linehaul_rate_avg = Decimal('0')
-    if linehaul_rates:
-        linehaul_rate_avg = sum(linehaul_rates.values()) / len(linehaul_rates)
-    
-    total_linehauls = total_dpo_linehaul + total_sd_linehaul
-    linehaul_total = linehaul_rate_avg * total_linehauls
-    
-    # 4. DEPO
-    depo_total = Decimal('0')
+    # === DEPO NÁKLADY ===
     depo_details = []
     
-    for depo_name, depo_info in depo_rates.items():
-        rate = depo_info['rate']
-        rate_type = depo_info['rate_type']
+    # Pro každé depo kde máme trasy
+    for depot_code in depot_days.keys():
+        depo_rates = find_depo_rates(all_depo_rates, depot_code)
         
-        if 'vratimov' in depo_name.lower():
-            days = vratimov_days
-        elif 'bydžov' in depo_name.lower() or 'bydzov' in depo_name.lower():
-            days = bydzov_days
-        else:
-            days = working_days
-        
-        if rate_type == 'monthly' or rate_type == 'měsíční':
-            depo_amount = rate  # Měsíční paušál
-        else:
-            depo_amount = rate * days  # Denní sazba
-        
-        depo_total += depo_amount
-        depo_details.append({
-            'name': depo_name,
-            'rate': float(rate),
-            'rateType': rate_type,
-            'days': days,
-            'amount': float(depo_amount)
-        })
+        for key, rate_info in depo_rates.items():
+            rate = rate_info['rate']
+            rate_type = rate_info['rate_type']
+            
+            if rate_type == 'monthly' or rate_type == 'měsíční':
+                depo_amount = rate
+                days = None
+            else:
+                days = working_days
+                depo_amount = rate * days
+            
+            totals['depo'] += depo_amount
+            
+            depo_details.append({
+                'name': rate_info['depo_name'],
+                'depotCode': depot_code,
+                'rate': float(rate),
+                'rateType': rate_type,
+                'days': days,
+                'amount': float(depo_amount),
+            })
     
     # Celkem
-    grand_total = fix_total + km_total + linehaul_total + depo_total
+    grand_total = totals['fix'] + totals['km'] + totals['linehaul'] + totals['depo']
+    grand_total_with_vat = grand_total * Decimal('1.21')
     
-    # Výstup
     return {
         "success": True,
         "carrier": {
@@ -287,75 +528,56 @@ async def calculate_expected_billing(
         "periodStart": month_start.isoformat(),
         "periodEnd": month_end.isoformat(),
         "workingDays": working_days,
-        
-        "plans": plan_details,
-        "priceConfigsCount": len(price_configs),
-        
+        "totals": {
+            "fix": float(totals['fix']),
+            "km": float(totals['km']),
+            "linehaul": float(totals['linehaul']),
+            "depo": float(totals['depo']),
+            "grandTotal": float(grand_total),
+            "grandTotalWithVat": float(grand_total_with_vat),
+        },
         "breakdown": {
             "fix": {
-                "dpoRoutes": total_dpo_routes,
-                "dpoRate": float(dpo_fix_rate),
-                "dpoTotal": float(fix_dpo_total),
-                "sdRoutes": total_sd_routes,
-                "sdRate": float(sd_fix_rate),
-                "sdTotal": float(fix_sd_total),
-                "total": float(fix_total)
+                "dpoRoutes": dpo_routes,
+                "sdRoutes": sd_routes,
+                "total": float(totals['fix']),
             },
             "km": {
                 "totalKm": float(total_km),
-                "rate": float(km_rate),
-                "total": float(km_total)
+                "total": float(totals['km']),
             },
             "linehaul": {
-                "dpoCount": total_dpo_linehaul,
-                "sdCount": total_sd_linehaul,
-                "totalCount": total_linehauls,
-                "avgRate": float(linehaul_rate_avg),
-                "total": float(linehaul_total),
-                "rates": {k: float(v) for k, v in linehaul_rates.items()}
+                "dpoLinehauls": dpo_linehauls,
+                "sdLinehauls": sd_linehauls,
+                "total": float(totals['linehaul']),
             },
             "depo": {
                 "details": depo_details,
-                "total": float(depo_total)
+                "total": float(totals['depo']),
+            },
+        },
+        "perDepot": {
+            code: {
+                'routes': data['routes'],
+                'trips': data['trips'],
+                'km': float(data['km']),
+                'fix': float(data['fix']),
+                'kmCost': float(data['km_cost']),
+                'linehaul': float(data['linehaul']),
+                'total': float(data['fix'] + data['km_cost'] + data['linehaul']),
             }
+            for code, data in per_depot.items()
         },
-        
-        "totals": {
-            "fix": float(fix_total),
-            "km": float(km_total),
-            "linehaul": float(linehaul_total),
-            "depo": float(depo_total),
-            "grandTotal": float(grand_total),
-            "grandTotalWithVat": float(grand_total * Decimal('1.21'))
-        },
-        
-        "warnings": []
-    }
-
-
-@router.get("/periods")
-async def get_available_periods(
-    carrier_id: int = Query(...),
-    db: AsyncSession = Depends(get_db)
-):
-    """Vrátí dostupná období (měsíce) pro daného dopravce na základě plánovacích souborů"""
-    
-    result = await db.execute(
-        select(RoutePlan.valid_from)
-        .where(RoutePlan.carrier_id == carrier_id)
-        .order_by(RoutePlan.valid_from.desc())
-    )
-    
-    periods = set()
-    for row in result.fetchall():
-        d = row[0]
-        if isinstance(d, datetime):
-            d = d.date()
-        periods.add((d.year, d.month))
-    
-    return {
-        "periods": [
-            {"year": year, "month": month, "label": f"{month:02d}/{year}"}
-            for year, month in sorted(periods, reverse=True)
-        ]
+        "plans": [
+            {
+                "id": plan.id,
+                "fileName": plan.file_name,
+                "validFrom": plan.valid_from.isoformat() if plan.valid_from else None,
+                "depot": plan.depot,
+                "routesCount": len(plan.routes),
+            }
+            for plan in plans
+        ],
+        "routesBreakdown": routes_breakdown[:50],  # Limit pro response size
+        "warnings": [],
     }

@@ -1,11 +1,19 @@
+/**
+ * ExpectedBilling.jsx - Očekávaná fakturace
+ * Updated: 2025-12-05 - Přidán per-depot breakdown a nová data
+ */
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { 
   Calculator, Loader2, AlertTriangle, 
-  FileText, Truck, MapPin, Building2, Receipt, TrendingUp
+  FileText, Truck, MapPin, Building2, Receipt, TrendingUp, Package
 } from 'lucide-react'
 import api from '../lib/api'
 import { useCarrier } from '../lib/CarrierContext'
+
+// =============================================================================
+// HELPERS
+// =============================================================================
 
 function formatCZK(amount) {
   if (amount == null || isNaN(amount)) return '—'
@@ -15,6 +23,31 @@ function formatCZK(amount) {
     maximumFractionDigits: 0 
   }).format(amount)
 }
+
+// Barvy pro depa
+const DEPOT_COLORS = {
+  'VRATIMOV': '#ef4444',
+  'NOVY_BYDZOV': '#3b82f6',
+  'BRNO': '#10b981',
+  'CESKE_BUDEJOVICE': '#f59e0b',
+  'RAKOVNIK': '#8b5cf6',
+  'DIRECT': '#06b6d4',
+  'UNKNOWN': '#6b7280',
+}
+
+const DEPOT_NAMES = {
+  'VRATIMOV': 'Vratimov',
+  'NOVY_BYDZOV': 'Nový Bydžov',
+  'BRNO': 'Brno',
+  'CESKE_BUDEJOVICE': 'České Budějovice',
+  'RAKOVNIK': 'Rakovník',
+  'DIRECT': 'DIRECT (Praha)',
+  'UNKNOWN': 'Ostatní',
+}
+
+// =============================================================================
+// KOMPONENTY
+// =============================================================================
 
 function StatCard({ title, value, subtitle, icon: Icon, color = 'var(--color-primary)' }) {
   return (
@@ -56,11 +89,60 @@ function BreakdownRow({ label, quantity, rate, total, color = 'var(--color-text-
   )
 }
 
+function DepotBreakdownCard({ depotCode, data }) {
+  const color = DEPOT_COLORS[depotCode] || DEPOT_COLORS['UNKNOWN']
+  const name = DEPOT_NAMES[depotCode] || depotCode
+  
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-4 py-3 border-b flex items-center justify-between" 
+        style={{ backgroundColor: `${color}10`, borderColor: 'var(--color-border)' }}>
+        <h4 className="font-semibold flex items-center gap-2" style={{ color }}>
+          <Building2 size={16} />
+          {name}
+        </h4>
+        <span className="text-lg font-bold" style={{ color }}>
+          {formatCZK(data.total)}
+        </span>
+      </div>
+      <div className="p-4 space-y-2">
+        <div className="flex justify-between text-sm">
+          <span style={{ color: 'var(--color-text-muted)' }}>Tras:</span>
+          <span className="font-medium">{data.routes} ({data.trips} jízd)</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span style={{ color: 'var(--color-text-muted)' }}>KM:</span>
+          <span className="font-medium">{Math.round(data.km).toLocaleString('cs-CZ')} km</span>
+        </div>
+        <div className="border-t pt-2 mt-2" style={{ borderColor: 'var(--color-border-light)' }}>
+          <div className="flex justify-between text-sm">
+            <span style={{ color: 'var(--color-text-muted)' }}>FIX:</span>
+            <span className="font-medium">{formatCZK(data.fix)}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span style={{ color: 'var(--color-text-muted)' }}>KM náklady:</span>
+            <span className="font-medium">{formatCZK(data.kmCost)}</span>
+          </div>
+          {data.linehaul > 0 && (
+            <div className="flex justify-between text-sm">
+              <span style={{ color: 'var(--color-text-muted)' }}>Linehaul:</span>
+              <span className="font-medium">{formatCZK(data.linehaul)}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// HLAVNÍ KOMPONENTA
+// =============================================================================
+
 export default function ExpectedBilling() {
-  // Použij globální CarrierContext (dopravce a období je vybráno v hlavičce)
   const { selectedCarrierId, carrierList, selectedPeriod } = useCarrier()
   
-  // Parsuj období z formátu "MM/YYYY" na year a month
+  // Parse období
   const { selectedYear, selectedMonth } = useMemo(() => {
     if (!selectedPeriod) {
       return { 
@@ -75,13 +157,12 @@ export default function ExpectedBilling() {
     }
   }, [selectedPeriod])
 
-  // Vybraný dopravce
   const selectedCarrier = useMemo(() => {
     return carrierList?.find(c => c.id === Number(selectedCarrierId))
   }, [carrierList, selectedCarrierId])
 
-  // Vypočítej očekávanou fakturaci
-  const { data: billingData, isLoading: billingLoading, error: billingError } = useQuery({
+  // Fetch billing data
+  const { data: billingData, isLoading, error } = useQuery({
     queryKey: ['expected-billing', selectedCarrierId, selectedYear, selectedMonth],
     queryFn: () => api.get(`/expected-billing/calculate`, {
       params: {
@@ -93,9 +174,21 @@ export default function ExpectedBilling() {
     enabled: !!selectedCarrierId && !!selectedYear && !!selectedMonth
   })
 
+  // Per-depot data
+  const perDepotData = useMemo(() => {
+    if (!billingData?.perDepot) return []
+    return Object.entries(billingData.perDepot)
+      .map(([code, data]) => ({ code, ...data }))
+      .sort((a, b) => b.total - a.total)
+  }, [billingData])
+
+  // =============================================================================
+  // RENDER
+  // =============================================================================
+
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Header - bez dropdownů (používá se globální z Layout) */}
+      {/* Header */}
       <div>
         <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-dark)' }}>
           Očekávaná fakturace
@@ -105,7 +198,7 @@ export default function ExpectedBilling() {
         </p>
       </div>
 
-      {/* Prázdný stav - není vybrán dopravce */}
+      {/* Prázdný stav */}
       {!selectedCarrierId && (
         <div className="card p-12 text-center">
           <Calculator className="mx-auto mb-4" size={48} style={{ color: 'var(--color-text-light)' }} />
@@ -115,7 +208,7 @@ export default function ExpectedBilling() {
       )}
 
       {/* Loading */}
-      {selectedCarrierId && billingLoading && (
+      {selectedCarrierId && isLoading && (
         <div className="card p-12 text-center">
           <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" style={{ color: 'var(--color-primary)' }} />
           <p style={{ color: 'var(--color-text-muted)' }}>Počítám očekávanou fakturaci...</p>
@@ -123,14 +216,14 @@ export default function ExpectedBilling() {
       )}
 
       {/* Error */}
-      {selectedCarrierId && billingError && (
+      {selectedCarrierId && error && (
         <div className="card p-6" style={{ borderLeft: '4px solid var(--color-red)' }}>
           <div className="flex items-center gap-3">
             <AlertTriangle size={24} style={{ color: 'var(--color-red)' }} />
             <div>
               <p className="font-medium" style={{ color: 'var(--color-red)' }}>Chyba při výpočtu</p>
               <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                {billingError.response?.data?.detail || billingError.message}
+                {error.response?.data?.detail || error.message}
               </p>
             </div>
           </div>
@@ -174,7 +267,7 @@ export default function ExpectedBilling() {
             <StatCard
               title="FIX za trasy"
               value={formatCZK(billingData.totals?.fix)}
-              subtitle={`${billingData.breakdown?.fix?.dpoRoutes + billingData.breakdown?.fix?.sdRoutes} tras`}
+              subtitle={`${(billingData.breakdown?.fix?.dpoRoutes || 0) + (billingData.breakdown?.fix?.sdRoutes || 0)} tras`}
               icon={Truck}
               color="var(--color-purple)"
             />
@@ -187,12 +280,35 @@ export default function ExpectedBilling() {
             />
           </div>
 
+          {/* Per-depot breakdown - NOVÉ */}
+          {perDepotData.length > 0 && (
+            <div className="card">
+              <div className="card-header">
+                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+                  <Building2 size={20} />
+                  Rozpad dle depa
+                </h3>
+              </div>
+              <div className="p-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {perDepotData.map(depot => (
+                    <DepotBreakdownCard 
+                      key={depot.code} 
+                      depotCode={depot.code} 
+                      data={depot} 
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Detailní rozpis */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* FIX sazby */}
+            {/* FIX rozpis */}
             <div className="card">
-              <div className="card-header" style={{ backgroundColor: 'var(--color-purple-light)' }}>
-                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-purple)' }}>
+              <div className="card-header">
+                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
                   <Truck size={20} />
                   FIX za trasy
                 </h3>
@@ -201,15 +317,13 @@ export default function ExpectedBilling() {
                 <BreakdownRow
                   label="DPO trasy"
                   quantity={billingData.breakdown?.fix?.dpoRoutes}
-                  rate={billingData.breakdown?.fix?.dpoRate}
-                  total={billingData.breakdown?.fix?.dpoTotal}
+                  total={billingData.totals?.fix * (billingData.breakdown?.fix?.dpoRoutes / ((billingData.breakdown?.fix?.dpoRoutes || 0) + (billingData.breakdown?.fix?.sdRoutes || 1)))}
                   color="var(--color-purple)"
                 />
                 <BreakdownRow
                   label="SD trasy"
                   quantity={billingData.breakdown?.fix?.sdRoutes}
-                  rate={billingData.breakdown?.fix?.sdRate}
-                  total={billingData.breakdown?.fix?.sdTotal}
+                  total={billingData.totals?.fix * (billingData.breakdown?.fix?.sdRoutes / ((billingData.breakdown?.fix?.dpoRoutes || 1) + (billingData.breakdown?.fix?.sdRoutes || 0)))}
                   color="var(--color-purple)"
                 />
                 <div className="pt-2 mt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
@@ -222,67 +336,68 @@ export default function ExpectedBilling() {
               </div>
             </div>
 
-            {/* KM */}
+            {/* KM rozpis */}
             <div className="card">
-              <div className="card-header" style={{ backgroundColor: 'var(--color-green-light)' }}>
-                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-green)' }}>
+              <div className="card-header">
+                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
                   <MapPin size={20} />
-                  Kilometry
+                  Variabilní (KM)
                 </h3>
               </div>
               <div className="p-4 space-y-2">
                 <BreakdownRow
-                  label="Celkové km"
+                  label="Celkem KM"
                   quantity={Math.round(billingData.breakdown?.km?.totalKm || 0)}
-                  rate={billingData.breakdown?.km?.rate}
                   total={billingData.breakdown?.km?.total}
-                  color="var(--color-green)"
+                  color="#0891b2"
                 />
               </div>
             </div>
 
-            {/* Linehaul */}
+            {/* Linehaul rozpis */}
             <div className="card">
-              <div className="card-header" style={{ backgroundColor: 'var(--color-red-light)' }}>
-                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-red)' }}>
+              <div className="card-header">
+                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
                   <Truck size={20} />
-                  Linehaul (svozy)
+                  Line-haul
                 </h3>
               </div>
               <div className="p-4 space-y-2">
                 <BreakdownRow
                   label="DPO linehauly"
-                  quantity={billingData.breakdown?.linehaul?.dpoCount}
-                  total={null}
+                  quantity={billingData.breakdown?.linehaul?.dpoLinehauls}
+                  total={billingData.totals?.linehaul * ((billingData.breakdown?.linehaul?.dpoLinehauls || 0) / ((billingData.breakdown?.linehaul?.dpoLinehauls || 0) + (billingData.breakdown?.linehaul?.sdLinehauls || 1)))}
+                  color="var(--color-orange)"
                 />
                 <BreakdownRow
                   label="SD linehauly"
-                  quantity={billingData.breakdown?.linehaul?.sdCount}
-                  total={null}
+                  quantity={billingData.breakdown?.linehaul?.sdLinehauls}
+                  total={billingData.totals?.linehaul * ((billingData.breakdown?.linehaul?.sdLinehauls || 0) / ((billingData.breakdown?.linehaul?.dpoLinehauls || 1) + (billingData.breakdown?.linehaul?.sdLinehauls || 0)))}
+                  color="var(--color-orange)"
                 />
-                <BreakdownRow
-                  label="Celkem linehaulů"
-                  quantity={billingData.breakdown?.linehaul?.totalCount}
-                  rate={billingData.breakdown?.linehaul?.avgRate}
-                  total={billingData.breakdown?.linehaul?.total}
-                  color="var(--color-red)"
-                />
+                <div className="pt-2 mt-2" style={{ borderTop: '1px solid var(--color-border)' }}>
+                  <BreakdownRow
+                    label="Celkem Linehaul"
+                    total={billingData.breakdown?.linehaul?.total}
+                    color="var(--color-orange)"
+                  />
+                </div>
               </div>
             </div>
 
-            {/* DEPO */}
+            {/* DEPO rozpis */}
             <div className="card">
-              <div className="card-header" style={{ backgroundColor: '#e0f2fe' }}>
-                <h3 className="font-semibold flex items-center gap-2" style={{ color: '#0891b2' }}>
+              <div className="card-header">
+                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
                   <Building2 size={20} />
-                  DEPO
+                  DEPO náklady
                 </h3>
               </div>
               <div className="p-4 space-y-2">
                 {billingData.breakdown?.depo?.details?.map((depo, idx) => (
                   <BreakdownRow
                     key={idx}
-                    label={`${depo.name} (${depo.rateType === 'monthly' ? 'měsíční' : `${depo.days} dnů`})`}
+                    label={`${depo.name} (${depo.rateType === 'monthly' || depo.rateType === 'měsíční' ? 'měsíční' : `${depo.days} dnů`})`}
                     rate={depo.rate}
                     total={depo.amount}
                     color="#0891b2"
@@ -321,46 +436,25 @@ export default function ExpectedBilling() {
                     <thead>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
                         <th className="text-left py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Soubor</th>
-                        <th className="text-left py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Období</th>
+                        <th className="text-left py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Platnost od</th>
                         <th className="text-left py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Depo</th>
-                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Prac. dny</th>
-                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>DPO</th>
-                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>SD</th>
-                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>KM/den</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Tras</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {billingData.plans.map((plan, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid var(--color-border-light)' }}>
-                          <td className="py-2 px-3 font-medium" style={{ color: 'var(--color-text-dark)' }}>
-                            {plan.fileName}
-                          </td>
+                      {billingData.plans.map(plan => (
+                        <tr key={plan.id} style={{ borderBottom: '1px solid var(--color-border-light)' }}>
+                          <td className="py-2 px-3">{plan.fileName || `Plán #${plan.id}`}</td>
                           <td className="py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>
-                            {plan.effectiveStart} – {plan.effectiveEnd}
+                            {plan.validFrom ? new Date(plan.validFrom).toLocaleDateString('cs-CZ') : '—'}
                           </td>
                           <td className="py-2 px-3">
                             <span className="px-2 py-0.5 rounded text-xs" 
-                              style={{ 
-                                backgroundColor: plan.depot === 'VRATIMOV' ? 'var(--color-purple-light)' : 
-                                                plan.depot === 'BYDZOV' ? '#e0f2fe' : 'var(--color-bg)',
-                                color: plan.depot === 'VRATIMOV' ? 'var(--color-purple)' : 
-                                       plan.depot === 'BYDZOV' ? '#0891b2' : 'var(--color-text-muted)'
-                              }}>
+                              style={{ backgroundColor: 'var(--color-bg-dark)', color: 'var(--color-text-muted)' }}>
                               {plan.depot}
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-right" style={{ color: 'var(--color-text-dark)' }}>
-                            {plan.workingDays}
-                          </td>
-                          <td className="py-2 px-3 text-right" style={{ color: 'var(--color-text-dark)' }}>
-                            {plan.dpoRoutes}
-                          </td>
-                          <td className="py-2 px-3 text-right" style={{ color: 'var(--color-text-dark)' }}>
-                            {plan.sdRoutes}
-                          </td>
-                          <td className="py-2 px-3 text-right" style={{ color: 'var(--color-text-dark)' }}>
-                            {Math.round(plan.totalKm)}
-                          </td>
+                          <td className="py-2 px-3 text-right font-medium">{plan.routesCount}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -370,14 +464,20 @@ export default function ExpectedBilling() {
             </div>
           )}
 
-          {/* Info box */}
-          <div className="p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-              <strong>Poznámka:</strong> Výpočet je orientační a vychází z plánovacích souborů a aktivních ceníků. 
-              Skutečná fakturace se může lišit podle reálného provozu (přidané/zrušené trasy, posily, atd.).
-              Použito {billingData.priceConfigsCount} aktivních ceníků.
-            </p>
-          </div>
+          {/* Warnings */}
+          {billingData.warnings?.length > 0 && (
+            <div className="card p-4" style={{ borderLeft: '4px solid var(--color-orange)' }}>
+              <h4 className="font-medium mb-2 flex items-center gap-2" style={{ color: 'var(--color-orange)' }}>
+                <AlertTriangle size={16} />
+                Upozornění
+              </h4>
+              <ul className="text-sm space-y-1" style={{ color: 'var(--color-text-muted)' }}>
+                {billingData.warnings.map((w, i) => (
+                  <li key={i}>• {w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </>
       )}
     </div>

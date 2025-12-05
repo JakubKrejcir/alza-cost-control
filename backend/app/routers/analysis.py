@@ -1,152 +1,255 @@
 """
 Analysis API Router
+Updated: 2025-12-05 - Využívá depot_id, route_category pro párování
 """
-from typing import List, Optional
+from typing import Optional
 from decimal import Decimal
-import json
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models import (
-    Proof, ProofAnalysis, PriceConfig, Invoice
+    Proof, Carrier, PriceConfig, FixRate, KmRate, DepoRate, LinehaulRate
 )
-from app.schemas import ProofAnalysisResponse, DashboardSummary
 
 router = APIRouter()
 
 
-def analyze_proof(proof: Proof, price_config: Optional[PriceConfig]) -> dict:
-    """Analyze proof against price config"""
-    errors = []
-    warnings = []
-    ok = []
-    missing_rates = []
+# =============================================================================
+# HELPER FUNKCE PRO PÁROVÁNÍ
+# =============================================================================
+
+def find_fix_rate_for_route(
+    fix_rates: list,
+    route_type: str,
+    route_category: Optional[str] = None,
+    depot_code: Optional[str] = None
+) -> Optional[float]:
+    """
+    Najde FIX sazbu pro daný typ trasy.
+    Priorita:
+    1. route_category + depot match
+    2. route_type exact match
+    3. route_type partial match
+    """
+    # Priorita 1: Podle route_category a depot
+    if route_category:
+        for rate in fix_rates:
+            if rate.route_category == route_category:
+                if depot_code and rate.depot and rate.depot.code == depot_code:
+                    return float(rate.rate)
+                elif not depot_code:
+                    return float(rate.rate)
     
-    result = {
-        'status': 'ok',
-        'errors': errors,
-        'warnings': warnings,
-        'ok': ok,
-        'missing_rates': missing_rates,
-        'fix': {'expected': Decimal('0'), 'actual': Decimal('0'), 'difference': Decimal('0')},
-        'km': {'expected': Decimal('0'), 'actual': Decimal('0'), 'difference': Decimal('0')},
-        'linehaul': {'expected': Decimal('0'), 'actual': Decimal('0'), 'difference': Decimal('0')},
-        'depo': {'expected': Decimal('0'), 'actual': Decimal('0'), 'difference': Decimal('0')},
-    }
+    # Priorita 2: Přesná shoda route_type
+    for rate in fix_rates:
+        if rate.route_type == route_type:
+            return float(rate.rate)
     
-    if not price_config:
-        warnings.append('Žádný aktivní ceník pro toto období')
-        result['status'] = 'warning'
-        return result
+    # Priorita 3: Částečná shoda
+    route_upper = route_type.upper()
+    for rate in fix_rates:
+        rt = (rate.route_type or '').upper()
+        if route_upper in rt or rt in route_upper:
+            return float(rate.rate)
     
-    # Analyze FIX
-    expected_fix = Decimal('0')
-    fix_rates_map = {r.route_type: r.rate for r in price_config.fix_rates}
-    
-    for route in proof.route_details:
-        config_rate = fix_rates_map.get(route.route_type)
-        if config_rate:
-            expected_fix += route.count * config_rate
-        else:
-            missing_rates.append({
-                'type': 'fix',
-                'route_type': route.route_type,
-                'proof_rate': float(route.rate)
-            })
-            expected_fix += route.amount
-    
-    result['fix']['expected'] = expected_fix
-    result['fix']['actual'] = proof.total_fix or Decimal('0')
-    result['fix']['difference'] = result['fix']['actual'] - result['fix']['expected']
-    
-    if abs(result['fix']['difference']) > 100:
-        warnings.append(f"Nevysvětlený rozdíl u FIX: {result['fix']['difference']:,.0f} Kč")
-    else:
-        ok.append('FIX: Hodnoty sedí')
-    
-    # Analyze KM
-    km_rate = price_config.km_rates[0].rate if price_config.km_rates else Decimal('10.97')
-    result['km']['actual'] = proof.total_km or Decimal('0')
-    
-    if abs(result['km']['actual']) > 100:
-        ok.append('KM: Hodnoty kontrolovány')
-    
-    # Analyze Linehaul
-    result['linehaul']['actual'] = proof.total_linehaul or Decimal('0')
-    
-    # Analyze Depo
-    result['depo']['actual'] = proof.total_depo or Decimal('0')
-    
-    # Check invoices
-    invoiced_types = set()
-    for inv in proof.invoices:
-        for item in inv.items:
-            invoiced_types.add(item.item_type.lower())
-    
-    required_types = ['fix', 'km', 'linehaul', 'depo']
-    for t in required_types:
-        total_field = f'total_{t}'
-        total_value = getattr(proof, total_field, None) or Decimal('0')
-        if t not in invoiced_types and total_value > 0:
-            warnings.append(f'Chybí faktura: {t.upper()}')
-    
-    # Set overall status
-    if errors:
-        result['status'] = 'error'
-    elif warnings:
-        result['status'] = 'warning'
-    
-    return result
+    return None
 
 
-def get_comprehensive_proof_detail(proof: Proof, price_config: Optional[PriceConfig]) -> dict:
-    """Get comprehensive proof detail with all breakdowns"""
+def detect_route_category_from_type(route_type: str) -> Optional[str]:
+    """Detekuje kategorii z názvu route_type"""
+    if not route_type:
+        return None
     
-    # Build fix rates map from price config
+    rt_upper = route_type.upper()
+    
+    # DIRECT ze skladu = Praha, STČ
+    if 'PRAHA' in rt_upper or 'STČ' in rt_upper or 'STREDNI' in rt_upper:
+        return 'DIRECT_SKLAD'
+    
+    # DIRECT z depa = ostatní regiony
+    if any(depot in rt_upper for depot in ['VRATIMOV', 'BYDZOV', 'BYDŽOV', 'BRNO', 'BUDEJOVIC', 'RAKOVNIK']):
+        return 'DIRECT_DEPO'
+    
+    return None
+
+
+def detect_depot_code_from_type(route_type: str) -> Optional[str]:
+    """Detekuje kód depa z názvu route_type"""
+    if not route_type:
+        return None
+    
+    rt_upper = route_type.upper()
+    
+    if 'VRATIMOV' in rt_upper:
+        return 'VRATIMOV'
+    elif 'BYDZOV' in rt_upper or 'BYDŽOV' in rt_upper:
+        return 'NOVY_BYDZOV'
+    elif 'BRNO' in rt_upper:
+        return 'BRNO'
+    elif 'BUDEJOVIC' in rt_upper or 'BUDĚJOVIC' in rt_upper:
+        return 'CESKE_BUDEJOVICE'
+    elif 'RAKOVNIK' in rt_upper or 'RAKOVNÍK' in rt_upper:
+        return 'RAKOVNIK'
+    
+    return None
+
+
+# =============================================================================
+# HLAVNÍ ENDPOINT
+# =============================================================================
+
+@router.get("/proof/{proof_id}")
+async def analyze_proof(proof_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Analyzuje proof a porovnává s ceníkem.
+    AKTUALIZOVÁNO: Využívá depot_id a route_category pro přesné párování.
+    """
+    # Načti proof se všemi vztahy
+    result = await db.execute(
+        select(Proof)
+        .options(
+            selectinload(Proof.carrier),
+            selectinload(Proof.depot),
+            selectinload(Proof.route_details),
+            selectinload(Proof.linehaul_details),
+            selectinload(Proof.depo_details),
+            selectinload(Proof.invoices),
+        )
+        .where(Proof.id == proof_id)
+    )
+    proof = result.scalar_one_or_none()
+    
+    if not proof:
+        raise HTTPException(status_code=404, detail="Proof not found")
+    
+    # Načti aktivní ceník s relationships
+    price_config = None
+    price_result = await db.execute(
+        select(PriceConfig)
+        .options(
+            selectinload(PriceConfig.fix_rates).selectinload(FixRate.depot),
+            selectinload(PriceConfig.km_rates).selectinload(KmRate.depot),
+            selectinload(PriceConfig.depo_rates).selectinload(DepoRate.depot),
+            selectinload(PriceConfig.linehaul_rates),
+        )
+        .where(
+            and_(
+                PriceConfig.carrier_id == proof.carrier_id,
+                PriceConfig.is_active == True,
+                PriceConfig.valid_from <= proof.period_date
+            )
+        )
+        .order_by(PriceConfig.valid_from.desc())
+    )
+    price_config = price_result.scalars().first()
+    
+    # Připrav mapy sazeb
     fix_rates_map = {}
     km_rate_config = None
     depo_rates_map = {}
     linehaul_rates_map = {}
     
     if price_config:
-        fix_rates_map = {r.route_type: float(r.rate) for r in price_config.fix_rates}
+        # FIX rates - klíč je route_type, ale ukládáme i category a depot
+        for r in price_config.fix_rates:
+            fix_rates_map[r.route_type] = {
+                'rate': float(r.rate),
+                'route_category': r.route_category,
+                'depot_code': r.depot.code if r.depot else None,
+            }
+        
+        # KM rate
         if price_config.km_rates:
             km_rate_config = float(price_config.km_rates[0].rate)
-        depo_rates_map = {f"{r.depo_name}_{r.rate_type}": float(r.rate) for r in price_config.depo_rates}
+        
+        # Depo rates
+        for r in price_config.depo_rates:
+            key = f"{r.depo_name}_{r.rate_type}"
+            depo_rates_map[key] = {
+                'rate': float(r.rate),
+                'depot_code': r.depot.code if r.depot else None,
+            }
+        
+        # Linehaul rates
         for r in price_config.linehaul_rates:
             key = f"{r.from_code or ''}_{r.to_code or ''}_{r.vehicle_type}"
             linehaul_rates_map[key] = float(r.rate)
     
-    # Route details with comparison
+    # === ANALÝZA ROUTE DETAILS ===
     route_details = []
     total_routes_calculated = Decimal('0')
+    missing_rates = []
+    
     for route in proof.route_details:
-        config_rate = fix_rates_map.get(route.route_type)
+        # Detekce category a depot z route_type
+        route_category = detect_route_category_from_type(route.route_type)
+        depot_code = detect_depot_code_from_type(route.route_type)
+        
+        # Hledání sazby
+        config_rate = None
+        
+        # 1. Přesná shoda
+        if route.route_type in fix_rates_map:
+            config_rate = fix_rates_map[route.route_type]['rate']
+        else:
+            # 2. Podle category a depot
+            for rt, rate_info in fix_rates_map.items():
+                if rate_info.get('route_category') == route_category:
+                    if depot_code and rate_info.get('depot_code') == depot_code:
+                        config_rate = rate_info['rate']
+                        break
+                    elif not depot_code:
+                        config_rate = rate_info['rate']
+                        break
+        
+        # 3. Fallback - partial match
+        if config_rate is None:
+            for rt, rate_info in fix_rates_map.items():
+                if route.route_type.upper() in rt.upper() or rt.upper() in route.route_type.upper():
+                    config_rate = rate_info['rate']
+                    break
+        
         calculated = route.count * route.rate
         total_routes_calculated += calculated
         
+        status = 'ok'
+        if config_rate is None:
+            status = 'missing'
+            missing_rates.append(f"FIX: {route.route_type}")
+        elif abs(float(route.rate) - config_rate) > 1:
+            status = 'warning'
+        
         route_details.append({
             'routeType': route.route_type,
+            'routeCategory': route_category,
+            'depotCode': depot_code,
             'count': route.count,
             'proofRate': float(route.rate),
             'configRate': config_rate,
             'amount': float(route.amount),
             'calculatedAmount': float(calculated),
             'difference': float(route.amount - calculated) if route.amount else 0,
-            'status': 'ok' if config_rate and abs(float(route.rate) - config_rate) < 1 else 'warning' if config_rate else 'missing'
+            'status': status
         })
     
-    # Depo details with comparison
+    # === ANALÝZA DEPO DETAILS ===
     depo_details = []
     total_depo_calculated = Decimal('0')
+    
     for depo in proof.depo_details:
         config_key = f"{depo.depo_name}_{depo.rate_type}"
-        config_rate = depo_rates_map.get(config_key)
+        config_info = depo_rates_map.get(config_key)
+        config_rate = config_info['rate'] if config_info else None
+        
         calculated = (depo.days or 1) * depo.rate
         total_depo_calculated += calculated
+        
+        status = 'ok' if config_rate else 'missing'
+        if not config_rate:
+            missing_rates.append(f"DEPO: {depo.depo_name} ({depo.rate_type})")
         
         depo_details.append({
             'depoName': depo.depo_name,
@@ -156,15 +259,23 @@ def get_comprehensive_proof_detail(proof: Proof, price_config: Optional[PriceCon
             'configRate': config_rate,
             'amount': float(depo.amount),
             'calculatedAmount': float(calculated),
-            'status': 'ok' if config_rate else 'missing'
+            'depotCode': config_info.get('depot_code') if config_info else None,
+            'status': status
         })
     
-    # Linehaul details
+    # === ANALÝZA LINEHAUL DETAILS ===
     linehaul_details = []
     total_linehaul_calculated = Decimal('0')
+    
     for lh in proof.linehaul_details:
+        key = f"{lh.from_code or ''}_{lh.to_code or ''}_{lh.vehicle_type or ''}"
+        config_rate = linehaul_rates_map.get(key)
+        
         calculated = lh.total or (lh.rate * (lh.days or 1) * (lh.per_day or 1))
         total_linehaul_calculated += calculated
+        
+        if not config_rate:
+            missing_rates.append(f"LH: {lh.from_code} → {lh.to_code} ({lh.vehicle_type})")
         
         linehaul_details.append({
             'description': lh.description,
@@ -175,91 +286,82 @@ def get_comprehensive_proof_detail(proof: Proof, price_config: Optional[PriceCon
             'perDay': lh.per_day,
             'rate': float(lh.rate),
             'total': float(lh.total),
-            'calculatedTotal': float(calculated)
+            'calculatedTotal': float(calculated),
+            'configRate': config_rate,
+            'status': 'ok' if config_rate else 'missing'
         })
     
-    # Invoice breakdown by type
-    invoice_by_type = {
-        'fix': {'invoiced': 0, 'invoices': []},
-        'km': {'invoiced': 0, 'invoices': []},
-        'linehaul': {'invoiced': 0, 'invoices': []},
-        'depo': {'invoiced': 0, 'invoices': []}
+    # === SOUHRN ===
+    summary = {
+        'fix': {
+            'proof': float(proof.total_fix or 0),
+            'calculated': float(total_routes_calculated),
+            'difference': float((proof.total_fix or 0) - total_routes_calculated)
+        },
+        'km': {
+            'proof': float(proof.total_km or 0),
+            'rate': km_rate_config,
+        },
+        'depo': {
+            'proof': float(proof.total_depo or 0),
+            'calculated': float(total_depo_calculated),
+            'difference': float((proof.total_depo or 0) - total_depo_calculated)
+        },
+        'linehaul': {
+            'proof': float(proof.total_linehaul or 0),
+            'calculated': float(total_linehaul_calculated),
+            'difference': float((proof.total_linehaul or 0) - total_linehaul_calculated)
+        },
+        'grandTotal': float(proof.grand_total or 0),
     }
+    
+    # === INVOICE STATUS ===
+    invoice_status = []
+    invoiced_totals = {'fix': 0, 'km': 0, 'linehaul': 0, 'depo': 0}
     
     for inv in proof.invoices:
         for item in inv.items:
             item_type_lower = (item.item_type or '').lower()
-            # Match item type to category
             for cat in ['fix', 'km', 'linehaul', 'depo']:
                 if cat in item_type_lower:
-                    invoice_by_type[cat]['invoiced'] += float(item.amount or 0)
-                    invoice_by_type[cat]['invoices'].append({
-                        'invoiceId': inv.id,
-                        'invoiceNumber': inv.invoice_number,
-                        'amount': float(item.amount or 0),
-                        'description': item.description
-                    })
+                    invoiced_totals[cat] += float(item.amount or 0)
                     break
     
-    # Build invoice status
-    invoice_status = []
-    type_labels = {'fix': 'FIX', 'km': 'KM', 'linehaul': 'Linehaul', 'depo': 'DEPO'}
-    for t, label in type_labels.items():
-        proof_amount = float(getattr(proof, f'total_{t}', None) or 0)
-        invoiced = invoice_by_type[t]['invoiced']
-        remaining = proof_amount - invoiced
-        
-        status = 'ok'
-        if proof_amount > 0 and invoiced == 0:
-            status = 'missing'
-        elif abs(remaining) > 100:
-            status = 'partial'
+    for category, label in [('fix', 'FIX'), ('km', 'KM'), ('linehaul', 'Linehaul'), ('depo', 'DEPO')]:
+        proof_amount = float(getattr(proof, f'total_{category}', 0) or 0)
+        invoiced = invoiced_totals[category]
         
         invoice_status.append({
-            'type': t,
+            'category': category,
             'label': label,
             'proofAmount': proof_amount,
             'invoicedAmount': invoiced,
-            'remaining': remaining,
-            'status': status,
-            'invoices': invoice_by_type[t]['invoices']
+            'remaining': proof_amount - invoiced,
+            'status': 'ok' if abs(proof_amount - invoiced) < 100 else ('missing' if invoiced == 0 else 'partial')
         })
     
-    # Summary totals
-    summary = {
-        'totalFix': float(proof.total_fix or 0),
-        'totalKm': float(proof.total_km or 0),
-        'totalLinehaul': float(proof.total_linehaul or 0),
-        'totalDepo': float(proof.total_depo or 0),
-        'totalBonus': float(proof.total_bonus or 0),
-        'totalPenalty': float(proof.total_penalty or 0),
-        'grandTotal': float(proof.grand_total or 0),
-        'totalInvoiced': sum(inv['invoicedAmount'] for inv in invoice_status),
-        'totalRemaining': sum(inv['remaining'] for inv in invoice_status),
-    }
-    
-    # Validation checks
+    # === CHECKS ===
     checks = []
     
-    # Check 1: FIX calculation matches
-    fix_diff = abs(float(proof.total_fix or 0) - float(total_routes_calculated))
+    # Check 1: FIX matches
+    fix_diff = abs(summary['fix']['difference'])
     checks.append({
         'name': 'FIX výpočet',
-        'description': 'Součet tras odpovídá celkovému FIX',
+        'description': 'Součet FIX položek odpovídá celkovému FIX',
         'status': 'ok' if fix_diff < 100 else 'warning',
-        'expected': float(total_routes_calculated),
-        'actual': float(proof.total_fix or 0),
+        'expected': summary['fix']['calculated'],
+        'actual': summary['fix']['proof'],
         'difference': fix_diff
     })
     
-    # Check 2: DEPO calculation matches
-    depo_diff = abs(float(proof.total_depo or 0) - float(total_depo_calculated))
+    # Check 2: DEPO matches
+    depo_diff = abs(summary['depo']['difference'])
     checks.append({
         'name': 'DEPO výpočet',
         'description': 'Součet DEPO položek odpovídá celkovému DEPO',
         'status': 'ok' if depo_diff < 100 else 'warning',
-        'expected': float(total_depo_calculated),
-        'actual': float(proof.total_depo or 0),
+        'expected': summary['depo']['calculated'],
+        'actual': summary['depo']['proof'],
         'difference': depo_diff
     })
     
@@ -271,22 +373,22 @@ def get_comprehensive_proof_detail(proof: Proof, price_config: Optional[PriceCon
         'message': 'Ceník nalezen' if price_config else 'Chybí aktivní ceník'
     })
     
-    # Check 4: All types invoiced
+    # Check 4: Missing rates
+    checks.append({
+        'name': 'Chybějící sazby',
+        'description': 'Všechny položky mají odpovídající sazbu v ceníku',
+        'status': 'ok' if not missing_rates else 'warning',
+        'message': 'Kompletní' if not missing_rates else f"Chybí: {len(missing_rates)} sazeb",
+        'missingRates': missing_rates[:10]  # Max 10
+    })
+    
+    # Check 5: All invoiced
     missing_invoices = [s['label'] for s in invoice_status if s['status'] == 'missing' and s['proofAmount'] > 0]
     checks.append({
         'name': 'Fakturace',
         'description': 'Všechny typy jsou vyfakturovány',
         'status': 'ok' if not missing_invoices else 'warning',
         'message': 'Kompletní' if not missing_invoices else f"Chybí: {', '.join(missing_invoices)}"
-    })
-    
-    # Check 5: No overfakturace
-    overfakturace = [s['label'] for s in invoice_status if s['remaining'] < -100]
-    checks.append({
-        'name': 'Přefakturace',
-        'description': 'Fakturováno není více než proof',
-        'status': 'ok' if not overfakturace else 'error',
-        'message': 'OK' if not overfakturace else f"Přefakturováno: {', '.join(overfakturace)}"
     })
     
     # Overall status
@@ -308,155 +410,21 @@ def get_comprehensive_proof_detail(proof: Proof, price_config: Optional[PriceCon
         'linehaulDetails': linehaul_details,
         'invoiceStatus': invoice_status,
         'checks': checks,
+        'missingRates': missing_rates,
         'hasPriceConfig': price_config is not None,
-        'priceConfigId': price_config.id if price_config else None
     }
 
 
-@router.post("/proof/{proof_id}", response_model=ProofAnalysisResponse)
-async def analyze_proof_endpoint(proof_id: int, db: AsyncSession = Depends(get_db)):
-    """Analyze proof against price config"""
-    # Get proof with all details
-    result = await db.execute(
-        select(Proof)
-        .options(
-            selectinload(Proof.carrier),
-            selectinload(Proof.route_details),
-            selectinload(Proof.linehaul_details),
-            selectinload(Proof.depo_details),
-            selectinload(Proof.invoices).selectinload(Invoice.items)
-        )
-        .where(Proof.id == proof_id)
-    )
-    proof = result.scalar_one_or_none()
-    
-    if not proof:
-        raise HTTPException(status_code=404, detail="Proof not found")
-    
-    # Get active price config
-    price_config_result = await db.execute(
-        select(PriceConfig)
-        .options(
-            selectinload(PriceConfig.fix_rates),
-            selectinload(PriceConfig.km_rates),
-            selectinload(PriceConfig.depo_rates),
-            selectinload(PriceConfig.linehaul_rates)
-        )
-        .where(
-            and_(
-                PriceConfig.carrier_id == proof.carrier_id,
-                PriceConfig.is_active == True,
-                PriceConfig.valid_from <= proof.period_date,
-                or_(
-                    PriceConfig.valid_to == None,
-                    PriceConfig.valid_to >= proof.period_date
-                )
-            )
-        )
-        .order_by(PriceConfig.valid_from.desc())
-        .limit(1)
-    )
-    price_config = price_config_result.scalar_one_or_none()
-    
-    # Perform analysis
-    analysis_result = analyze_proof(proof, price_config)
-    
-    # Save analysis
-    analysis = ProofAnalysis(
-        proof_id=proof_id,
-        status=analysis_result['status'],
-        errors_json=json.dumps(analysis_result['errors']),
-        warnings_json=json.dumps(analysis_result['warnings']),
-        ok_json=json.dumps(analysis_result['ok']),
-        diff_fix=analysis_result['fix']['difference'],
-        diff_km=analysis_result['km']['difference'],
-        diff_linehaul=analysis_result['linehaul']['difference'],
-        diff_depo=analysis_result['depo']['difference'],
-        missing_rates_json=json.dumps(analysis_result['missing_rates'])
-    )
-    db.add(analysis)
-    await db.commit()
-    await db.refresh(analysis)
-    
-    return analysis
-
-
-@router.get("/proof/{proof_id}/detail")
-async def get_proof_detail(proof_id: int, db: AsyncSession = Depends(get_db)):
-    """Get comprehensive proof detail with all breakdowns"""
-    # Get proof with all details
-    result = await db.execute(
-        select(Proof)
-        .options(
-            selectinload(Proof.carrier),
-            selectinload(Proof.route_details),
-            selectinload(Proof.linehaul_details),
-            selectinload(Proof.depo_details),
-            selectinload(Proof.invoices).selectinload(Invoice.items)
-        )
-        .where(Proof.id == proof_id)
-    )
-    proof = result.scalar_one_or_none()
-    
-    if not proof:
-        raise HTTPException(status_code=404, detail="Proof not found")
-    
-    # Get active price config
-    price_config_result = await db.execute(
-        select(PriceConfig)
-        .options(
-            selectinload(PriceConfig.fix_rates),
-            selectinload(PriceConfig.km_rates),
-            selectinload(PriceConfig.depo_rates),
-            selectinload(PriceConfig.linehaul_rates)
-        )
-        .where(
-            and_(
-                PriceConfig.carrier_id == proof.carrier_id,
-                PriceConfig.is_active == True,
-                PriceConfig.valid_from <= proof.period_date,
-                or_(
-                    PriceConfig.valid_to == None,
-                    PriceConfig.valid_to >= proof.period_date
-                )
-            )
-        )
-        .order_by(PriceConfig.valid_from.desc())
-        .limit(1)
-    )
-    price_config = price_config_result.scalar_one_or_none()
-    
-    return get_comprehensive_proof_detail(proof, price_config)
-
-
-@router.get("/proof/{proof_id}", response_model=ProofAnalysisResponse)
-async def get_proof_analysis(proof_id: int, db: AsyncSession = Depends(get_db)):
-    """Get latest analysis for proof"""
-    result = await db.execute(
-        select(ProofAnalysis)
-        .where(ProofAnalysis.proof_id == proof_id)
-        .order_by(ProofAnalysis.created_at.desc())
-        .limit(1)
-    )
-    analysis = result.scalar_one_or_none()
-    
-    if not analysis:
-        raise HTTPException(status_code=404, detail="No analysis found for this proof")
-    
-    return analysis
-
-
-@router.get("/dashboard", response_model=List[DashboardSummary])
-async def get_dashboard(
+@router.get("/summary")
+async def get_analysis_summary(
     carrier_id: Optional[int] = Query(None),
     period: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get dashboard summary for period"""
+    """Get summary of all proofs analysis"""
     query = select(Proof).options(
         selectinload(Proof.carrier),
         selectinload(Proof.invoices),
-        selectinload(Proof.analyses)
     )
     
     filters = []
@@ -476,35 +444,27 @@ async def get_dashboard(
     summary = []
     for proof in proofs:
         invoiced_total = sum(
-            float(inv.total_without_vat or 0) for inv in proof.invoices
+            float(item.amount or 0) 
+            for inv in proof.invoices 
+            for item in inv.items
         )
+        
         proof_total = float(proof.grand_total or 0)
+        diff = proof_total - invoiced_total
         
-        # Get latest analysis
-        latest_analysis = None
-        if proof.analyses:
-            latest_analysis = sorted(proof.analyses, key=lambda a: a.created_at, reverse=True)[0]
+        status = 'ok'
+        if abs(diff) > 1000:
+            status = 'warning' if invoiced_total > 0 else 'missing'
         
-        errors_count = 0
-        warnings_count = 0
-        if latest_analysis:
-            try:
-                errors_count = len(json.loads(latest_analysis.errors_json or '[]'))
-                warnings_count = len(json.loads(latest_analysis.warnings_json or '[]'))
-            except:
-                pass
-        
-        summary.append(DashboardSummary(
-            id=proof.id,
-            carrier=proof.carrier.name,
-            period=proof.period,
-            proof_total=Decimal(str(proof_total)),
-            invoiced_total=Decimal(str(invoiced_total)),
-            invoice_count=len(proof.invoices),
-            remaining_to_invoice=Decimal(str(proof_total - invoiced_total)),
-            status=latest_analysis.status if latest_analysis else 'pending',
-            errors=errors_count,
-            warnings=warnings_count
-        ))
+        summary.append({
+            'proofId': proof.id,
+            'carrierId': proof.carrier_id,
+            'carrierName': proof.carrier.name if proof.carrier else None,
+            'period': proof.period,
+            'proofTotal': proof_total,
+            'invoicedTotal': invoiced_total,
+            'difference': diff,
+            'status': status,
+        })
     
     return summary

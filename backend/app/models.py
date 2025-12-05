@@ -1,5 +1,7 @@
 """
 SQLAlchemy Models - matching the Prisma schema exactly
+Updated: 2025-12-05 - Added Warehouse, StartLocationMapping, RouteNameMapping
+                      Updated FixRate, KmRate, LinehaulRate, DepoRate, BonusRate
 """
 from datetime import datetime
 from decimal import Decimal
@@ -9,6 +11,38 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
+
+# =============================================================================
+# WAREHOUSE MODEL (NEW)
+# =============================================================================
+
+class Warehouse(Base):
+    """Expediční sklady (CZLC4, LCU, CZTC1, LCZ)"""
+    __tablename__ = "Warehouse"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    location: Mapped[Optional[str]] = mapped_column(String(200))
+    latitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 7))
+    longitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 7))
+    warehouse_type: Mapped[str] = mapped_column("warehouseType", String(50), default='MAIN')
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+
+    # Relationships
+    linehaul_from: Mapped[List["LinehaulRate"]] = relationship(
+        back_populates="from_warehouse", 
+        foreign_keys="LinehaulRate.from_warehouse_id"
+    )
+    start_location_mappings: Mapped[List["StartLocationMapping"]] = relationship(
+        back_populates="warehouse"
+    )
+
+
+# =============================================================================
+# CARRIER MODEL
+# =============================================================================
 
 class Carrier(Base):
     __tablename__ = "Carrier"
@@ -31,6 +65,10 @@ class Carrier(Base):
     route_plans: Mapped[List["RoutePlan"]] = relationship(back_populates="carrier", cascade="all, delete-orphan")
 
 
+# =============================================================================
+# DEPOT MODEL (UPDATED)
+# =============================================================================
+
 class Depot(Base):
     __tablename__ = "Depot"
 
@@ -40,6 +78,11 @@ class Depot(Base):
     code: Mapped[Optional[str]] = mapped_column(String(50))
     type: Mapped[Optional[str]] = mapped_column(String(50))
     address: Mapped[Optional[str]] = mapped_column(Text)
+    # NEW COLUMNS
+    latitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 7))
+    longitude: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 7))
+    region: Mapped[Optional[str]] = mapped_column(String(100))
+    depot_type: Mapped[str] = mapped_column("depotType", String(50), default='DISTRIBUTION')
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -51,7 +94,56 @@ class Depot(Base):
         back_populates="to_depot", foreign_keys="LinehaulRate.to_depot_id"
     )
     proofs: Mapped[List["Proof"]] = relationship(back_populates="depot")
+    # NEW RELATIONSHIPS
+    start_location_mappings: Mapped[List["StartLocationMapping"]] = relationship(back_populates="depot")
+    route_name_mappings: Mapped[List["RouteNameMapping"]] = relationship(back_populates="depot")
+    fix_rates: Mapped[List["FixRate"]] = relationship(back_populates="depot", foreign_keys="FixRate.depot_id")
+    km_rates: Mapped[List["KmRate"]] = relationship(back_populates="depot", foreign_keys="KmRate.depot_id")
+    depo_rates_by_depot: Mapped[List["DepoRate"]] = relationship(back_populates="depot", foreign_keys="DepoRate.depot_id")
+    bonus_rates: Mapped[List["BonusRate"]] = relationship(back_populates="depot", foreign_keys="BonusRate.depot_id")
 
+
+# =============================================================================
+# START LOCATION MAPPING MODEL (NEW)
+# =============================================================================
+
+class StartLocationMapping(Base):
+    """Mapování názvů startovních míst z plánovacích souborů"""
+    __tablename__ = "StartLocationMapping"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_name: Mapped[str] = mapped_column("planName", String(100), unique=True, nullable=False)
+    location_type: Mapped[str] = mapped_column("locationType", String(20), nullable=False)
+    warehouse_id: Mapped[Optional[int]] = mapped_column("warehouseId", ForeignKey("Warehouse.id"))
+    depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
+    route_category: Mapped[str] = mapped_column("routeCategory", String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+
+    # Relationships
+    warehouse: Mapped[Optional["Warehouse"]] = relationship(back_populates="start_location_mappings")
+    depot: Mapped[Optional["Depot"]] = relationship(back_populates="start_location_mappings")
+
+
+# =============================================================================
+# ROUTE NAME MAPPING MODEL (NEW)
+# =============================================================================
+
+class RouteNameMapping(Base):
+    """Mapování prefixů názvů tras na depa"""
+    __tablename__ = "RouteNameMapping"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    route_prefix: Mapped[str] = mapped_column("routePrefix", String(50), nullable=False)
+    depot_id: Mapped[int] = mapped_column("depotId", ForeignKey("Depot.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+
+    # Relationships
+    depot: Mapped["Depot"] = relationship(back_populates="route_name_mappings")
+
+
+# =============================================================================
+# CONTRACT MODEL
+# =============================================================================
 
 class Contract(Base):
     __tablename__ = "Contract"
@@ -70,6 +162,10 @@ class Contract(Base):
     carrier: Mapped["Carrier"] = relationship(back_populates="contracts")
     prices: Mapped[List["PriceConfig"]] = relationship(back_populates="contract")
 
+
+# =============================================================================
+# PRICE CONFIG MODEL
+# =============================================================================
 
 class PriceConfig(Base):
     __tablename__ = "PriceConfig"
@@ -93,6 +189,10 @@ class PriceConfig(Base):
     bonus_rates: Mapped[List["BonusRate"]] = relationship(back_populates="price_config", cascade="all, delete-orphan")
 
 
+# =============================================================================
+# FIX RATE MODEL (UPDATED)
+# =============================================================================
+
 class FixRate(Base):
     __tablename__ = "FixRate"
 
@@ -100,10 +200,19 @@ class FixRate(Base):
     price_config_id: Mapped[int] = mapped_column("priceConfigId", ForeignKey("PriceConfig.id", ondelete="CASCADE"))
     route_type: Mapped[str] = mapped_column("routeType", String(50))
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    # NEW COLUMNS
+    depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
+    route_category: Mapped[Optional[str]] = mapped_column("routeCategory", String(50))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
+    # Relationships
     price_config: Mapped["PriceConfig"] = relationship(back_populates="fix_rates")
+    depot: Mapped[Optional["Depot"]] = relationship(back_populates="fix_rates", foreign_keys=[depot_id])
 
+
+# =============================================================================
+# KM RATE MODEL (UPDATED)
+# =============================================================================
 
 class KmRate(Base):
     __tablename__ = "KmRate"
@@ -112,10 +221,18 @@ class KmRate(Base):
     price_config_id: Mapped[int] = mapped_column("priceConfigId", ForeignKey("PriceConfig.id", ondelete="CASCADE"))
     route_type: Mapped[Optional[str]] = mapped_column("routeType", String(50))
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    # NEW COLUMNS
+    depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
+    # Relationships
     price_config: Mapped["PriceConfig"] = relationship(back_populates="km_rates")
+    depot: Mapped[Optional["Depot"]] = relationship(back_populates="km_rates", foreign_keys=[depot_id])
 
+
+# =============================================================================
+# DEPO RATE MODEL (UPDATED)
+# =============================================================================
 
 class DepoRate(Base):
     __tablename__ = "DepoRate"
@@ -125,10 +242,18 @@ class DepoRate(Base):
     depo_name: Mapped[str] = mapped_column("depoName", String(100))
     rate_type: Mapped[str] = mapped_column("rateType", String(50))
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    # NEW COLUMNS
+    depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
+    # Relationships
     price_config: Mapped["PriceConfig"] = relationship(back_populates="depo_rates")
+    depot: Mapped[Optional["Depot"]] = relationship(back_populates="depo_rates_by_depot", foreign_keys=[depot_id])
 
+
+# =============================================================================
+# LINEHAUL RATE MODEL (UPDATED)
+# =============================================================================
 
 class LinehaulRate(Base):
     __tablename__ = "LinehaulRate"
@@ -143,11 +268,22 @@ class LinehaulRate(Base):
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     is_posila: Mapped[bool] = mapped_column("isPosila", Boolean, default=False)
     description: Mapped[Optional[str]] = mapped_column(Text)
+    # NEW COLUMNS
+    from_warehouse_id: Mapped[Optional[int]] = mapped_column("fromWarehouseId", ForeignKey("Warehouse.id"))
+    pallet_capacity_min: Mapped[Optional[int]] = mapped_column("palletCapacityMin", Integer)
+    pallet_capacity_max: Mapped[Optional[int]] = mapped_column("palletCapacityMax", Integer)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
+    # Relationships
     price_config: Mapped["PriceConfig"] = relationship(back_populates="linehaul_rates")
     from_depot: Mapped[Optional["Depot"]] = relationship(back_populates="linehaul_from", foreign_keys=[from_depot_id])
     to_depot: Mapped[Optional["Depot"]] = relationship(back_populates="linehaul_to", foreign_keys=[to_depot_id])
+    from_warehouse: Mapped[Optional["Warehouse"]] = relationship(back_populates="linehaul_from", foreign_keys=[from_warehouse_id])
 
+
+# =============================================================================
+# BONUS RATE MODEL (UPDATED)
+# =============================================================================
 
 class BonusRate(Base):
     __tablename__ = "BonusRate"
@@ -158,10 +294,18 @@ class BonusRate(Base):
     quality_max: Mapped[Decimal] = mapped_column("qualityMax", Numeric(5, 2))
     bonus_amount: Mapped[Decimal] = mapped_column("bonusAmount", Numeric(10, 2))
     total_with_bonus: Mapped[Decimal] = mapped_column("totalWithBonus", Numeric(10, 2))
+    # NEW COLUMNS
+    depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
+    # Relationships
     price_config: Mapped["PriceConfig"] = relationship(back_populates="bonus_rates")
+    depot: Mapped[Optional["Depot"]] = relationship(back_populates="bonus_rates", foreign_keys=[depot_id])
 
+
+# =============================================================================
+# PROOF MODEL
+# =============================================================================
 
 class Proof(Base):
     __tablename__ = "Proof"
@@ -195,16 +339,20 @@ class Proof(Base):
     analyses: Mapped[List["ProofAnalysis"]] = relationship(back_populates="proof", cascade="all, delete-orphan")
 
 
+# =============================================================================
+# PROOF DETAIL MODELS
+# =============================================================================
+
 class ProofRouteDetail(Base):
     __tablename__ = "ProofRouteDetail"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
-    route_type: Mapped[str] = mapped_column("routeType", String(50))
-    routes_count: Mapped[Optional[int]] = mapped_column("routesCount", Integer)
-    count: Mapped[int] = mapped_column(Integer)
+    route_type: Mapped[str] = mapped_column("routeType", String(100))
+    count: Mapped[int] = mapped_column(Integer, default=0)
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     proof: Mapped["Proof"] = relationship(back_populates="route_details")
 
@@ -214,7 +362,7 @@ class ProofLinehaulDetail(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
-    description: Mapped[str] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(String(255))
     from_code: Mapped[Optional[str]] = mapped_column("fromCode", String(50))
     to_code: Mapped[Optional[str]] = mapped_column("toCode", String(50))
     vehicle_type: Mapped[Optional[str]] = mapped_column("vehicleType", String(50))
@@ -222,6 +370,7 @@ class ProofLinehaulDetail(Base):
     per_day: Mapped[Optional[int]] = mapped_column("perDay", Integer)
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     total: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     proof: Mapped["Proof"] = relationship(back_populates="linehaul_details")
 
@@ -236,53 +385,31 @@ class ProofDepoDetail(Base):
     days: Mapped[Optional[int]] = mapped_column(Integer)
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     proof: Mapped["Proof"] = relationship(back_populates="depo_details")
 
 
 class ProofDailyDetail(Base):
-    """Daily breakdown of routes from proof 'Podkladove tab' sheet"""
     __tablename__ = "ProofDailyDetail"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
     date: Mapped[datetime] = mapped_column(DateTime)
-    
-    # Počty tras (CNT) - CELKEM
+    day_of_week: Mapped[str] = mapped_column("dayOfWeek", String(10))
     dr_dpo_count: Mapped[int] = mapped_column("drDpoCount", Integer, default=0)
     lh_dpo_count: Mapped[int] = mapped_column("lhDpoCount", Integer, default=0)
     dr_sd_count: Mapped[int] = mapped_column("drSdCount", Integer, default=0)
     lh_sd_count: Mapped[int] = mapped_column("lhSdCount", Integer, default=0)
-    
-    # Počty tras - VRATIMOV
     vratimov_dr_dpo: Mapped[int] = mapped_column("vratimovDrDpo", Integer, default=0)
     vratimov_lh_dpo: Mapped[int] = mapped_column("vratimovLhDpo", Integer, default=0)
     vratimov_dr_sd: Mapped[int] = mapped_column("vratimovDrSd", Integer, default=0)
     vratimov_lh_sd: Mapped[int] = mapped_column("vratimovLhSd", Integer, default=0)
-    
-    # Počty tras - NOVÝ BYDŽOV
     bydzov_dr_dpo: Mapped[int] = mapped_column("bydzovDrDpo", Integer, default=0)
     bydzov_lh_dpo: Mapped[int] = mapped_column("bydzovLhDpo", Integer, default=0)
     bydzov_dr_sd: Mapped[int] = mapped_column("bydzovDrSd", Integer, default=0)
     bydzov_lh_sd: Mapped[int] = mapped_column("bydzovLhSd", Integer, default=0)
-    
-    # Kilometry (KM) - CELKEM
-    dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("drDpoKm", Numeric(10, 2), default=0)
-    lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("lhDpoKm", Numeric(10, 2), default=0)
-    dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("drSdKm", Numeric(10, 2), default=0)
-    lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("lhSdKm", Numeric(10, 2), default=0)
-    
-    # Kilometry - VRATIMOV
-    vratimov_dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("vratimovDrDpoKm", Numeric(10, 2), default=0)
-    vratimov_lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("vratimovLhDpoKm", Numeric(10, 2), default=0)
-    vratimov_dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("vratimovDrSdKm", Numeric(10, 2), default=0)
-    vratimov_lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("vratimovLhSdKm", Numeric(10, 2), default=0)
-    
-    # Kilometry - NOVÝ BYDŽOV
-    bydzov_dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("bydzovDrDpoKm", Numeric(10, 2), default=0)
-    bydzov_lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("bydzovLhDpoKm", Numeric(10, 2), default=0)
-    bydzov_dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("bydzovDrSdKm", Numeric(10, 2), default=0)
-    bydzov_lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("bydzovLhSdKm", Numeric(10, 2), default=0)
+    depo_hours: Mapped[Optional[Decimal]] = mapped_column("depoHours", Numeric(8, 2), default=0)
 
     proof: Mapped["Proof"] = relationship(back_populates="daily_details")
 
@@ -306,6 +433,10 @@ class ProofDailyDetail(Base):
     def bydzov_total(self) -> int:
         return self.bydzov_dr_dpo + self.bydzov_lh_dpo + self.bydzov_dr_sd + self.bydzov_lh_sd
 
+
+# =============================================================================
+# INVOICE MODELS
+# =============================================================================
 
 class Invoice(Base):
     __tablename__ = "Invoice"
@@ -343,6 +474,10 @@ class InvoiceItem(Base):
     invoice: Mapped["Invoice"] = relationship(back_populates="items")
 
 
+# =============================================================================
+# PROOF ANALYSIS MODEL
+# =============================================================================
+
 class ProofAnalysis(Base):
     __tablename__ = "ProofAnalysis"
 
@@ -361,6 +496,10 @@ class ProofAnalysis(Base):
 
     proof: Mapped["Proof"] = relationship(back_populates="analyses")
 
+
+# =============================================================================
+# AUDIT LOG MODEL
+# =============================================================================
 
 class AuditLog(Base):
     __tablename__ = "AuditLog"
@@ -390,89 +529,60 @@ class RoutePlan(Base):
     plan_type: Mapped[str] = mapped_column("planType", String(10), default="BOTH")
     depot: Mapped[str] = mapped_column("depot", String(20), default="BOTH")
     total_routes: Mapped[int] = mapped_column("totalRoutes", Integer, default=0)
-    dpo_routes_count: Mapped[int] = mapped_column("dpoRoutesCount", Integer, default=0)
-    sd_routes_count: Mapped[int] = mapped_column("sdRoutesCount", Integer, default=0)
-    dpo_linehaul_count: Mapped[int] = mapped_column("dpoLinehaulCount", Integer, default=0)
-    sd_linehaul_count: Mapped[int] = mapped_column("sdLinehaulCount", Integer, default=0)
-    total_distance_km: Mapped[Optional[Decimal]] = mapped_column("totalDistanceKm", Numeric(10, 2))
+    total_km: Mapped[Optional[Decimal]] = mapped_column("totalKm", Numeric(12, 2))
     total_stops: Mapped[int] = mapped_column("totalStops", Integer, default=0)
+    total_duration_minutes: Mapped[int] = mapped_column("totalDurationMinutes", Integer, default=0)
     vratimov_dpo_count: Mapped[int] = mapped_column("vratimovDpoCount", Integer, default=0)
     vratimov_sd_count: Mapped[int] = mapped_column("vratimovSdCount", Integer, default=0)
-    vratimov_stops: Mapped[int] = mapped_column("vratimovStops", Integer, default=0)
-    vratimov_km: Mapped[Optional[Decimal]] = mapped_column("vratimovKm", Numeric(10, 2), default=0)
-    vratimov_duration_min: Mapped[int] = mapped_column("vratimovDurationMin", Integer, default=0)
     bydzov_dpo_count: Mapped[int] = mapped_column("bydzovDpoCount", Integer, default=0)
     bydzov_sd_count: Mapped[int] = mapped_column("bydzovSdCount", Integer, default=0)
-    bydzov_stops: Mapped[int] = mapped_column("bydzovStops", Integer, default=0)
-    bydzov_km: Mapped[Optional[Decimal]] = mapped_column("bydzovKm", Numeric(10, 2), default=0)
-    bydzov_duration_min: Mapped[int] = mapped_column("bydzovDurationMin", Integer, default=0)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Relationships
     carrier: Mapped["Carrier"] = relationship(back_populates="route_plans")
-    routes: Mapped[List["RoutePlanRoute"]] = relationship(back_populates="route_plan", cascade="all, delete-orphan")
-
-    __table_args__ = (
-        UniqueConstraint('carrierId', 'validFrom', 'planType', 'depot', name='uq_carrier_date_plantype_depot'),
-    )
+    routes: Mapped[List["RoutePlanRoute"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
 
 
 class RoutePlanRoute(Base):
-    """Jednotlivé trasy v plánu (sheet Routes)"""
+    """Jednotlivé trasy v plánu"""
     __tablename__ = "RoutePlanRoute"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    route_plan_id: Mapped[int] = mapped_column("routePlanId", ForeignKey("RoutePlan.id", ondelete="CASCADE"))
+    plan_id: Mapped[int] = mapped_column("planId", ForeignKey("RoutePlan.id", ondelete="CASCADE"))
     route_name: Mapped[str] = mapped_column("routeName", String(100))
-    route_letter: Mapped[Optional[str]] = mapped_column("routeLetter", String(10))
     carrier_name: Mapped[Optional[str]] = mapped_column("carrierName", String(100))
-    route_type: Mapped[str] = mapped_column("routeType", String(20))
-    delivery_type: Mapped[Optional[str]] = mapped_column("deliveryType", String(20))
-    depot: Mapped[Optional[str]] = mapped_column("depot", String(20))
-    start_location: Mapped[Optional[str]] = mapped_column("startLocation", String(255))
     stops_count: Mapped[int] = mapped_column("stopsCount", Integer, default=0)
-    max_capacity: Mapped[int] = mapped_column("maxCapacity", Integer, default=0)
+    start_location: Mapped[Optional[str]] = mapped_column("startLocation", String(200))
+    max_capacity: Mapped[Optional[Decimal]] = mapped_column("maxCapacity", Numeric(10, 2))
     start_time: Mapped[Optional[str]] = mapped_column("startTime", String(10))
     end_time: Mapped[Optional[str]] = mapped_column("endTime", String(10))
+    total_distance_km: Mapped[Optional[Decimal]] = mapped_column("totalDistanceKm", Numeric(10, 3))
     work_time: Mapped[Optional[str]] = mapped_column("workTime", String(10))
-    distance_km: Mapped[Optional[Decimal]] = mapped_column("distanceKm", Numeric(10, 2))
-
-    route_plan: Mapped["RoutePlan"] = relationship(back_populates="routes")
-    details: Mapped[List["RoutePlanDetail"]] = relationship(back_populates="route", cascade="all, delete-orphan")
-
-
-class RoutePlanDetail(Base):
-    """Detaily jednotlivých zastávek na trase"""
-    __tablename__ = "RoutePlanDetail"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    route_id: Mapped[int] = mapped_column("routeId", ForeignKey("RoutePlanRoute.id", ondelete="CASCADE"))
-    sequence: Mapped[int] = mapped_column(Integer)
-    eta: Mapped[Optional[str]] = mapped_column(String(10))
-    order_id: Mapped[Optional[str]] = mapped_column("orderId", String(50))
-    stop_name: Mapped[Optional[str]] = mapped_column("stopName", String(255))
-    address: Mapped[Optional[str]] = mapped_column(Text)
-    distance_from_previous: Mapped[Optional[Decimal]] = mapped_column("distanceFromPrevious", Numeric(10, 2))
-    unload_sequence: Mapped[Optional[int]] = mapped_column("unloadSequence", Integer)
+    dr_lh: Mapped[Optional[str]] = mapped_column("drLh", String(20))
+    depot: Mapped[Optional[str]] = mapped_column("depot", String(50))
+    plan_type: Mapped[Optional[str]] = mapped_column("planType", String(10))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
-    route: Mapped["RoutePlanRoute"] = relationship(back_populates="details")
+    # Relationships
+    plan: Mapped["RoutePlan"] = relationship(back_populates="routes")
 
 
 # =============================================================================
-# ALZABOX MODELS - BI modul
+# ALZABOX MODELS
 # =============================================================================
 
 class AlzaBox(Base):
-    """Master data Alzaboxu - fixní informace"""
+    """Jednotlivé AlzaBoxy - master data"""
     __tablename__ = "AlzaBox"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
-    alza_id: Mapped[Optional[int]] = mapped_column("alzaId", Integer)
+    box_id: Mapped[str] = mapped_column("boxId", String(20), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(255))
-    country: Mapped[str] = mapped_column(String(5), index=True)
+    address: Mapped[Optional[str]] = mapped_column(Text)
     city: Mapped[Optional[str]] = mapped_column(String(100))
+    zip_code: Mapped[Optional[str]] = mapped_column("zipCode", String(10))
+    country: Mapped[str] = mapped_column(String(5), default='CZ')
     region: Mapped[Optional[str]] = mapped_column(String(100))
     gps_lat: Mapped[Optional[Decimal]] = mapped_column("gpsLat", Numeric(10, 6))
     gps_lon: Mapped[Optional[Decimal]] = mapped_column("gpsLon", Numeric(10, 6))
