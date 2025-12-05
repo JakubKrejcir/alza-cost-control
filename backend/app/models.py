@@ -541,7 +541,7 @@ class RoutePlan(Base):
 
     # Relationships
     carrier: Mapped["Carrier"] = relationship(back_populates="route_plans")
-    routes: Mapped[List["RoutePlanRoute"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    routes: Mapped[List["RoutePlanRoute"]] = relationship(back_populates="route_plan", cascade="all, delete-orphan")
 
 
 class RoutePlanRoute(Base):
@@ -549,7 +549,7 @@ class RoutePlanRoute(Base):
     __tablename__ = "RoutePlanRoute"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    plan_id: Mapped[int] = mapped_column("planId", ForeignKey("RoutePlan.id", ondelete="CASCADE"))
+    route_plan_id: Mapped[int] = mapped_column("routePlanId", ForeignKey("RoutePlan.id", ondelete="CASCADE"))
     route_name: Mapped[str] = mapped_column("routeName", String(100))
     carrier_name: Mapped[Optional[str]] = mapped_column("carrierName", String(100))
     stops_count: Mapped[int] = mapped_column("stopsCount", Integer, default=0)
@@ -565,7 +565,27 @@ class RoutePlanRoute(Base):
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
-    plan: Mapped["RoutePlan"] = relationship(back_populates="routes")
+    route_plan: Mapped["RoutePlan"] = relationship(back_populates="routes")
+    details: Mapped[List["RoutePlanDetail"]] = relationship(back_populates="route", cascade="all, delete-orphan")
+
+
+class RoutePlanDetail(Base):
+    """Detaily jednotlivých zastávek na trase"""
+    __tablename__ = "RoutePlanDetail"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    route_id: Mapped[int] = mapped_column("routeId", ForeignKey("RoutePlanRoute.id", ondelete="CASCADE"))
+    sequence: Mapped[int] = mapped_column(Integer)
+    eta: Mapped[Optional[str]] = mapped_column(String(10))
+    order_id: Mapped[Optional[str]] = mapped_column("orderId", String(50))
+    stop_name: Mapped[Optional[str]] = mapped_column("stopName", String(255))
+    address: Mapped[Optional[str]] = mapped_column(Text)
+    distance_from_previous: Mapped[Optional[Decimal]] = mapped_column("distanceFromPrevious", Numeric(10, 2))
+    unload_sequence: Mapped[Optional[int]] = mapped_column("unloadSequence", Integer)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+
+    # Relationships
+    route: Mapped["RoutePlanRoute"] = relationship(back_populates="details")
 
 
 # =============================================================================
