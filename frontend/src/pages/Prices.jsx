@@ -1,16 +1,10 @@
 /**
  * Prices.jsx - Přehled ceníků
- * Premium UI Design - Logistická aplikace
- * 
- * Design: Luxusní minimalistický styl s důrazem na čitelnost a hierarchii
+ * Tabulkové zobrazení - vše viditelné najednou
  */
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { 
-  Truck, Package, Building2, Warehouse, TrendingUp, 
-  ChevronRight, Search, Filter, Loader2, AlertTriangle,
-  MapPin, Clock, Zap, Star, ArrowUpRight
-} from 'lucide-react'
+import { Truck, Package, Building2, Award, AlertCircle } from 'lucide-react'
 import { prices, contracts } from '../lib/api'
 import { useCarrier } from '../lib/CarrierContext'
 
@@ -19,65 +13,23 @@ import { useCarrier } from '../lib/CarrierContext'
 // =============================================================================
 
 const DEPOT_CONFIG = {
-  'DIRECT': { 
-    name: 'Praha & Střední Čechy', 
-    color: '#0ea5e9', 
-    gradient: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
-    icon: '🏢',
-    description: 'Přímé rozvozy ze skladu'
-  },
-  'VRATIMOV': { 
-    name: 'Vratimov', 
-    color: '#ef4444', 
-    gradient: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
-    icon: '🔴',
-    description: 'Moravskoslezský kraj'
-  },
-  'NOVY_BYDZOV': { 
-    name: 'Nový Bydžov', 
-    color: '#3b82f6', 
-    gradient: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
-    icon: '🔵',
-    description: 'Východní Čechy'
-  },
-  'BRNO': { 
-    name: 'Brno', 
-    color: '#10b981', 
-    gradient: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-    icon: '🟢',
-    description: 'Jihomoravský kraj'
-  },
-  'CESKE_BUDEJOVICE': { 
-    name: 'České Budějovice', 
-    color: '#f59e0b', 
-    gradient: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-    icon: '🟠',
-    description: 'Jižní Čechy'
-  },
-  'RAKOVNIK': { 
-    name: 'Rakovník', 
-    color: '#8b5cf6', 
-    gradient: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
-    icon: '🟣',
-    description: 'Západní Čechy'
-  },
-  'UNKNOWN': { 
-    name: 'Ostatní', 
-    color: '#64748b', 
-    gradient: 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
-    icon: '⚪',
-    description: 'Nezařazené sazby'
-  },
+  'VRATIMOV': { name: 'Vratimov', color: '#ef4444', emoji: '🔴' },
+  'NOVY_BYDZOV': { name: 'Nový Bydžov', color: '#3b82f6', emoji: '🔵' },
+  'BRNO': { name: 'Brno', color: '#10b981', emoji: '🟢' },
+  'CESKE_BUDEJOVICE': { name: 'Č. Budějovice', color: '#f59e0b', emoji: '🟠' },
+  'RAKOVNIK': { name: 'Rakovník', color: '#8b5cf6', emoji: '🟣' },
+  'DIRECT': { name: 'Praha/STČ', color: '#0ea5e9', emoji: '🏢' },
 }
 
-const VEHICLE_CONFIG = {
-  'DODAVKA': { label: 'Dodávka', pallets: '8-10', icon: '🚐' },
-  'SOLO': { label: 'Solo', pallets: '15-21', icon: '🚛' },
-  'KAMION': { label: 'Kamion', pallets: '33', icon: '🚚' },
+const VEHICLE_TYPES = ['DODAVKA', 'SOLO', 'KAMION']
+const VEHICLE_LABELS = {
+  'DODAVKA': { label: 'Dodávka', emoji: '🚐', pallets: '8-10 pal' },
+  'SOLO': { label: 'Solo', emoji: '🚛', pallets: '15-21 pal' },
+  'KAMION': { label: 'Kamion', emoji: '🚚', pallets: '33 pal' },
 }
 
 // =============================================================================
-// UTILITY FUNKCE
+// UTILITY
 // =============================================================================
 
 function formatCZK(amount) {
@@ -89,15 +41,15 @@ function formatCZK(amount) {
   }).format(amount)
 }
 
-function extractDepotFromRouteType(routeType) {
-  if (!routeType) return null
-  const rt = routeType.toUpperCase()
-  if (rt.includes('VRATIMOV')) return 'VRATIMOV'
-  if (rt.includes('BYDZOV') || rt.includes('BYDŽOV')) return 'NOVY_BYDZOV'
-  if (rt.includes('BRNO')) return 'BRNO'
-  if (rt.includes('BUDEJOVIC') || rt.includes('BUDĚJOVIC')) return 'CESKE_BUDEJOVICE'
-  if (rt.includes('RAKOVNIK') || rt.includes('RAKOVNÍK')) return 'RAKOVNIK'
-  if (rt.includes('PRAHA') || rt.includes('DIRECT')) return 'DIRECT'
+function extractDepotCode(text) {
+  if (!text) return null
+  const t = text.toUpperCase()
+  if (t.includes('VRATIMOV')) return 'VRATIMOV'
+  if (t.includes('BYDZOV') || t.includes('BYDŽOV')) return 'NOVY_BYDZOV'
+  if (t.includes('BRNO')) return 'BRNO'
+  if (t.includes('BUDEJOVIC') || t.includes('BUDĚJOVIC')) return 'CESKE_BUDEJOVICE'
+  if (t.includes('RAKOVNIK') || t.includes('RAKOVNÍK')) return 'RAKOVNIK'
+  if (t.includes('PRAHA') || t.includes('DIRECT') || t.includes('STČ')) return 'DIRECT'
   return null
 }
 
@@ -105,375 +57,401 @@ function extractDepotFromRouteType(routeType) {
 // KOMPONENTY
 // =============================================================================
 
-// Animated Counter
-function AnimatedValue({ value, suffix = '' }) {
+function SectionHeader({ icon: Icon, title }) {
   return (
-    <span className="tabular-nums font-semibold">
-      {formatCZK(value)}{suffix}
-    </span>
-  )
-}
-
-// Rate Badge (pro dodatek)
-function DodatekBadge({ number }) {
-  if (!number) return null
-  return (
-    <span 
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
-      style={{ 
-        background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(59, 130, 246, 0.15) 100%)',
-        color: '#7c3aed',
-        border: '1px solid rgba(139, 92, 246, 0.2)'
-      }}
-    >
-      <Star size={10} />
-      D{number}
-    </span>
-  )
-}
-
-// Kategorie badge
-function CategoryBadge({ category }) {
-  const isWarehouse = category === 'DIRECT_SKLAD'
-  return (
-    <span 
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium"
-      style={{ 
-        backgroundColor: isWarehouse ? 'rgba(14, 165, 233, 0.1)' : 'rgba(139, 92, 246, 0.1)',
-        color: isWarehouse ? '#0ea5e9' : '#8b5cf6',
-      }}
-    >
-      {isWarehouse ? <Warehouse size={10} /> : <Building2 size={10} />}
-      {isWarehouse ? 'Ze skladu' : 'Z depa'}
-    </span>
-  )
-}
-
-// Jednotlivý řádek sazby
-function RateRow({ label, value, unit, dodatek, category, highlight, description }) {
-  return (
-    <div 
-      className={`group relative flex items-center justify-between py-3.5 px-4 transition-all duration-200 ${highlight ? 'bg-gradient-to-r from-amber-50 to-transparent' : 'hover:bg-slate-50/80'}`}
-      style={{ borderBottom: '1px solid #f1f5f9' }}
-    >
-      <div className="flex items-center gap-3 flex-1 min-w-0">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-700 truncate">
-              {label}
-            </span>
-            {category && <CategoryBadge category={category} />}
-          </div>
-          {description && (
-            <span className="text-xs text-slate-400">{description}</span>
-          )}
-        </div>
-      </div>
-      
-      <div className="flex items-center gap-3">
-        <div className="text-right">
-          <span className="text-base font-semibold text-slate-900 tabular-nums">
-            {formatCZK(value)}
-          </span>
-          {unit && (
-            <span className="text-sm text-slate-400 ml-1">{unit}</span>
-          )}
-        </div>
-        {dodatek && <DodatekBadge number={dodatek} />}
-      </div>
-      
-      {/* Hover indicator */}
-      <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-blue-500 to-purple-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-    </div>
-  )
-}
-
-// Sekce s typem sazby
-function RateSection({ title, icon: Icon, color, rates, children }) {
-  const hasRates = rates && rates.length > 0
-  
-  if (!hasRates && !children) return null
-  
-  return (
-    <div className="mb-6 last:mb-0">
-      <div className="flex items-center gap-2 mb-3 px-1">
-        <div 
-          className="w-8 h-8 rounded-lg flex items-center justify-center"
-          style={{ backgroundColor: `${color}15` }}
-        >
-          <Icon size={16} style={{ color }} />
-        </div>
-        <h4 className="text-sm font-semibold text-slate-600 uppercase tracking-wide">
-          {title}
-        </h4>
-        {hasRates && (
-          <span className="text-xs text-slate-400 ml-auto">
-            {rates.length} {rates.length === 1 ? 'sazba' : rates.length < 5 ? 'sazby' : 'sazeb'}
-          </span>
-        )}
-      </div>
-      
-      <div className="bg-white rounded-xl border border-slate-200/60 overflow-hidden shadow-sm">
-        {children || rates.map((rate, idx) => (
-          <RateRow 
-            key={idx}
-            label={rate.label}
-            value={rate.value}
-            unit={rate.unit}
-            dodatek={rate.dodatek}
-            category={rate.category}
-            description={rate.description}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// Linehaul karta
-function LinehaulCard({ rate }) {
-  const vehicleInfo = VEHICLE_CONFIG[rate.vehicleType] || VEHICLE_CONFIG['KAMION']
-  
-  return (
-    <div 
-      className="group relative bg-white rounded-xl border border-slate-200/60 p-4 hover:shadow-lg hover:border-slate-300 transition-all duration-300"
-    >
-      {/* Vehicle icon */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-2xl">{vehicleInfo.icon}</span>
-          <div>
-            <div className="text-sm font-semibold text-slate-800">{vehicleInfo.label}</div>
-            <div className="text-xs text-slate-400">{vehicleInfo.pallets} palet</div>
-          </div>
-        </div>
-        {rate.dodatek && <DodatekBadge number={rate.dodatek} />}
-      </div>
-      
-      {/* Route */}
-      <div className="flex items-center gap-2 mb-3 py-2 px-3 rounded-lg bg-slate-50">
-        <span className="text-xs font-mono font-medium text-slate-600">{rate.fromCode}</span>
-        <ArrowUpRight size={12} className="text-slate-400" />
-        <span className="text-xs font-mono font-medium text-slate-600">{rate.toCode}</span>
-      </div>
-      
-      {/* Price */}
-      <div className="text-right">
-        <span className="text-xl font-bold text-slate-900 tabular-nums">
-          {formatCZK(rate.value)}
-        </span>
-      </div>
-      
-      {/* Hover effect */}
+    <div className="flex items-center gap-3 mb-4">
       <div 
-        className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"
-        style={{ 
-          background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.03) 0%, rgba(139, 92, 246, 0.03) 100%)',
-        }}
-      />
-    </div>
-  )
-}
-
-// Hlavní karta depa
-function DepotCard({ depotCode, data, isExpanded, onToggle }) {
-  const config = DEPOT_CONFIG[depotCode] || DEPOT_CONFIG['UNKNOWN']
-  const { fixRates, kmRates, linehaulRates, depoRates } = data
-  
-  const totalRates = fixRates.length + kmRates.length + linehaulRates.length + depoRates.length
-  
-  // Transform rates for display
-  const fixRatesFormatted = fixRates.map(r => ({
-    label: r.routeType || r.route_type || 'Standardní trasa',
-    value: r.rate,
-    dodatek: r.dodatek,
-    category: r.routeCategory || r.route_category,
-  }))
-  
-  const kmRatesFormatted = kmRates.map(r => ({
-    label: r.routeType || r.route_type || 'Kilometrová sazba',
-    value: r.rate,
-    unit: '/km',
-    dodatek: r.dodatek,
-  }))
-  
-  const depoRatesFormatted = depoRates.map(r => ({
-    label: r.depoName || r.depo_name || 'Náklady depa',
-    value: r.rate,
-    unit: (r.rateType || r.rate_type) === 'hourly' ? '/hod' : '/měs',
-    dodatek: r.dodatek,
-    description: (r.rateType || r.rate_type) === 'hourly' ? 'Hodinová sazba' : 'Měsíční paušál',
-  }))
-  
-  const linehaulRatesFormatted = linehaulRates.map(r => ({
-    fromCode: r.fromCode || r.from_code || '?',
-    toCode: r.toCode || r.to_code || depotCode,
-    vehicleType: r.vehicleType || r.vehicle_type || 'KAMION',
-    value: r.rate,
-    dodatek: r.dodatek,
-  }))
-  
-  return (
-    <div 
-      className="relative bg-white rounded-2xl border border-slate-200/60 overflow-hidden shadow-sm hover:shadow-xl transition-all duration-500"
-      style={{ 
-        background: 'linear-gradient(180deg, #ffffff 0%, #fafbfc 100%)',
-      }}
-    >
-      {/* Gradient top border */}
-      <div 
-        className="absolute top-0 left-0 right-0 h-1"
-        style={{ background: config.gradient }}
-      />
-      
-      {/* Header */}
-      <div 
-        className="relative px-6 py-5 cursor-pointer select-none"
-        onClick={onToggle}
+        className="w-10 h-10 rounded-xl flex items-center justify-center"
+        style={{ backgroundColor: '#f1f5f9' }}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div 
-              className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl shadow-sm"
-              style={{ 
-                background: `${config.color}10`,
-                border: `1px solid ${config.color}20`,
-              }}
-            >
-              {config.icon}
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-slate-900">
-                {config.name}
-              </h3>
-              <p className="text-sm text-slate-500">{config.description}</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            <div className="text-right">
-              <div className="text-2xl font-bold text-slate-900">{totalRates}</div>
-              <div className="text-xs text-slate-400 uppercase tracking-wide">sazeb</div>
-            </div>
-            <div 
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isExpanded ? 'rotate-90' : ''}`}
-              style={{ backgroundColor: `${config.color}10` }}
-            >
-              <ChevronRight size={18} style={{ color: config.color }} />
-            </div>
-          </div>
-        </div>
-        
-        {/* Quick stats */}
-        <div className="flex items-center gap-6 mt-4 pt-4 border-t border-slate-100">
-          {fixRates.length > 0 && (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Package size={14} style={{ color: config.color }} />
-              <span>{fixRates.length} FIX</span>
-            </div>
-          )}
-          {kmRates.length > 0 && (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <MapPin size={14} style={{ color: config.color }} />
-              <span>{kmRates.length} KM</span>
-            </div>
-          )}
-          {linehaulRates.length > 0 && (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Truck size={14} style={{ color: config.color }} />
-              <span>{linehaulRates.length} LH</span>
-            </div>
-          )}
-          {depoRates.length > 0 && (
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <Building2 size={14} style={{ color: config.color }} />
-              <span>{depoRates.length} DEPO</span>
-            </div>
-          )}
-        </div>
+        <Icon size={20} className="text-slate-600" />
       </div>
+      <h2 className="text-lg font-bold text-slate-800 uppercase tracking-wide">
+        {title}
+      </h2>
+    </div>
+  )
+}
+
+function DepotHeader({ depotCode, children }) {
+  const config = DEPOT_CONFIG[depotCode] || { name: depotCode, color: '#64748b', emoji: '⚪' }
+  return (
+    <th 
+      className="px-4 py-3 text-center font-semibold text-sm"
+      style={{ 
+        backgroundColor: `${config.color}15`,
+        color: config.color,
+        borderBottom: `2px solid ${config.color}`
+      }}
+    >
+      <span className="mr-1">{config.emoji}</span>
+      {children || config.name}
+    </th>
+  )
+}
+
+// LINEHAUL TABULKA
+function LinehaulTable({ linehaulRates, depots }) {
+  if (linehaulRates.length === 0) return null
+  
+  // Vytvoř matici: vehicle_type -> depot -> rate
+  const matrix = {}
+  VEHICLE_TYPES.forEach(vt => {
+    matrix[vt] = {}
+  })
+  
+  linehaulRates.forEach(rate => {
+    const vehicleType = (rate.vehicleType || rate.vehicle_type || 'KAMION').toUpperCase()
+    const toDepot = rate.toCode || rate.to_code || extractDepotCode(rate.description) || 'UNKNOWN'
+    
+    // Normalizuj vehicle type
+    let normalizedVT = vehicleType
+    if (vehicleType.includes('DODAV') || vehicleType.includes('VAN')) normalizedVT = 'DODAVKA'
+    else if (vehicleType.includes('SOLO')) normalizedVT = 'SOLO'
+    else if (vehicleType.includes('KAMION') || vehicleType.includes('TRUCK')) normalizedVT = 'KAMION'
+    
+    if (matrix[normalizedVT]) {
+      matrix[normalizedVT][toDepot] = rate.rate
+    }
+  })
+  
+  // Zjisti které depoty mají data
+  const activeDepots = depots.filter(d => 
+    VEHICLE_TYPES.some(vt => matrix[vt][d] != null)
+  )
+  
+  if (activeDepots.length === 0) return null
+  
+  return (
+    <div className="mb-8">
+      <SectionHeader icon={Truck} title="Linehaul (přeprava ze skladu na depo)" />
       
-      {/* Content - expandable */}
-      <div 
-        className={`overflow-hidden transition-all duration-500 ease-out ${isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'}`}
-      >
-        <div className="px-6 pb-6 space-y-1">
-          {/* Separator */}
-          <div className="h-px bg-gradient-to-r from-transparent via-slate-200 to-transparent mb-6" />
-          
-          {/* FIX sazby */}
-          {fixRatesFormatted.length > 0 && (
-            <RateSection 
-              title="Rozvoz (FIX za trasu)" 
-              icon={Package} 
-              color={config.color}
-              rates={fixRatesFormatted}
-            />
-          )}
-          
-          {/* KM sazby */}
-          {kmRatesFormatted.length > 0 && (
-            <RateSection 
-              title="Variabilní náklady" 
-              icon={MapPin} 
-              color={config.color}
-              rates={kmRatesFormatted}
-            />
-          )}
-          
-          {/* Linehaul */}
-          {linehaulRatesFormatted.length > 0 && (
-            <RateSection 
-              title="Line-haul" 
-              icon={Truck} 
-              color={config.color}
-              rates={[]}
-            >
-              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {linehaulRatesFormatted.map((rate, idx) => (
-                  <LinehaulCard key={idx} rate={rate} />
-                ))}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200">
+          <thead>
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 bg-slate-50 border-b border-slate-200">
+                Typ vozu
+              </th>
+              {activeDepots.map(depot => (
+                <DepotHeader key={depot} depotCode={depot} />
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {VEHICLE_TYPES.map((vt, idx) => {
+              const info = VEHICLE_LABELS[vt]
+              const hasAnyRate = activeDepots.some(d => matrix[vt][d] != null)
+              if (!hasAnyRate) return null
+              
+              return (
+                <tr 
+                  key={vt} 
+                  className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}
+                >
+                  <td className="px-4 py-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{info.emoji}</span>
+                      <div>
+                        <div className="font-medium text-slate-800">{info.label}</div>
+                        <div className="text-xs text-slate-400">{info.pallets}</div>
+                      </div>
+                    </div>
+                  </td>
+                  {activeDepots.map(depot => (
+                    <td 
+                      key={depot} 
+                      className="px-4 py-3 text-center border-b border-slate-100"
+                    >
+                      <span className="font-semibold text-slate-800 tabular-nums">
+                        {matrix[vt][depot] ? formatCZK(matrix[vt][depot]) : '—'}
+                      </span>
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ROZVOZ TABULKA (FIX + KM)
+function RozvozTable({ fixRates, kmRates }) {
+  if (fixRates.length === 0 && kmRates.length === 0) return null
+  
+  // Seskup fix rates podle depa
+  const fixByDepot = {}
+  fixRates.forEach(rate => {
+    const routeType = rate.routeType || rate.route_type || ''
+    const depot = rate.depot?.code || extractDepotCode(routeType) || 'DIRECT'
+    const category = rate.routeCategory || rate.route_category
+    const isFromWarehouse = category === 'DIRECT_SKLAD' || routeType.toUpperCase().includes('DIRECT')
+    
+    if (!fixByDepot[depot]) {
+      fixByDepot[depot] = []
+    }
+    
+    // Extrahuj typ trasy (DPO/SD)
+    let tripType = 'DIRECT'
+    const rt = routeType.toUpperCase()
+    if (rt.includes('DPO')) tripType = 'DPO'
+    else if (rt.includes('SD') || rt.includes('SAME')) tripType = 'SD'
+    
+    fixByDepot[depot].push({
+      tripType,
+      rate: rate.rate,
+      isFromWarehouse,
+      routeType
+    })
+  })
+  
+  // Seskup km rates podle depa
+  const kmByDepot = {}
+  kmRates.forEach(rate => {
+    const depot = rate.depot?.code || extractDepotCode(rate.routeType || rate.route_type) || 'DIRECT'
+    kmByDepot[depot] = rate.rate
+  })
+  
+  // Vytvoř řádky tabulky
+  const rows = []
+  Object.entries(fixByDepot).forEach(([depot, rates]) => {
+    rates.forEach(r => {
+      rows.push({
+        depot,
+        tripType: r.tripType,
+        fixRate: r.rate,
+        kmRate: kmByDepot[depot],
+        source: r.isFromWarehouse ? 'ze skladu' : 'z depa',
+        routeType: r.routeType
+      })
+    })
+  })
+  
+  // Seřaď podle depa
+  const depotOrder = ['VRATIMOV', 'NOVY_BYDZOV', 'BRNO', 'CESKE_BUDEJOVICE', 'RAKOVNIK', 'DIRECT']
+  rows.sort((a, b) => {
+    const aIdx = depotOrder.indexOf(a.depot)
+    const bIdx = depotOrder.indexOf(b.depot)
+    if (aIdx !== bIdx) return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx)
+    return a.tripType.localeCompare(b.tripType)
+  })
+  
+  if (rows.length === 0) return null
+  
+  return (
+    <div className="mb-8">
+      <SectionHeader icon={Package} title="Rozvoz (FIX za trasu + KM)" />
+      
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200">
+          <thead>
+            <tr className="bg-slate-50">
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 border-b border-slate-200">Depo</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 border-b border-slate-200">Typ trasy</th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-600 border-b border-slate-200">FIX/trasa</th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-600 border-b border-slate-200">Kč/km</th>
+              <th className="px-4 py-3 text-center font-semibold text-slate-600 border-b border-slate-200">Zdroj</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, idx) => {
+              const config = DEPOT_CONFIG[row.depot] || { name: row.depot, color: '#64748b', emoji: '⚪' }
+              const prevRow = rows[idx - 1]
+              const showDepot = !prevRow || prevRow.depot !== row.depot
+              
+              return (
+                <tr 
+                  key={`${row.depot}-${row.tripType}-${idx}`}
+                  className={showDepot && idx > 0 ? 'border-t-2 border-slate-200' : ''}
+                  style={{ backgroundColor: idx % 2 === 0 ? 'white' : '#fafbfc' }}
+                >
+                  <td className="px-4 py-3 border-b border-slate-100">
+                    {showDepot && (
+                      <div className="flex items-center gap-2">
+                        <span>{config.emoji}</span>
+                        <span className="font-medium" style={{ color: config.color }}>
+                          {config.name}
+                        </span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 border-b border-slate-100">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
+                      {row.tripType}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right border-b border-slate-100">
+                    <span className="font-semibold text-slate-800 tabular-nums">
+                      {formatCZK(row.fixRate)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right border-b border-slate-100">
+                    <span className="font-semibold text-slate-800 tabular-nums">
+                      {row.kmRate ? `${Number(row.kmRate).toFixed(2)} Kč` : '—'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-center border-b border-slate-100">
+                    <span 
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        row.source === 'ze skladu' 
+                          ? 'bg-sky-50 text-sky-700' 
+                          : 'bg-purple-50 text-purple-700'
+                      }`}
+                    >
+                      {row.source}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// NÁKLADY DEP TABULKA
+function DepoNakladyTable({ depoRates, depots }) {
+  if (depoRates.length === 0) return null
+  
+  // Seskup podle depa a typu
+  const byDepot = {}
+  depoRates.forEach(rate => {
+    const depot = rate.depot?.code || extractDepotCode(rate.depoName || rate.depo_name) || 'UNKNOWN'
+    const rateType = rate.rateType || rate.rate_type || 'monthly'
+    
+    if (!byDepot[depot]) {
+      byDepot[depot] = {}
+    }
+    byDepot[depot][rateType] = rate.rate
+  })
+  
+  const activeDepots = depots.filter(d => byDepot[d])
+  if (activeDepots.length === 0) return null
+  
+  const rateTypes = [
+    { key: 'monthly', label: 'Sklad/měsíc' },
+    { key: 'hourly', label: 'Hodinová sazba' },
+  ]
+  
+  return (
+    <div className="mb-8">
+      <SectionHeader icon={Building2} title="Náklady dep (měsíční paušály)" />
+      
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200">
+          <thead>
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600 bg-slate-50 border-b border-slate-200">
+                Typ nákladu
+              </th>
+              {activeDepots.map(depot => (
+                <DepotHeader key={depot} depotCode={depot} />
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rateTypes.map((rt, idx) => {
+              const hasAnyRate = activeDepots.some(d => byDepot[d]?.[rt.key] != null)
+              if (!hasAnyRate) return null
+              
+              return (
+                <tr 
+                  key={rt.key}
+                  className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}
+                >
+                  <td className="px-4 py-3 border-b border-slate-100 font-medium text-slate-700">
+                    {rt.label}
+                  </td>
+                  {activeDepots.map(depot => (
+                    <td 
+                      key={depot} 
+                      className="px-4 py-3 text-center border-b border-slate-100"
+                    >
+                      <span className="font-semibold text-slate-800 tabular-nums">
+                        {byDepot[depot]?.[rt.key] 
+                          ? `${formatCZK(byDepot[depot][rt.key])}${rt.key === 'hourly' ? '/hod' : ''}` 
+                          : '—'
+                        }
+                      </span>
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// BONUSY TABULKA
+function BonusyTable({ bonusRates }) {
+  if (bonusRates.length === 0) return null
+  
+  // Seřaď podle quality_min
+  const sorted = [...bonusRates].sort((a, b) => {
+    const aMin = a.qualityMin || a.quality_min || 0
+    const bMin = b.qualityMin || b.quality_min || 0
+    return aMin - bMin
+  })
+  
+  return (
+    <div className="mb-8">
+      <SectionHeader icon={Award} title="Bonusy za kvalitu" />
+      
+      <div className="overflow-x-auto">
+        <div className="flex gap-0 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200">
+          {sorted.map((bonus, idx) => {
+            const min = bonus.qualityMin || bonus.quality_min || 0
+            const max = bonus.qualityMax || bonus.quality_max || 100
+            const amount = bonus.bonusAmount || bonus.bonus_amount || 0
+            
+            const isLast = idx === sorted.length - 1
+            const isFirst = idx === 0
+            
+            // Gradient barva podle výše bonusu
+            const intensity = idx / (sorted.length - 1)
+            const bgColor = amount > 0 
+              ? `rgba(16, 185, 129, ${0.05 + intensity * 0.15})` 
+              : '#fef2f2'
+            
+            return (
+              <div 
+                key={idx}
+                className="flex-1 text-center py-4 px-3 border-r border-slate-200 last:border-r-0"
+                style={{ backgroundColor: bgColor }}
+              >
+                <div className="text-sm font-medium text-slate-600 mb-2">
+                  {isFirst ? `< ${max}%` : isLast ? `≥ ${min}%` : `${min}-${max}%`}
+                </div>
+                <div 
+                  className={`text-lg font-bold ${amount > 0 ? 'text-emerald-600' : 'text-slate-400'}`}
+                >
+                  {amount > 0 ? `+${formatCZK(amount)}` : '0 Kč'}
+                </div>
               </div>
-            </RateSection>
-          )}
-          
-          {/* DEPO náklady */}
-          {depoRatesFormatted.length > 0 && (
-            <RateSection 
-              title="Náklady depa" 
-              icon={Building2} 
-              color={config.color}
-              rates={depoRatesFormatted}
-            />
-          )}
+            )
+          })}
         </div>
       </div>
     </div>
   )
 }
 
-// Empty state
-function EmptyState({ title, description, icon: Icon }) {
+// PRÁZDNÝ STAV
+function EmptyState({ message }) {
   return (
-    <div className="flex flex-col items-center justify-center py-20 px-6">
-      <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-50 flex items-center justify-center mb-6 shadow-inner">
-        <Icon size={32} className="text-slate-300" />
+    <div className="flex flex-col items-center justify-center py-16 px-6 bg-white rounded-xl border border-slate-200">
+      <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+        <AlertCircle size={28} className="text-slate-400" />
       </div>
-      <h3 className="text-xl font-semibold text-slate-700 mb-2">{title}</h3>
-      <p className="text-slate-500 text-center max-w-md">{description}</p>
-    </div>
-  )
-}
-
-// Loading state
-function LoadingState() {
-  return (
-    <div className="flex flex-col items-center justify-center py-20">
-      <div className="relative">
-        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-500 animate-pulse" />
-        <Loader2 className="absolute inset-0 m-auto w-8 h-8 text-white animate-spin" />
-      </div>
-      <p className="mt-6 text-slate-500 font-medium">Načítám ceníky...</p>
+      <p className="text-slate-500 text-center">{message}</p>
     </div>
   )
 }
@@ -484,14 +462,12 @@ function LoadingState() {
 
 export default function Prices() {
   const { selectedCarrierId, carrierList } = useCarrier()
-  const [expandedDepots, setExpandedDepots] = useState(new Set(['DIRECT']))
-  const [searchQuery, setSearchQuery] = useState('')
   
   const selectedCarrier = useMemo(() => {
     return carrierList?.find(c => c.id === Number(selectedCarrierId))
   }, [carrierList, selectedCarrierId])
   
-  // Načti smlouvy
+  // Načti smlouvy (pro čísla dodatků)
   const { data: contractList } = useQuery({
     queryKey: ['contracts', selectedCarrierId],
     queryFn: () => contracts.getAll(selectedCarrierId),
@@ -499,264 +475,138 @@ export default function Prices() {
   })
   
   // Načti ceníky
-  const { data: priceList, isLoading, error } = useQuery({
+  const { data: priceList, isLoading } = useQuery({
     queryKey: ['prices', selectedCarrierId],
     queryFn: () => prices.getAll({ carrier_id: selectedCarrierId, active: 'true' }),
     enabled: !!selectedCarrierId
   })
   
-  // Zpracuj data - seskup podle depa
-  const pricesByDepot = useMemo(() => {
-    if (!priceList) return {}
+  // Zpracuj data
+  const processedData = useMemo(() => {
+    if (!priceList) return { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [], bonusRates: [], depots: [] }
     
-    const result = {}
-    const contractMap = {}
-    contractList?.forEach(c => {
-      contractMap[c.id] = c.amendment_number || c.amendmentNumber || null
-    })
+    const fixRates = []
+    const kmRates = []
+    const linehaulRates = []
+    const depoRates = []
+    const bonusRates = []
+    const depotsSet = new Set()
     
-    priceList.forEach(priceConfig => {
-      const dodatek = contractMap[priceConfig.contract_id || priceConfig.contractId]
-      
-      // FIX rates
-      ;(priceConfig.fix_rates || priceConfig.fixRates || []).forEach(rate => {
-        let depotKey
-        if (rate.depot?.code) {
-          depotKey = rate.depot.code
-        } else if (rate.routeCategory || rate.route_category) {
-          const category = rate.routeCategory || rate.route_category
-          depotKey = category === 'DIRECT_SKLAD' ? 'DIRECT' : extractDepotFromRouteType(rate.routeType || rate.route_type)
-        } else {
-          depotKey = extractDepotFromRouteType(rate.routeType || rate.route_type) || 'UNKNOWN'
-        }
-        
-        if (!result[depotKey]) {
-          result[depotKey] = { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [] }
-        }
-        
-        const existing = result[depotKey].fixRates.find(r => 
-          (r.routeType || r.route_type) === (rate.routeType || rate.route_type)
-        )
-        if (!existing) {
-          result[depotKey].fixRates.push({ ...rate, dodatek })
-        }
+    priceList.forEach(pc => {
+      ;(pc.fix_rates || pc.fixRates || []).forEach(r => {
+        fixRates.push(r)
+        const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type)
+        if (depot) depotsSet.add(depot)
       })
       
-      // KM rates
-      ;(priceConfig.km_rates || priceConfig.kmRates || []).forEach(rate => {
-        const depotKey = rate.depot?.code || 'UNKNOWN'
-        
-        if (!result[depotKey]) {
-          result[depotKey] = { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [] }
-        }
-        
-        const existing = result[depotKey].kmRates.find(r => 
-          (r.routeType || r.route_type) === (rate.routeType || rate.route_type)
-        )
-        if (!existing) {
-          result[depotKey].kmRates.push({ ...rate, dodatek })
-        }
+      ;(pc.km_rates || pc.kmRates || []).forEach(r => {
+        kmRates.push(r)
+        const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type)
+        if (depot) depotsSet.add(depot)
       })
       
-      // Linehaul rates
-      ;(priceConfig.linehaul_rates || priceConfig.linehaulRates || []).forEach(rate => {
-        const depotKey = rate.to_code || rate.toCode || 'UNKNOWN'
-        
-        if (!result[depotKey]) {
-          result[depotKey] = { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [] }
-        }
-        
-        const key = `${rate.from_code || rate.fromCode}-${rate.vehicle_type || rate.vehicleType}`
-        const existing = result[depotKey].linehaulRates.find(r => 
-          `${r.from_code || r.fromCode}-${r.vehicle_type || r.vehicleType}` === key
-        )
-        if (!existing) {
-          result[depotKey].linehaulRates.push({ ...rate, dodatek })
-        }
+      ;(pc.linehaul_rates || pc.linehaulRates || []).forEach(r => {
+        linehaulRates.push(r)
+        const depot = r.toCode || r.to_code
+        if (depot) depotsSet.add(depot)
       })
       
-      // Depo rates
-      ;(priceConfig.depo_rates || priceConfig.depoRates || []).forEach(rate => {
-        let depotKey = rate.depot?.code
-        if (!depotKey) {
-          const depoName = (rate.depo_name || rate.depoName || '').toLowerCase()
-          if (depoName.includes('vratimov')) depotKey = 'VRATIMOV'
-          else if (depoName.includes('bydžov') || depoName.includes('bydzov')) depotKey = 'NOVY_BYDZOV'
-          else if (depoName.includes('brno')) depotKey = 'BRNO'
-          else depotKey = 'UNKNOWN'
-        }
-        
-        if (!result[depotKey]) {
-          result[depotKey] = { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [] }
-        }
-        
-        const existing = result[depotKey].depoRates.find(r => 
-          (r.rateType || r.rate_type) === (rate.rateType || rate.rate_type)
-        )
-        if (!existing) {
-          result[depotKey].depoRates.push({ ...rate, dodatek })
-        }
+      ;(pc.depo_rates || pc.depoRates || []).forEach(r => {
+        depoRates.push(r)
+        const depot = r.depot?.code || extractDepotCode(r.depoName || r.depo_name)
+        if (depot) depotsSet.add(depot)
+      })
+      
+      ;(pc.bonus_rates || pc.bonusRates || []).forEach(r => {
+        bonusRates.push(r)
       })
     })
     
-    return result
-  }, [priceList, contractList])
-  
-  // Seřaď depa
-  const sortedDepots = useMemo(() => {
-    const depots = Object.keys(pricesByDepot)
-    const order = ['DIRECT', 'VRATIMOV', 'NOVY_BYDZOV', 'BRNO', 'CESKE_BUDEJOVICE', 'RAKOVNIK', 'UNKNOWN']
-    return depots.sort((a, b) => {
-      const aIndex = order.indexOf(a)
-      const bIndex = order.indexOf(b)
-      if (aIndex === -1 && bIndex === -1) return 0
-      if (aIndex === -1) return 1
-      if (bIndex === -1) return -1
-      return aIndex - bIndex
+    // Seřaď depoty
+    const depotOrder = ['VRATIMOV', 'NOVY_BYDZOV', 'BRNO', 'CESKE_BUDEJOVICE', 'RAKOVNIK', 'DIRECT']
+    const depots = Array.from(depotsSet).sort((a, b) => {
+      const aIdx = depotOrder.indexOf(a)
+      const bIdx = depotOrder.indexOf(b)
+      return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx)
     })
-  }, [pricesByDepot])
+    
+    return { fixRates, kmRates, linehaulRates, depoRates, bonusRates, depots }
+  }, [priceList])
   
-  // Toggle depot expansion
-  const toggleDepot = (depotCode) => {
-    setExpandedDepots(prev => {
-      const next = new Set(prev)
-      if (next.has(depotCode)) {
-        next.delete(depotCode)
-      } else {
-        next.add(depotCode)
-      }
-      return next
+  // Najdi poslední dodatek
+  const latestAmendment = useMemo(() => {
+    if (!contractList || contractList.length === 0) return null
+    const sorted = [...contractList].sort((a, b) => {
+      const aNum = a.amendment_number || a.amendmentNumber || 0
+      const bNum = b.amendment_number || b.amendmentNumber || 0
+      return bNum - aNum
     })
-  }
+    return sorted[0]?.amendment_number || sorted[0]?.amendmentNumber
+  }, [contractList])
   
-  // Expand/collapse all
-  const expandAll = () => setExpandedDepots(new Set(sortedDepots))
-  const collapseAll = () => setExpandedDepots(new Set())
-  
-  // Stats
-  const totalRates = useMemo(() => {
-    let count = 0
-    Object.values(pricesByDepot).forEach(data => {
-      count += data.fixRates.length + data.kmRates.length + data.linehaulRates.length + data.depoRates.length
-    })
-    return count
-  }, [pricesByDepot])
+  const hasAnyData = processedData.fixRates.length > 0 || 
+                     processedData.kmRates.length > 0 || 
+                     processedData.linehaulRates.length > 0 || 
+                     processedData.depoRates.length > 0 ||
+                     processedData.bonusRates.length > 0
   
   // =============================================================================
   // RENDER
   // =============================================================================
   
   return (
-    <div 
-      className="min-h-screen"
-      style={{ 
-        background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
-      }}
-    >
+    <div className="min-h-screen" style={{ backgroundColor: '#f8fafc' }}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-start justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-slate-900 mb-2">
-                Ceníky
-              </h1>
-              <p className="text-slate-500">
-                {selectedCarrier ? (
-                  <>
-                    <span className="font-medium text-slate-700">{selectedCarrier.name}</span>
-                    {' · '}
-                    <span>{sortedDepots.length} dep · {totalRates} sazeb</span>
-                  </>
-                ) : (
-                  'Přehled sazeb podle dep a typů služeb'
-                )}
-              </p>
-            </div>
-            
-            {selectedCarrierId && sortedDepots.length > 0 && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={expandAll}
-                  className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-white rounded-lg transition-colors"
-                >
-                  Rozbalit vše
-                </button>
-                <button
-                  onClick={collapseAll}
-                  className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 hover:bg-white rounded-lg transition-colors"
-                >
-                  Sbalit vše
-                </button>
-              </div>
-            )}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Ceníky
+              {selectedCarrier && (
+                <span className="text-slate-400 font-normal ml-2">· {selectedCarrier.name}</span>
+              )}
+            </h1>
           </div>
+          
+          {latestAmendment && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+              <span className="text-sm text-slate-500">Aktuální:</span>
+              <span className="text-sm font-semibold text-slate-800">Dodatek D{latestAmendment}</span>
+            </div>
+          )}
         </div>
         
         {/* Content */}
         {!selectedCarrierId ? (
-          <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm">
-            <EmptyState 
-              title="Vyberte dopravce" 
-              description="Pro zobrazení ceníků vyberte dopravce v hlavičce stránky"
-              icon={TrendingUp}
-            />
-          </div>
+          <EmptyState message="Vyberte dopravce v hlavičce stránky" />
         ) : isLoading ? (
-          <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm">
-            <LoadingState />
+          <div className="flex items-center justify-center py-16">
+            <div className="animate-spin w-8 h-8 border-4 border-slate-200 border-t-blue-500 rounded-full" />
           </div>
-        ) : error ? (
-          <div className="bg-white rounded-2xl border border-red-200 shadow-sm p-6">
-            <div className="flex items-center gap-4 text-red-600">
-              <AlertTriangle size={24} />
-              <div>
-                <h3 className="font-semibold">Chyba při načítání</h3>
-                <p className="text-sm text-red-500">{error.message}</p>
-              </div>
-            </div>
-          </div>
-        ) : sortedDepots.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm">
-            <EmptyState 
-              title="Žádné ceníky" 
-              description="Pro tohoto dopravce nejsou nahrány žádné aktivní ceníky. Nahrajte smlouvu v sekci Dokumenty."
-              icon={Package}
-            />
-          </div>
+        ) : !hasAnyData ? (
+          <EmptyState message="Pro tohoto dopravce nejsou nahrány žádné ceníky. Nahrajte smlouvu v sekci Dokumenty." />
         ) : (
-          <div className="space-y-4">
-            {sortedDepots.map(depotCode => (
-              <DepotCard
-                key={depotCode}
-                depotCode={depotCode}
-                data={pricesByDepot[depotCode]}
-                isExpanded={expandedDepots.has(depotCode)}
-                onToggle={() => toggleDepot(depotCode)}
-              />
-            ))}
-          </div>
-        )}
-        
-        {/* Legend */}
-        {sortedDepots.length > 0 && (
-          <div className="mt-8 p-4 bg-white/50 rounded-xl border border-slate-200/40">
-            <div className="flex flex-wrap items-center gap-6 text-sm">
-              <span className="font-medium text-slate-700">Legenda:</span>
-              <div className="flex items-center gap-2 text-slate-500">
-                <DodatekBadge number="7" />
-                <span>= Dodatek č. 7</span>
-              </div>
-              <div className="flex items-center gap-2 text-slate-500">
-                <CategoryBadge category="DIRECT_SKLAD" />
-                <span>= Trasy ze skladu</span>
-              </div>
-              <div className="flex items-center gap-2 text-slate-500">
-                <CategoryBadge category="DIRECT_DEPO" />
-                <span>= Trasy z depa</span>
-              </div>
-            </div>
-          </div>
+          <>
+            <LinehaulTable 
+              linehaulRates={processedData.linehaulRates} 
+              depots={processedData.depots} 
+            />
+            
+            <RozvozTable 
+              fixRates={processedData.fixRates} 
+              kmRates={processedData.kmRates} 
+            />
+            
+            <DepoNakladyTable 
+              depoRates={processedData.depoRates} 
+              depots={processedData.depots} 
+            />
+            
+            <BonusyTable 
+              bonusRates={processedData.bonusRates} 
+            />
+          </>
         )}
       </div>
     </div>
