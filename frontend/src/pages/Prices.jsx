@@ -57,6 +57,21 @@ function extractDepotCode(text) {
 // KOMPONENTY
 // =============================================================================
 
+function DodatekBadge({ number }) {
+  if (!number) return null
+  return (
+    <span 
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ml-2"
+      style={{ 
+        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+        color: '#7c3aed'
+      }}
+    >
+      D{number}
+    </span>
+  )
+}
+
 function SectionHeader({ icon: Icon, title }) {
   return (
     <div className="flex items-center gap-3 mb-4">
@@ -94,7 +109,7 @@ function DepotHeader({ depotCode, children }) {
 function LinehaulTable({ linehaulRates, depots }) {
   if (linehaulRates.length === 0) return null
   
-  // Vytvoř matici: vehicle_type -> depot -> rate
+  // Vytvoř matici: vehicle_type -> depot -> { rate, dodatek }
   const matrix = {}
   VEHICLE_TYPES.forEach(vt => {
     matrix[vt] = {}
@@ -111,7 +126,7 @@ function LinehaulTable({ linehaulRates, depots }) {
     else if (vehicleType.includes('KAMION') || vehicleType.includes('TRUCK')) normalizedVT = 'KAMION'
     
     if (matrix[normalizedVT]) {
-      matrix[normalizedVT][toDepot] = rate.rate
+      matrix[normalizedVT][toDepot] = { rate: rate.rate, dodatek: rate.dodatek }
     }
   })
   
@@ -163,9 +178,12 @@ function LinehaulTable({ linehaulRates, depots }) {
                       key={depot} 
                       className="px-4 py-3 text-center border-b border-slate-100"
                     >
-                      <span className="font-semibold text-slate-800 tabular-nums">
-                        {matrix[vt][depot] ? formatCZK(matrix[vt][depot]) : '—'}
-                      </span>
+                      {matrix[vt][depot] ? (
+                        <span className="font-semibold text-slate-800 tabular-nums">
+                          {formatCZK(matrix[vt][depot].rate)}
+                          <DodatekBadge number={matrix[vt][depot].dodatek} />
+                        </span>
+                      ) : '—'}
                     </td>
                   ))}
                 </tr>
@@ -204,7 +222,8 @@ function RozvozTable({ fixRates, kmRates }) {
       tripType,
       rate: rate.rate,
       isFromWarehouse,
-      routeType
+      routeType,
+      dodatek: rate.dodatek
     })
   })
   
@@ -212,7 +231,7 @@ function RozvozTable({ fixRates, kmRates }) {
   const kmByDepot = {}
   kmRates.forEach(rate => {
     const depot = rate.depot?.code || extractDepotCode(rate.routeType || rate.route_type) || 'DIRECT'
-    kmByDepot[depot] = rate.rate
+    kmByDepot[depot] = { rate: rate.rate, dodatek: rate.dodatek }
   })
   
   // Vytvoř řádky tabulky
@@ -223,7 +242,9 @@ function RozvozTable({ fixRates, kmRates }) {
         depot,
         tripType: r.tripType,
         fixRate: r.rate,
-        kmRate: kmByDepot[depot],
+        fixDodatek: r.dodatek,
+        kmRate: kmByDepot[depot]?.rate,
+        kmDodatek: kmByDepot[depot]?.dodatek,
         source: r.isFromWarehouse ? 'ze skladu' : 'z depa',
         routeType: r.routeType
       })
@@ -286,11 +307,17 @@ function RozvozTable({ fixRates, kmRates }) {
                   <td className="px-4 py-3 text-right border-b border-slate-100">
                     <span className="font-semibold text-slate-800 tabular-nums">
                       {formatCZK(row.fixRate)}
+                      <DodatekBadge number={row.fixDodatek} />
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right border-b border-slate-100">
                     <span className="font-semibold text-slate-800 tabular-nums">
-                      {row.kmRate ? `${Number(row.kmRate).toFixed(2)} Kč` : '—'}
+                      {row.kmRate ? (
+                        <>
+                          {Number(row.kmRate).toFixed(2)} Kč
+                          <DodatekBadge number={row.kmDodatek} />
+                        </>
+                      ) : '—'}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center border-b border-slate-100">
@@ -327,7 +354,7 @@ function DepoNakladyTable({ depoRates, depots }) {
     if (!byDepot[depot]) {
       byDepot[depot] = {}
     }
-    byDepot[depot][rateType] = rate.rate
+    byDepot[depot][rateType] = { rate: rate.rate, dodatek: rate.dodatek }
   })
   
   const activeDepots = depots.filter(d => byDepot[d])
@@ -372,12 +399,12 @@ function DepoNakladyTable({ depoRates, depots }) {
                       key={depot} 
                       className="px-4 py-3 text-center border-b border-slate-100"
                     >
-                      <span className="font-semibold text-slate-800 tabular-nums">
-                        {byDepot[depot]?.[rt.key] 
-                          ? `${formatCZK(byDepot[depot][rt.key])}${rt.key === 'hourly' ? '/hod' : ''}` 
-                          : '—'
-                        }
-                      </span>
+                      {byDepot[depot]?.[rt.key] ? (
+                        <span className="font-semibold text-slate-800 tabular-nums">
+                          {formatCZK(byDepot[depot][rt.key].rate)}{rt.key === 'hourly' ? '/hod' : ''}
+                          <DodatekBadge number={byDepot[depot][rt.key].dodatek} />
+                        </span>
+                      ) : '—'}
                     </td>
                   ))}
                 </tr>
@@ -411,12 +438,13 @@ function BonusyTable({ bonusRates }) {
             const min = bonus.qualityMin || bonus.quality_min || 0
             const max = bonus.qualityMax || bonus.quality_max || 100
             const amount = bonus.bonusAmount || bonus.bonus_amount || 0
+            const dodatek = bonus.dodatek
             
             const isLast = idx === sorted.length - 1
             const isFirst = idx === 0
             
             // Gradient barva podle výše bonusu
-            const intensity = idx / (sorted.length - 1)
+            const intensity = idx / (sorted.length - 1 || 1)
             const bgColor = amount > 0 
               ? `rgba(16, 185, 129, ${0.05 + intensity * 0.15})` 
               : '#fef2f2'
@@ -434,6 +462,7 @@ function BonusyTable({ bonusRates }) {
                   className={`text-lg font-bold ${amount > 0 ? 'text-emerald-600' : 'text-slate-400'}`}
                 >
                   {amount > 0 ? `+${formatCZK(amount)}` : '0 Kč'}
+                  {dodatek && <DodatekBadge number={dodatek} />}
                 </div>
               </div>
             )
@@ -481,45 +510,110 @@ export default function Prices() {
     enabled: !!selectedCarrierId
   })
   
-  // Zpracuj data
+  // Mapa contract_id -> číslo dodatku a datum
+  const contractMap = useMemo(() => {
+    const map = {}
+    contractList?.forEach(c => {
+      map[c.id] = {
+        dodatek: c.amendment_number || c.amendmentNumber || null,
+        validFrom: c.valid_from || c.validFrom || null
+      }
+    })
+    return map
+  }, [contractList])
+  
+  // Zpracuj data s deduplikací
   const processedData = useMemo(() => {
     if (!priceList) return { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [], bonusRates: [], depots: [] }
     
-    const fixRates = []
-    const kmRates = []
-    const linehaulRates = []
-    const depoRates = []
-    const bonusRates = []
+    // Pomocná funkce pro deduplikaci - ponechá pouze nejnovější sazbu podle klíče
+    const deduplicateRates = (rates, getKey) => {
+      const map = new Map()
+      rates.forEach(rate => {
+        const key = getKey(rate)
+        const existing = map.get(key)
+        if (!existing) {
+          map.set(key, rate)
+        } else {
+          // Porovnej podle čísla dodatku (vyšší = novější)
+          const existingDodatek = existing.dodatek || 0
+          const newDodatek = rate.dodatek || 0
+          if (newDodatek > existingDodatek) {
+            map.set(key, rate)
+          }
+        }
+      })
+      return Array.from(map.values())
+    }
+    
+    const fixRatesRaw = []
+    const kmRatesRaw = []
+    const linehaulRatesRaw = []
+    const depoRatesRaw = []
+    const bonusRatesRaw = []
     const depotsSet = new Set()
     
     priceList.forEach(pc => {
+      const contractInfo = contractMap[pc.contract_id || pc.contractId] || {}
+      const dodatek = contractInfo.dodatek
+      
       ;(pc.fix_rates || pc.fixRates || []).forEach(r => {
-        fixRates.push(r)
+        fixRatesRaw.push({ ...r, dodatek })
         const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type)
         if (depot) depotsSet.add(depot)
       })
       
       ;(pc.km_rates || pc.kmRates || []).forEach(r => {
-        kmRates.push(r)
+        kmRatesRaw.push({ ...r, dodatek })
         const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type)
         if (depot) depotsSet.add(depot)
       })
       
       ;(pc.linehaul_rates || pc.linehaulRates || []).forEach(r => {
-        linehaulRates.push(r)
+        linehaulRatesRaw.push({ ...r, dodatek })
         const depot = r.toCode || r.to_code
         if (depot) depotsSet.add(depot)
       })
       
       ;(pc.depo_rates || pc.depoRates || []).forEach(r => {
-        depoRates.push(r)
+        depoRatesRaw.push({ ...r, dodatek })
         const depot = r.depot?.code || extractDepotCode(r.depoName || r.depo_name)
         if (depot) depotsSet.add(depot)
       })
       
       ;(pc.bonus_rates || pc.bonusRates || []).forEach(r => {
-        bonusRates.push(r)
+        bonusRatesRaw.push({ ...r, dodatek })
       })
+    })
+    
+    // Deduplikace podle unikátního klíče
+    const fixRates = deduplicateRates(fixRatesRaw, r => {
+      const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type) || 'DIRECT'
+      const routeType = r.routeType || r.route_type || ''
+      return `${depot}-${routeType}`
+    })
+    
+    const kmRates = deduplicateRates(kmRatesRaw, r => {
+      const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type) || 'DIRECT'
+      return depot
+    })
+    
+    const linehaulRates = deduplicateRates(linehaulRatesRaw, r => {
+      const toDepot = r.toCode || r.to_code || 'UNKNOWN'
+      const vehicleType = (r.vehicleType || r.vehicle_type || 'KAMION').toUpperCase()
+      return `${toDepot}-${vehicleType}`
+    })
+    
+    const depoRates = deduplicateRates(depoRatesRaw, r => {
+      const depot = r.depot?.code || extractDepotCode(r.depoName || r.depo_name) || 'UNKNOWN'
+      const rateType = r.rateType || r.rate_type || 'monthly'
+      return `${depot}-${rateType}`
+    })
+    
+    const bonusRates = deduplicateRates(bonusRatesRaw, r => {
+      const min = r.qualityMin || r.quality_min || 0
+      const max = r.qualityMax || r.quality_max || 100
+      return `${min}-${max}`
     })
     
     // Seřaď depoty
@@ -531,7 +625,7 @@ export default function Prices() {
     })
     
     return { fixRates, kmRates, linehaulRates, depoRates, bonusRates, depots }
-  }, [priceList])
+  }, [priceList, contractMap])
   
   // Najdi poslední dodatek
   const latestAmendment = useMemo(() => {
