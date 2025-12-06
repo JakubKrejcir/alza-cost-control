@@ -249,6 +249,28 @@ function RozvozTable({ fixRates, kmRates, title }) {
 // TABULKA NÁKLADY DEPA
 // =============================================================================
 
+// Formátování názvu položky depo nákladů
+function formatDepoRateName(depoName, rateType) {
+  const nameMap = {
+    'Sklad_ALL_IN': 'Sklad ALL IN',
+    'Sklad_ALL_IN_sleva': 'Sklad ALL IN (se slevou)',
+    'Skladnici': 'Skladníci',
+    'Brigadnik': 'Brigádník',
+    'Vratimov': 'Práce na depu',
+  }
+  return nameMap[depoName] || depoName?.replace(/_/g, ' ') || rateType || 'Provoz depa'
+}
+
+// Formátování jednotky
+function formatRateUnit(rateType) {
+  if (!rateType) return ''
+  const lower = rateType.toLowerCase()
+  if (lower.includes('hour') || lower === 'hourly') return '/h'
+  if (lower.includes('day') || lower === 'daily') return '/den'
+  if (lower.includes('month') || lower === 'monthly') return '/měs'
+  return ''
+}
+
 function DepoNakladyTable({ depoRates, title }) {
   if (!depoRates || depoRates.length === 0) return null
 
@@ -256,7 +278,7 @@ function DepoNakladyTable({ depoRates, title }) {
     <div className="mb-6">
       <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
         <Building2 size={16} style={{ color: 'var(--color-orange)' }} />
-        {title || 'NÁKLADY DEPA (měsíční paušály)'}
+        {title || 'NÁKLADY DEPA'}
       </h4>
       
       <div className="overflow-x-auto">
@@ -269,26 +291,30 @@ function DepoNakladyTable({ depoRates, title }) {
             </tr>
           </thead>
           <tbody>
-            {depoRates.map((rate, idx) => (
-              <tr 
-                key={idx}
-                className="border-b"
-                style={{ borderColor: 'var(--color-border-light)' }}
-              >
-                <td className="p-3" style={{ color: 'var(--color-text-dark)' }}>
-                  {rate.rateType || rate.rate_type || rate.depoName || rate.depo_name || 'Provoz depa'}
-                </td>
-                <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-text-dark)' }}>
-                  {formatCZK(rate.rate)}
-                  {(rate.rateType || rate.rate_type)?.includes('hodin') && '/h'}
-                  {(rate.rateType || rate.rate_type)?.includes('den') && '/den'}
-                  {(rate.rateType || rate.rate_type)?.includes('měs') && '/měs'}
-                </td>
-                <td className="p-3 text-right">
-                  <DodatekBadge number={rate.dodatek} />
-                </td>
-              </tr>
-            ))}
+            {depoRates.map((rate, idx) => {
+              const depoName = rate.depoName || rate.depo_name
+              const rateType = rate.rateType || rate.rate_type
+              const displayName = formatDepoRateName(depoName, rateType)
+              const unit = formatRateUnit(rateType)
+              
+              return (
+                <tr 
+                  key={idx}
+                  className="border-b"
+                  style={{ borderColor: 'var(--color-border-light)' }}
+                >
+                  <td className="p-3" style={{ color: 'var(--color-text-dark)' }}>
+                    {displayName}
+                  </td>
+                  <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                    {formatCZK(rate.rate)}{unit}
+                  </td>
+                  <td className="p-3 text-right">
+                    <DodatekBadge number={rate.dodatek} />
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -560,11 +586,19 @@ export default function Prices() {
         })
       })
       
-      // Zpracuj Depo rates - vždy pod ALZABOX
+      // Zpracuj Depo rates - mapuj na správná depa podle typu nákladu
       const depoRates = priceConfig.depoRates || priceConfig.depo_rates || []
       depoRates.forEach(rate => {
-        const depot = normalizeDepotName(rate.depoName || rate.depo_name)
+        const depoName = (rate.depoName || rate.depo_name || '').toLowerCase()
         const category = 'alzabox'
+        
+        // Mapuj depoName na skutečné depo
+        let depot = 'Ostatní'
+        if (depoName.includes('sklad') || depoName.includes('skladni') || depoName.includes('brigadnik')) {
+          depot = 'Nový Bydžov'
+        } else if (depoName.includes('vratimov')) {
+          depot = 'Vratimov'
+        }
         
         if (!result[category][depot]) {
           result[category][depot] = {
@@ -576,8 +610,10 @@ export default function Prices() {
           }
         }
         
+        // Deduplikace podle rateType A depoName (protože máme různé typy nákladů)
+        const key = `${rate.depoName || rate.depo_name}-${rate.rateType || rate.rate_type}`
         const exists = result[category][depot].depoRates.some(r => 
-          (r.rateType || r.rate_type) === (rate.rateType || rate.rate_type)
+          `${r.depoName || r.depo_name}-${r.rateType || r.rate_type}` === key
         )
         
         if (!exists) {
