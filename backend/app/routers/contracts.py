@@ -594,12 +594,20 @@ async def upload_contract_pdf(
         await db.flush()
         is_new_carrier = True
     
+    # Extrahuj číslo dodatku z názvu
+    amendment_num = None
+    if contract_info['number']:
+        num_match = re.search(r'(\d+)', contract_info['number'])
+        if num_match:
+            amendment_num = int(num_match.group(1))
+    
     # Vytvoř smlouvu
     contract = Contract(
         carrier_id=carrier.id,
         number=contract_info['number'] or f"Dodatek-{file.filename}",
         type=contract_info['type'],
         valid_from=contract_info['valid_from'] or datetime.now(),
+        amendment_number=amendment_num,
         notes=f"Typ služby: {contract_info['service_type'] or 'neznámý'}"
     )
     db.add(contract)
