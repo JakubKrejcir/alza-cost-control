@@ -176,6 +176,7 @@ class ContractResponse(CamelModel):
     valid_to: Optional[datetime] = None
     document_url: Optional[str] = None
     notes: Optional[str] = None
+    amendment_number: Optional[int] = None
     created_at: datetime
 
 
