@@ -156,6 +156,7 @@ class Contract(Base):
     valid_to: Mapped[Optional[datetime]] = mapped_column("validTo", DateTime)
     document_url: Mapped[Optional[str]] = mapped_column("documentUrl", Text)
     notes: Mapped[Optional[str]] = mapped_column(Text)
+    amendment_number: Mapped[Optional[int]] = mapped_column("amendmentNumber", Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
