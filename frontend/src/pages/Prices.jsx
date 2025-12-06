@@ -1,339 +1,159 @@
-/**
- * Prices.jsx - Přehled ceníků
- * Tabulkové zobrazení - vše viditelné najednou
- */
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Truck, Package, Building2, Award, AlertCircle } from 'lucide-react'
+import { 
+  DollarSign, 
+  Truck, 
+  Package, 
+  Warehouse, 
+  FileText, 
+  AlertCircle,
+  MapPin,
+  ArrowRight,
+  Building2,
+  Factory
+} from 'lucide-react'
 import { prices, contracts } from '../lib/api'
 import { useCarrier } from '../lib/CarrierContext'
 
 // =============================================================================
-// KONFIGURACE
-// =============================================================================
-
-const DEPOT_CONFIG = {
-  'VRATIMOV': { name: 'Vratimov', color: '#ef4444', emoji: '🔴' },
-  'NOVY_BYDZOV': { name: 'Nový Bydžov', color: '#3b82f6', emoji: '🔵' },
-  'BRNO': { name: 'Brno', color: '#10b981', emoji: '🟢' },
-  'CESKE_BUDEJOVICE': { name: 'Č. Budějovice', color: '#f59e0b', emoji: '🟠' },
-  'RAKOVNIK': { name: 'Rakovník', color: '#8b5cf6', emoji: '🟣' },
-  'DIRECT': { name: 'Praha/STČ', color: '#0ea5e9', emoji: '🏢' },
-}
-
-const VEHICLE_TYPES = ['DODAVKA', 'SOLO', 'KAMION']
-const VEHICLE_LABELS = {
-  'DODAVKA': { label: 'Dodávka', emoji: '🚐', pallets: '8-10 pal' },
-  'SOLO': { label: 'Solo', emoji: '🚛', pallets: '15-21 pal' },
-  'KAMION': { label: 'Kamion', emoji: '🚚', pallets: '33 pal' },
-}
-
-// =============================================================================
-// UTILITY
+// UTILITY FUNCTIONS
 // =============================================================================
 
 function formatCZK(amount) {
-  if (amount == null || isNaN(amount)) return '—'
+  if (amount == null) return '—'
   return new Intl.NumberFormat('cs-CZ', { 
     style: 'currency', 
     currency: 'CZK',
-    maximumFractionDigits: 0 
+    maximumFractionDigits: 2 
   }).format(amount)
 }
 
-function extractDepotCode(text) {
-  if (!text) return null
-  const t = text.toUpperCase()
-  if (t.includes('VRATIMOV')) return 'VRATIMOV'
-  if (t.includes('BYDZOV') || t.includes('BYDŽOV')) return 'NOVY_BYDZOV'
-  if (t.includes('BRNO')) return 'BRNO'
-  if (t.includes('BUDEJOVIC') || t.includes('BUDĚJOVIC')) return 'CESKE_BUDEJOVICE'
-  if (t.includes('RAKOVNIK') || t.includes('RAKOVNÍK')) return 'RAKOVNIK'
-  if (t.includes('PRAHA') || t.includes('DIRECT') || t.includes('STČ')) return 'DIRECT'
-  return null
+// Normalizace názvu depa
+function normalizeDepotName(name) {
+  if (!name) return 'Ostatní'
+  const normalized = name.trim()
+  // Oprava zkratek
+  if (normalized === 'V') return 'Vratimov'
+  if (normalized === 'NB' || normalized === 'Novy_Bydzov') return 'Nový Bydžov'
+  // Nahrazení podtržítek mezerami
+  return normalized.replace(/_/g, ' ')
+}
+
+// Mapování zdrojového skladu na čitelný název
+function formatSourceWarehouse(code) {
+  const warehouses = {
+    'CZTC1': 'Úžice (CZTC1)',
+    'CZLC4': 'Chrášťany (CZLC4)',
+    'LCZ_CZTC1': 'LCZ Úžice',
+    'LCU': 'LCU',
+    'LCS': 'LCS',
+    'SKLC3': 'SKLC3'
+  }
+  return warehouses[code] || code
+}
+
+// Typ vozu s kapacitou palet
+function formatVehicleType(type, palletMin, palletMax) {
+  const vehicleNames = {
+    'DODAVKA': 'Dodávka',
+    'SOLO': 'Solo',
+    'KAMION': 'Kamion'
+  }
+  const name = vehicleNames[type?.toUpperCase()] || type
+  if (palletMin && palletMax) {
+    return `${name} (${palletMin}-${palletMax} pal)`
+  }
+  if (palletMax) {
+    return `${name} (${palletMax} pal)`
+  }
+  return name
 }
 
 // =============================================================================
-// KOMPONENTY
+// BADGE KOMPONENTA PRO ČÍSLO DODATKU
 // =============================================================================
 
 function DodatekBadge({ number }) {
-  if (!number) return null
+  if (!number || number === '?') return null
+  
   return (
     <span 
-      className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ml-2"
+      className="text-xs px-2 py-0.5 rounded-full font-medium ml-2"
       style={{ 
-        backgroundColor: 'rgba(139, 92, 246, 0.1)',
-        color: '#7c3aed'
+        backgroundColor: 'var(--color-primary-light)', 
+        color: 'var(--color-primary)' 
       }}
+      title={`Dodatek č. ${number}`}
     >
       D{number}
     </span>
   )
 }
 
-function SectionHeader({ icon: Icon, title }) {
-  return (
-    <div className="flex items-center gap-3 mb-4">
-      <div 
-        className="w-10 h-10 rounded-xl flex items-center justify-center"
-        style={{ backgroundColor: '#f1f5f9' }}
-      >
-        <Icon size={20} className="text-slate-600" />
-      </div>
-      <h2 className="text-lg font-bold text-slate-800 uppercase tracking-wide">
-        {title}
-      </h2>
-    </div>
-  )
-}
+// =============================================================================
+// TABULKA LINEHAUL
+// =============================================================================
 
-function DepotHeader({ depotCode, children }) {
-  const config = DEPOT_CONFIG[depotCode] || { name: depotCode, color: '#64748b', emoji: '⚪' }
-  return (
-    <th 
-      className="px-4 py-3 text-center font-semibold text-sm"
-      style={{ 
-        backgroundColor: `${config.color}15`,
-        color: config.color,
-        borderBottom: `2px solid ${config.color}`
-      }}
-    >
-      <span className="mr-1">{config.emoji}</span>
-      {children || config.name}
-    </th>
-  )
-}
+function LinehaulTable({ rates, title }) {
+  if (!rates || rates.length === 0) return null
 
-// LINEHAUL TABULKA
-function LinehaulTable({ linehaulRates, depots }) {
-  if (linehaulRates.length === 0) return null
-  
-  // Vytvoř matici: vehicle_type -> depot -> { rate, dodatek }
-  const matrix = {}
-  VEHICLE_TYPES.forEach(vt => {
-    matrix[vt] = {}
+  // Seskup podle zdrojového skladu
+  const bySource = {}
+  rates.forEach(rate => {
+    const source = rate.fromCode || rate.from_code || 'Neznámý'
+    if (!bySource[source]) bySource[source] = []
+    bySource[source].push(rate)
   })
-  
-  linehaulRates.forEach(rate => {
-    const vehicleType = (rate.vehicleType || rate.vehicle_type || 'KAMION').toUpperCase()
-    const toDepot = rate.toCode || rate.to_code || extractDepotCode(rate.description) || 'UNKNOWN'
-    
-    // Normalizuj vehicle type
-    let normalizedVT = vehicleType
-    if (vehicleType.includes('DODAV') || vehicleType.includes('VAN')) normalizedVT = 'DODAVKA'
-    else if (vehicleType.includes('SOLO')) normalizedVT = 'SOLO'
-    else if (vehicleType.includes('KAMION') || vehicleType.includes('TRUCK')) normalizedVT = 'KAMION'
-    
-    if (matrix[normalizedVT]) {
-      matrix[normalizedVT][toDepot] = { rate: rate.rate, dodatek: rate.dodatek }
-    }
-  })
-  
-  // Zjisti které depoty mají data
-  const activeDepots = depots.filter(d => 
-    VEHICLE_TYPES.some(vt => matrix[vt][d] != null)
-  )
-  
-  if (activeDepots.length === 0) return null
-  
+
   return (
-    <div className="mb-8">
-      <SectionHeader icon={Truck} title="Linehaul (přeprava ze skladu na depo)" />
+    <div className="mb-6">
+      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+        <Truck size={16} style={{ color: 'var(--color-primary)' }} />
+        {title || 'LINEHAUL (přeprava ze skladu na depo)'}
+      </h4>
       
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200">
+        <table className="w-full text-sm">
           <thead>
-            <tr>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600 bg-slate-50 border-b border-slate-200">
-                Typ vozu
-              </th>
-              {activeDepots.map(depot => (
-                <DepotHeader key={depot} depotCode={depot} />
-              ))}
+            <tr style={{ backgroundColor: 'var(--color-bg)' }}>
+              <th className="text-left p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Zdroj</th>
+              <th className="text-left p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Typ vozu</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Sazba</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Dodatek</th>
             </tr>
           </thead>
           <tbody>
-            {VEHICLE_TYPES.map((vt, idx) => {
-              const info = VEHICLE_LABELS[vt]
-              const hasAnyRate = activeDepots.some(d => matrix[vt][d] != null)
-              if (!hasAnyRate) return null
-              
-              return (
+            {Object.entries(bySource).map(([source, sourceRates]) => (
+              sourceRates.map((rate, idx) => (
                 <tr 
-                  key={vt} 
-                  className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}
+                  key={`${source}-${idx}`} 
+                  className="border-b"
+                  style={{ borderColor: 'var(--color-border-light)' }}
                 >
-                  <td className="px-4 py-3 border-b border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{info.emoji}</span>
-                      <div>
-                        <div className="font-medium text-slate-800">{info.label}</div>
-                        <div className="text-xs text-slate-400">{info.pallets}</div>
-                      </div>
-                    </div>
-                  </td>
-                  {activeDepots.map(depot => (
-                    <td 
-                      key={depot} 
-                      className="px-4 py-3 text-center border-b border-slate-100"
-                    >
-                      {matrix[vt][depot] ? (
-                        <span className="font-semibold text-slate-800 tabular-nums">
-                          {formatCZK(matrix[vt][depot].rate)}
-                          <DodatekBadge number={matrix[vt][depot].dodatek} />
-                        </span>
-                      ) : '—'}
-                    </td>
-                  ))}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
-// ROZVOZ TABULKA (FIX + KM)
-function RozvozTable({ fixRates, kmRates }) {
-  if (fixRates.length === 0 && kmRates.length === 0) return null
-  
-  // Seskup fix rates podle depa
-  const fixByDepot = {}
-  fixRates.forEach(rate => {
-    const routeType = rate.routeType || rate.route_type || ''
-    const depot = rate.depot?.code || extractDepotCode(routeType) || 'DIRECT'
-    const category = rate.routeCategory || rate.route_category
-    const isFromWarehouse = category === 'DIRECT_SKLAD' || routeType.toUpperCase().includes('DIRECT')
-    
-    if (!fixByDepot[depot]) {
-      fixByDepot[depot] = []
-    }
-    
-    // Extrahuj typ trasy (DPO/SD)
-    let tripType = 'DIRECT'
-    const rt = routeType.toUpperCase()
-    if (rt.includes('DPO')) tripType = 'DPO'
-    else if (rt.includes('SD') || rt.includes('SAME')) tripType = 'SD'
-    
-    fixByDepot[depot].push({
-      tripType,
-      rate: rate.rate,
-      isFromWarehouse,
-      routeType,
-      dodatek: rate.dodatek
-    })
-  })
-  
-  // Seskup km rates podle depa
-  const kmByDepot = {}
-  kmRates.forEach(rate => {
-    const depot = rate.depot?.code || extractDepotCode(rate.routeType || rate.route_type) || 'DIRECT'
-    kmByDepot[depot] = { rate: rate.rate, dodatek: rate.dodatek }
-  })
-  
-  // Vytvoř řádky tabulky
-  const rows = []
-  Object.entries(fixByDepot).forEach(([depot, rates]) => {
-    rates.forEach(r => {
-      rows.push({
-        depot,
-        tripType: r.tripType,
-        fixRate: r.rate,
-        fixDodatek: r.dodatek,
-        kmRate: kmByDepot[depot]?.rate,
-        kmDodatek: kmByDepot[depot]?.dodatek,
-        source: r.isFromWarehouse ? 'ze skladu' : 'z depa',
-        routeType: r.routeType
-      })
-    })
-  })
-  
-  // Seřaď podle depa
-  const depotOrder = ['VRATIMOV', 'NOVY_BYDZOV', 'BRNO', 'CESKE_BUDEJOVICE', 'RAKOVNIK', 'DIRECT']
-  rows.sort((a, b) => {
-    const aIdx = depotOrder.indexOf(a.depot)
-    const bIdx = depotOrder.indexOf(b.depot)
-    if (aIdx !== bIdx) return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx)
-    return a.tripType.localeCompare(b.tripType)
-  })
-  
-  if (rows.length === 0) return null
-  
-  return (
-    <div className="mb-8">
-      <SectionHeader icon={Package} title="Rozvoz (FIX za trasu + KM)" />
-      
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200">
-          <thead>
-            <tr className="bg-slate-50">
-              <th className="px-4 py-3 text-left font-semibold text-slate-600 border-b border-slate-200">Depo</th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600 border-b border-slate-200">Typ trasy</th>
-              <th className="px-4 py-3 text-right font-semibold text-slate-600 border-b border-slate-200">FIX/trasa</th>
-              <th className="px-4 py-3 text-right font-semibold text-slate-600 border-b border-slate-200">Kč/km</th>
-              <th className="px-4 py-3 text-center font-semibold text-slate-600 border-b border-slate-200">Zdroj</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, idx) => {
-              const config = DEPOT_CONFIG[row.depot] || { name: row.depot, color: '#64748b', emoji: '⚪' }
-              const prevRow = rows[idx - 1]
-              const showDepot = !prevRow || prevRow.depot !== row.depot
-              
-              return (
-                <tr 
-                  key={`${row.depot}-${row.tripType}-${idx}`}
-                  className={showDepot && idx > 0 ? 'border-t-2 border-slate-200' : ''}
-                  style={{ backgroundColor: idx % 2 === 0 ? 'white' : '#fafbfc' }}
-                >
-                  <td className="px-4 py-3 border-b border-slate-100">
-                    {showDepot && (
-                      <div className="flex items-center gap-2">
-                        <span>{config.emoji}</span>
-                        <span className="font-medium" style={{ color: config.color }}>
-                          {config.name}
-                        </span>
-                      </div>
+                  <td className="p-3">
+                    {idx === 0 && (
+                      <span className="flex items-center gap-2">
+                        <MapPin size={14} style={{ color: 'var(--color-text-muted)' }} />
+                        {formatSourceWarehouse(source)}
+                      </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 border-b border-slate-100">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
-                      {row.tripType}
-                    </span>
+                  <td className="p-3" style={{ color: 'var(--color-text-dark)' }}>
+                    {formatVehicleType(
+                      rate.vehicleType || rate.vehicle_type,
+                      rate.palletCapacityMin || rate.pallet_capacity_min,
+                      rate.palletCapacityMax || rate.pallet_capacity_max
+                    )}
                   </td>
-                  <td className="px-4 py-3 text-right border-b border-slate-100">
-                    <span className="font-semibold text-slate-800 tabular-nums">
-                      {formatCZK(row.fixRate)}
-                      <DodatekBadge number={row.fixDodatek} />
-                    </span>
+                  <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                    {formatCZK(rate.rate)}
                   </td>
-                  <td className="px-4 py-3 text-right border-b border-slate-100">
-                    <span className="font-semibold text-slate-800 tabular-nums">
-                      {row.kmRate ? (
-                        <>
-                          {Number(row.kmRate).toFixed(2)} Kč
-                          <DodatekBadge number={row.kmDodatek} />
-                        </>
-                      ) : '—'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-center border-b border-slate-100">
-                    <span 
-                      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        row.source === 'ze skladu' 
-                          ? 'bg-sky-50 text-sky-700' 
-                          : 'bg-purple-50 text-purple-700'
-                      }`}
-                    >
-                      {row.source}
-                    </span>
+                  <td className="p-3 text-right">
+                    <DodatekBadge number={rate.dodatek} />
                   </td>
                 </tr>
-              )
-            })}
+              ))
+            ))}
           </tbody>
         </table>
       </div>
@@ -341,75 +161,83 @@ function RozvozTable({ fixRates, kmRates }) {
   )
 }
 
-// NÁKLADY DEP TABULKA
-function DepoNakladyTable({ depoRates, depots }) {
-  if (depoRates.length === 0) return null
-  
-  // Seskup podle depa a typu
-  const byDepot = {}
-  depoRates.forEach(rate => {
-    const depot = rate.depot?.code || extractDepotCode(rate.depoName || rate.depo_name) || 'UNKNOWN'
-    const rateType = rate.rateType || rate.rate_type || 'monthly'
-    
-    if (!byDepot[depot]) {
-      byDepot[depot] = {}
-    }
-    byDepot[depot][rateType] = { rate: rate.rate, dodatek: rate.dodatek }
-  })
-  
-  const activeDepots = depots.filter(d => byDepot[d])
-  if (activeDepots.length === 0) return null
-  
-  const rateTypes = [
-    { key: 'monthly', label: 'Sklad/měsíc' },
-    { key: 'hourly', label: 'Hodinová sazba' },
-  ]
-  
+// =============================================================================
+// TABULKA ROZVOZ (FIX + KM)
+// =============================================================================
+
+function RozvozTable({ fixRates, kmRates, title }) {
+  const hasData = (fixRates && fixRates.length > 0) || (kmRates && kmRates.length > 0)
+  if (!hasData) return null
+
   return (
-    <div className="mb-8">
-      <SectionHeader icon={Building2} title="Náklady dep (měsíční paušály)" />
+    <div className="mb-6">
+      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+        <Package size={16} style={{ color: 'var(--color-green)' }} />
+        {title || 'ROZVOZ (FIX za trasu + KM)'}
+      </h4>
       
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200">
+        <table className="w-full text-sm">
           <thead>
-            <tr>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600 bg-slate-50 border-b border-slate-200">
-                Typ nákladu
-              </th>
-              {activeDepots.map(depot => (
-                <DepotHeader key={depot} depotCode={depot} />
-              ))}
+            <tr style={{ backgroundColor: 'var(--color-bg)' }}>
+              <th className="text-left p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Typ trasy</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>FIX/trasa</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Kč/km</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Dodatek</th>
             </tr>
           </thead>
           <tbody>
-            {rateTypes.map((rt, idx) => {
-              const hasAnyRate = activeDepots.some(d => byDepot[d]?.[rt.key] != null)
-              if (!hasAnyRate) return null
+            {fixRates?.map((fix, idx) => {
+              // Najdi odpovídající KM sazbu
+              const km = kmRates?.find(k => 
+                (k.routeType || k.route_type) === (fix.routeType || fix.route_type)
+              ) || kmRates?.[0]
+              
+              const routeType = fix.routeType || fix.route_type || 'Standardní'
+              const displayName = routeType.replace('DIRECT_', '').replace(/_/g, ' ')
               
               return (
                 <tr 
-                  key={rt.key}
-                  className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}
+                  key={idx}
+                  className="border-b"
+                  style={{ borderColor: 'var(--color-border-light)' }}
                 >
-                  <td className="px-4 py-3 border-b border-slate-100 font-medium text-slate-700">
-                    {rt.label}
+                  <td className="p-3" style={{ color: 'var(--color-text-dark)' }}>
+                    {displayName}
                   </td>
-                  {activeDepots.map(depot => (
-                    <td 
-                      key={depot} 
-                      className="px-4 py-3 text-center border-b border-slate-100"
-                    >
-                      {byDepot[depot]?.[rt.key] ? (
-                        <span className="font-semibold text-slate-800 tabular-nums">
-                          {formatCZK(byDepot[depot][rt.key].rate)}{rt.key === 'hourly' ? '/hod' : ''}
-                          <DodatekBadge number={byDepot[depot][rt.key].dodatek} />
-                        </span>
-                      ) : '—'}
-                    </td>
-                  ))}
+                  <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                    {formatCZK(fix.rate)}
+                  </td>
+                  <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                    {km ? `${Number(km.rate).toFixed(2)} Kč` : '—'}
+                  </td>
+                  <td className="p-3 text-right">
+                    <DodatekBadge number={fix.dodatek} />
+                  </td>
                 </tr>
               )
             })}
+            {/* Pokud jsou jen KM sazby bez FIX */}
+            {(!fixRates || fixRates.length === 0) && kmRates?.map((km, idx) => (
+              <tr 
+                key={idx}
+                className="border-b"
+                style={{ borderColor: 'var(--color-border-light)' }}
+              >
+                <td className="p-3" style={{ color: 'var(--color-text-dark)' }}>
+                  Standardní
+                </td>
+                <td className="p-3 text-right" style={{ color: 'var(--color-text-muted)' }}>
+                  —
+                </td>
+                <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                  {Number(km.rate).toFixed(2)} Kč
+                </td>
+                <td className="p-3 text-right">
+                  <DodatekBadge number={km.dodatek} />
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -417,70 +245,186 @@ function DepoNakladyTable({ depoRates, depots }) {
   )
 }
 
-// BONUSY TABULKA
-function BonusyTable({ bonusRates }) {
-  if (bonusRates.length === 0) return null
-  
-  // Seřaď podle quality_min
-  const sorted = [...bonusRates].sort((a, b) => {
-    const aMin = a.qualityMin || a.quality_min || 0
-    const bMin = b.qualityMin || b.quality_min || 0
-    return aMin - bMin
-  })
-  
+// =============================================================================
+// TABULKA NÁKLADY DEPA
+// =============================================================================
+
+function DepoNakladyTable({ depoRates, title }) {
+  if (!depoRates || depoRates.length === 0) return null
+
   return (
-    <div className="mb-8">
-      <SectionHeader icon={Award} title="Bonusy za kvalitu" />
+    <div className="mb-6">
+      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+        <Building2 size={16} style={{ color: 'var(--color-orange)' }} />
+        {title || 'NÁKLADY DEPA (měsíční paušály)'}
+      </h4>
       
       <div className="overflow-x-auto">
-        <div className="flex gap-0 bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200">
-          {sorted.map((bonus, idx) => {
-            const min = bonus.qualityMin || bonus.quality_min || 0
-            const max = bonus.qualityMax || bonus.quality_max || 100
-            const amount = bonus.bonusAmount || bonus.bonus_amount || 0
-            const dodatek = bonus.dodatek
-            
-            const isLast = idx === sorted.length - 1
-            const isFirst = idx === 0
-            
-            // Gradient barva podle výše bonusu
-            const intensity = idx / (sorted.length - 1 || 1)
-            const bgColor = amount > 0 
-              ? `rgba(16, 185, 129, ${0.05 + intensity * 0.15})` 
-              : '#fef2f2'
-            
-            return (
-              <div 
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ backgroundColor: 'var(--color-bg)' }}>
+              <th className="text-left p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Položka</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Sazba</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Dodatek</th>
+            </tr>
+          </thead>
+          <tbody>
+            {depoRates.map((rate, idx) => (
+              <tr 
                 key={idx}
-                className="flex-1 text-center py-4 px-3 border-r border-slate-200 last:border-r-0"
-                style={{ backgroundColor: bgColor }}
+                className="border-b"
+                style={{ borderColor: 'var(--color-border-light)' }}
               >
-                <div className="text-sm font-medium text-slate-600 mb-2">
-                  {isFirst ? `< ${max}%` : isLast ? `≥ ${min}%` : `${min}-${max}%`}
-                </div>
-                <div 
-                  className={`text-lg font-bold ${amount > 0 ? 'text-emerald-600' : 'text-slate-400'}`}
-                >
-                  {amount > 0 ? `+${formatCZK(amount)}` : '0 Kč'}
-                  {dodatek && <DodatekBadge number={dodatek} />}
-                </div>
-              </div>
-            )
-          })}
-        </div>
+                <td className="p-3" style={{ color: 'var(--color-text-dark)' }}>
+                  {rate.rateType || rate.rate_type || rate.depoName || rate.depo_name || 'Provoz depa'}
+                </td>
+                <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                  {formatCZK(rate.rate)}
+                  {(rate.rateType || rate.rate_type)?.includes('hodin') && '/h'}
+                  {(rate.rateType || rate.rate_type)?.includes('den') && '/den'}
+                  {(rate.rateType || rate.rate_type)?.includes('měs') && '/měs'}
+                </td>
+                <td className="p-3 text-right">
+                  <DodatekBadge number={rate.dodatek} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
 }
 
-// PRÁZDNÝ STAV
-function EmptyState({ message }) {
+// =============================================================================
+// TABULKA SKLADOVÉ SLUŽBY (Bonusy)
+// =============================================================================
+
+function SkladoveSluzbyTable({ bonusRates, title }) {
+  if (!bonusRates || bonusRates.length === 0) return null
+
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-6 bg-white rounded-xl border border-slate-200">
-      <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
-        <AlertCircle size={28} className="text-slate-400" />
+    <div className="mb-6">
+      <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+        <Warehouse size={16} style={{ color: 'var(--color-purple)' }} />
+        {title || 'SKLADOVÉ SLUŽBY'}
+      </h4>
+      
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr style={{ backgroundColor: 'var(--color-bg)' }}>
+              <th className="text-left p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Kvalita</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Bonus</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Celkem s bonusem</th>
+              <th className="text-right p-3 font-medium" style={{ color: 'var(--color-text-muted)' }}>Dodatek</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bonusRates.map((rate, idx) => (
+              <tr 
+                key={idx}
+                className="border-b"
+                style={{ borderColor: 'var(--color-border-light)' }}
+              >
+                <td className="p-3" style={{ color: 'var(--color-text-dark)' }}>
+                  ≥ {rate.qualityMin || rate.quality_min}%
+                </td>
+                <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-green)' }}>
+                  +{formatCZK(rate.bonusAmount || rate.bonus_amount)}
+                </td>
+                <td className="p-3 text-right font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+                  {formatCZK(rate.totalWithBonus || rate.total_with_bonus)}
+                </td>
+                <td className="p-3 text-right">
+                  <DodatekBadge number={rate.dodatek} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-      <p className="text-slate-500 text-center">{message}</p>
+    </div>
+  )
+}
+
+// =============================================================================
+// KARTA DEPA
+// =============================================================================
+
+function DepoCard({ depoName, data, color }) {
+  const { linehaulRates, fixRates, kmRates, depoRates, bonusRates } = data
+  
+  const hasAnyData = 
+    linehaulRates?.length > 0 || 
+    fixRates?.length > 0 || 
+    kmRates?.length > 0 || 
+    depoRates?.length > 0 || 
+    bonusRates?.length > 0
+
+  if (!hasAnyData) return null
+
+  return (
+    <div className="card overflow-hidden mb-4">
+      {/* Header */}
+      <div 
+        className="px-5 py-3 border-b flex items-center gap-3"
+        style={{ 
+          backgroundColor: `${color}10`, 
+          borderColor: 'var(--color-border)' 
+        }}
+      >
+        <div 
+          className="w-3 h-3 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+        <h3 className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+          Depo {depoName}
+        </h3>
+      </div>
+      
+      {/* Content */}
+      <div className="p-5">
+        <LinehaulTable rates={linehaulRates} />
+        <RozvozTable fixRates={fixRates} kmRates={kmRates} />
+        <DepoNakladyTable depoRates={depoRates} />
+        <SkladoveSluzbyTable bonusRates={bonusRates} />
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// SEKCE TYPU ZÁVOZU
+// =============================================================================
+
+function ServiceTypeSection({ title, icon: Icon, color, children, depotCount }) {
+  return (
+    <div className="mb-8">
+      {/* Header sekce */}
+      <div className="flex items-center gap-3 mb-4 pb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div 
+          className="w-10 h-10 rounded-lg flex items-center justify-center"
+          style={{ backgroundColor: `${color}15` }}
+        >
+          <Icon size={20} style={{ color }} />
+        </div>
+        <div>
+          <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+            {title}
+          </h2>
+          {depotCount > 0 && (
+            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+              {depotCount} {depotCount === 1 ? 'depo' : 'depa'}
+            </p>
+          )}
+        </div>
+      </div>
+      
+      {/* Obsah */}
+      <div className="pl-4">
+        {children}
+      </div>
     </div>
   )
 }
@@ -496,7 +440,7 @@ export default function Prices() {
     return carrierList?.find(c => c.id === Number(selectedCarrierId))
   }, [carrierList, selectedCarrierId])
   
-  // Načti smlouvy (pro čísla dodatků)
+  // Načti smlouvy pro čísla dodatků
   const { data: contractList } = useQuery({
     queryKey: ['contracts', selectedCarrierId],
     queryFn: () => contracts.getAll(selectedCarrierId),
@@ -510,199 +454,316 @@ export default function Prices() {
     enabled: !!selectedCarrierId
   })
   
-  // Mapa contract_id -> číslo dodatku a datum
-  const contractMap = useMemo(() => {
-    const map = {}
-    contractList?.forEach(c => {
-      map[c.id] = {
-        dodatek: c.amendment_number || c.amendmentNumber || null,
-        validFrom: c.valid_from || c.validFrom || null
-      }
-    })
-    return map
-  }, [contractList])
-  
-  // Zpracuj data s deduplikací
+  // Zpracuj data - seskup podle typu služby → depo
   const processedData = useMemo(() => {
-    if (!priceList) return { fixRates: [], kmRates: [], linehaulRates: [], depoRates: [], bonusRates: [], depots: [] }
+    if (!priceList) return { alzabox: {}, tridirna: {} }
     
-    // Pomocná funkce pro deduplikaci - ponechá pouze nejnovější sazbu podle klíče
-    const deduplicateRates = (rates, getKey) => {
-      const map = new Map()
-      rates.forEach(rate => {
-        const key = getKey(rate)
-        const existing = map.get(key)
-        if (!existing) {
-          map.set(key, rate)
-        } else {
-          // Porovnej podle čísla dodatku (vyšší = novější)
-          const existingDodatek = existing.dodatek || 0
-          const newDodatek = rate.dodatek || 0
-          if (newDodatek > existingDodatek) {
-            map.set(key, rate)
-          }
-        }
-      })
-      return Array.from(map.values())
+    // Mapa contract_id → číslo dodatku
+    const contractMap = {}
+    contractList?.forEach(c => {
+      contractMap[c.id] = c.amendmentNumber || c.amendment_number || null
+    })
+    
+    const result = {
+      alzabox: {},  // Rozvoz AlzaBox
+      tridirna: {}  // Svoz Třídírna
     }
     
-    const fixRatesRaw = []
-    const kmRatesRaw = []
-    const linehaulRatesRaw = []
-    const depoRatesRaw = []
-    const bonusRatesRaw = []
-    const depotsSet = new Set()
+    // Seřaď podle data platnosti (nejnovější první) pro deduplikaci
+    const sortedPriceList = [...priceList].sort((a, b) => 
+      new Date(b.validFrom || b.valid_from) - new Date(a.validFrom || a.valid_from)
+    )
     
-    priceList.forEach(pc => {
-      const contractInfo = contractMap[pc.contract_id || pc.contractId] || {}
-      const dodatek = contractInfo.dodatek
+    sortedPriceList.forEach(priceConfig => {
+      const dodatek = contractMap[priceConfig.contractId || priceConfig.contract_id]
+      const type = (priceConfig.type || '').toLowerCase()
       
-      ;(pc.fix_rates || pc.fixRates || []).forEach(r => {
-        fixRatesRaw.push({ ...r, dodatek })
-        const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type)
-        if (depot) depotsSet.add(depot)
+      // Urči kategorii
+      let category = 'alzabox'
+      if (type.includes('třídírna') || type.includes('tridirna')) {
+        category = 'tridirna'
+      }
+      
+      // Zpracuj Linehaul rates
+      const linehaulRates = priceConfig.linehaulRates || priceConfig.linehaul_rates || []
+      linehaulRates.forEach(rate => {
+        const toDepot = normalizeDepotName(rate.toCode || rate.to_code)
+        
+        if (!result[category][toDepot]) {
+          result[category][toDepot] = {
+            linehaulRates: [],
+            fixRates: [],
+            kmRates: [],
+            depoRates: [],
+            bonusRates: []
+          }
+        }
+        
+        // Deduplikace - přidej pouze pokud neexistuje stejná kombinace
+        const key = `${rate.fromCode || rate.from_code}-${rate.vehicleType || rate.vehicle_type}`
+        const exists = result[category][toDepot].linehaulRates.some(r => 
+          `${r.fromCode || r.from_code}-${r.vehicleType || r.vehicle_type}` === key
+        )
+        
+        if (!exists) {
+          result[category][toDepot].linehaulRates.push({ ...rate, dodatek })
+        }
       })
       
-      ;(pc.km_rates || pc.kmRates || []).forEach(r => {
-        kmRatesRaw.push({ ...r, dodatek })
-        const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type)
-        if (depot) depotsSet.add(depot)
+      // Zpracuj FIX rates
+      const fixRates = priceConfig.fixRates || priceConfig.fix_rates || []
+      fixRates.forEach(rate => {
+        const routeType = rate.routeType || rate.route_type || ''
+        
+        // Extrahuj depo z názvu trasy (např. DIRECT_Vratimov → Vratimov)
+        let depot = 'Praha/STČ'
+        if (routeType.toLowerCase().includes('vratimov')) {
+          depot = 'Vratimov'
+        } else if (routeType.toLowerCase().includes('bydzov') || routeType.toLowerCase().includes('bydžov')) {
+          depot = 'Nový Bydžov'
+        }
+        
+        if (!result[category][depot]) {
+          result[category][depot] = {
+            linehaulRates: [],
+            fixRates: [],
+            kmRates: [],
+            depoRates: [],
+            bonusRates: []
+          }
+        }
+        
+        // Deduplikace
+        const exists = result[category][depot].fixRates.some(r => 
+          (r.routeType || r.route_type) === routeType
+        )
+        
+        if (!exists) {
+          result[category][depot].fixRates.push({ ...rate, dodatek })
+        }
       })
       
-      ;(pc.linehaul_rates || pc.linehaulRates || []).forEach(r => {
-        linehaulRatesRaw.push({ ...r, dodatek })
-        const depot = r.toCode || r.to_code
-        if (depot) depotsSet.add(depot)
+      // Zpracuj KM rates - přiřaď ke všem depům v kategorii
+      const kmRates = priceConfig.kmRates || priceConfig.km_rates || []
+      kmRates.forEach(rate => {
+        Object.keys(result[category]).forEach(depot => {
+          const exists = result[category][depot].kmRates.some(r => 
+            (r.routeType || r.route_type) === (rate.routeType || rate.route_type)
+          )
+          if (!exists) {
+            result[category][depot].kmRates.push({ ...rate, dodatek })
+          }
+        })
       })
       
-      ;(pc.depo_rates || pc.depoRates || []).forEach(r => {
-        depoRatesRaw.push({ ...r, dodatek })
-        const depot = r.depot?.code || extractDepotCode(r.depoName || r.depo_name)
-        if (depot) depotsSet.add(depot)
+      // Zpracuj Depo rates
+      const depoRates = priceConfig.depoRates || priceConfig.depo_rates || []
+      depoRates.forEach(rate => {
+        const depot = normalizeDepotName(rate.depoName || rate.depo_name)
+        
+        if (!result[category][depot]) {
+          result[category][depot] = {
+            linehaulRates: [],
+            fixRates: [],
+            kmRates: [],
+            depoRates: [],
+            bonusRates: []
+          }
+        }
+        
+        const exists = result[category][depot].depoRates.some(r => 
+          (r.rateType || r.rate_type) === (rate.rateType || rate.rate_type)
+        )
+        
+        if (!exists) {
+          result[category][depot].depoRates.push({ ...rate, dodatek })
+        }
       })
       
-      ;(pc.bonus_rates || pc.bonusRates || []).forEach(r => {
-        bonusRatesRaw.push({ ...r, dodatek })
+      // Zpracuj Bonus rates
+      const bonusRates = priceConfig.bonusRates || priceConfig.bonus_rates || []
+      bonusRates.forEach(rate => {
+        // Bonusy patří k depu Nový Bydžov (sklad)
+        const depot = 'Nový Bydžov'
+        
+        if (!result[category][depot]) {
+          result[category][depot] = {
+            linehaulRates: [],
+            fixRates: [],
+            kmRates: [],
+            depoRates: [],
+            bonusRates: []
+          }
+        }
+        
+        const exists = result[category][depot].bonusRates.some(r => 
+          (r.qualityMin || r.quality_min) === (rate.qualityMin || rate.quality_min)
+        )
+        
+        if (!exists) {
+          result[category][depot].bonusRates.push({ ...rate, dodatek })
+        }
       })
     })
     
-    // Deduplikace podle unikátního klíče
-    const fixRates = deduplicateRates(fixRatesRaw, r => {
-      const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type) || 'DIRECT'
-      const routeType = r.routeType || r.route_type || ''
-      return `${depot}-${routeType}`
-    })
-    
-    const kmRates = deduplicateRates(kmRatesRaw, r => {
-      const depot = r.depot?.code || extractDepotCode(r.routeType || r.route_type) || 'DIRECT'
-      return depot
-    })
-    
-    const linehaulRates = deduplicateRates(linehaulRatesRaw, r => {
-      const toDepot = r.toCode || r.to_code || 'UNKNOWN'
-      const vehicleType = (r.vehicleType || r.vehicle_type || 'KAMION').toUpperCase()
-      return `${toDepot}-${vehicleType}`
-    })
-    
-    const depoRates = deduplicateRates(depoRatesRaw, r => {
-      const depot = r.depot?.code || extractDepotCode(r.depoName || r.depo_name) || 'UNKNOWN'
-      const rateType = r.rateType || r.rate_type || 'monthly'
-      return `${depot}-${rateType}`
-    })
-    
-    const bonusRates = deduplicateRates(bonusRatesRaw, r => {
-      const min = r.qualityMin || r.quality_min || 0
-      const max = r.qualityMax || r.quality_max || 100
-      return `${min}-${max}`
-    })
-    
-    // Seřaď depoty
-    const depotOrder = ['VRATIMOV', 'NOVY_BYDZOV', 'BRNO', 'CESKE_BUDEJOVICE', 'RAKOVNIK', 'DIRECT']
-    const depots = Array.from(depotsSet).sort((a, b) => {
-      const aIdx = depotOrder.indexOf(a)
-      const bIdx = depotOrder.indexOf(b)
-      return (aIdx === -1 ? 99 : aIdx) - (bIdx === -1 ? 99 : bIdx)
-    })
-    
-    return { fixRates, kmRates, linehaulRates, depoRates, bonusRates, depots }
-  }, [priceList, contractMap])
+    return result
+  }, [priceList, contractList])
   
-  // Najdi poslední dodatek
-  const latestAmendment = useMemo(() => {
-    if (!contractList || contractList.length === 0) return null
-    const sorted = [...contractList].sort((a, b) => {
-      const aNum = a.amendment_number || a.amendmentNumber || 0
-      const bNum = b.amendment_number || b.amendmentNumber || 0
-      return bNum - aNum
-    })
-    return sorted[0]?.amendment_number || sorted[0]?.amendmentNumber
-  }, [contractList])
+  // Barvy pro depa
+  const depotColors = {
+    'Vratimov': '#ef4444',
+    'Nový Bydžov': '#22c55e',
+    'Praha/STČ': '#3b82f6',
+    'Praha': '#3b82f6',
+    'default': '#6b7280'
+  }
   
-  const hasAnyData = processedData.fixRates.length > 0 || 
-                     processedData.kmRates.length > 0 || 
-                     processedData.linehaulRates.length > 0 || 
-                     processedData.depoRates.length > 0 ||
-                     processedData.bonusRates.length > 0
+  const getDepotColor = (depot) => {
+    for (const [key, color] of Object.entries(depotColors)) {
+      if (depot.toLowerCase().includes(key.toLowerCase())) return color
+    }
+    return depotColors.default
+  }
   
-  // =============================================================================
+  // ==========================================================================
   // RENDER
-  // =============================================================================
+  // ==========================================================================
   
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#f8fafc' }}>
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">
-              Ceníky
-              {selectedCarrier && (
-                <span className="text-slate-400 font-normal ml-2">· {selectedCarrier.name}</span>
-              )}
-            </h1>
-          </div>
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div>
+        <h1 className="text-xl font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+          Ceníky
+          {selectedCarrier && (
+            <span style={{ color: 'var(--color-primary)' }}>· {selectedCarrier.name}</span>
+          )}
+        </h1>
+        <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+          Přehled sazeb podle typu závozu a depa
+        </p>
+      </div>
+      
+      {/* Loading */}
+      {isLoading && (
+        <div className="card p-12 text-center">
+          <div className="animate-spin w-8 h-8 border-2 rounded-full mx-auto mb-4"
+            style={{ borderColor: 'var(--color-border)', borderTopColor: 'var(--color-primary)' }} 
+          />
+          <p style={{ color: 'var(--color-text-muted)' }}>Načítání ceníků...</p>
+        </div>
+      )}
+      
+      {/* Žádný dopravce */}
+      {!selectedCarrierId && !isLoading && (
+        <div className="card p-12 text-center">
+          <AlertCircle size={48} className="mx-auto mb-4" style={{ color: 'var(--color-text-light)' }} />
+          <h3 className="font-semibold mb-2" style={{ color: 'var(--color-text-dark)' }}>
+            Vyberte dopravce
+          </h3>
+          <p style={{ color: 'var(--color-text-muted)' }}>
+            Pro zobrazení ceníků vyberte dopravce v hlavičce aplikace
+          </p>
+        </div>
+      )}
+      
+      {/* Žádná data */}
+      {selectedCarrierId && !isLoading && (!priceList || priceList.length === 0) && (
+        <div className="card p-12 text-center">
+          <FileText size={48} className="mx-auto mb-4" style={{ color: 'var(--color-text-light)' }} />
+          <h3 className="font-semibold mb-2" style={{ color: 'var(--color-text-dark)' }}>
+            Žádné ceníky
+          </h3>
+          <p style={{ color: 'var(--color-text-muted)' }}>
+            Pro tohoto dopravce nejsou k dispozici žádné aktivní ceníky
+          </p>
+        </div>
+      )}
+      
+      {/* Data */}
+      {selectedCarrierId && !isLoading && priceList && priceList.length > 0 && (
+        <>
+          {/* ROZVOZ ALZABOX */}
+          {Object.keys(processedData.alzabox).length > 0 && (
+            <ServiceTypeSection 
+              title="ROZVOZ ALZABOX" 
+              icon={Package} 
+              color="#3b82f6"
+              depotCount={Object.keys(processedData.alzabox).length}
+            >
+              {Object.entries(processedData.alzabox).map(([depot, data]) => (
+                <DepoCard 
+                  key={depot}
+                  depoName={depot}
+                  data={data}
+                  color={getDepotColor(depot)}
+                />
+              ))}
+            </ServiceTypeSection>
+          )}
           
-          {latestAmendment && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg border border-slate-200 shadow-sm">
-              <span className="text-sm text-slate-500">Aktuální:</span>
-              <span className="text-sm font-semibold text-slate-800">Dodatek D{latestAmendment}</span>
+          {/* SVOZ TŘÍDÍRNA */}
+          {Object.keys(processedData.tridirna).length > 0 && (
+            <ServiceTypeSection 
+              title="SVOZ TŘÍDÍRNA" 
+              icon={Factory} 
+              color="#8b5cf6"
+              depotCount={Object.keys(processedData.tridirna).length}
+            >
+              {Object.entries(processedData.tridirna).map(([depot, data]) => (
+                <DepoCard 
+                  key={depot}
+                  depoName={depot}
+                  data={data}
+                  color={getDepotColor(depot)}
+                />
+              ))}
+            </ServiceTypeSection>
+          )}
+          
+          {/* Historie dodatků */}
+          {contractList && contractList.length > 0 && (
+            <div className="card overflow-hidden">
+              <div className="card-header">
+                <h2 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+                  <FileText size={20} style={{ color: 'var(--color-primary)' }} />
+                  Historie dodatků ke smlouvě
+                </h2>
+              </div>
+              <div className="p-5">
+                <div className="space-y-2">
+                  {contractList
+                    .filter(c => c.amendmentNumber || c.amendment_number)
+                    .sort((a, b) => (b.amendmentNumber || b.amendment_number || 0) - (a.amendmentNumber || a.amendment_number || 0))
+                    .map(contract => (
+                      <div 
+                        key={contract.id} 
+                        className="flex items-center gap-4 p-3 rounded-lg"
+                        style={{ backgroundColor: 'var(--color-bg)' }}
+                      >
+                        <DodatekBadge number={contract.amendmentNumber || contract.amendment_number} />
+                        <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                          od {contract.validFrom || contract.valid_from 
+                            ? new Date(contract.validFrom || contract.valid_from).toLocaleDateString('cs-CZ')
+                            : '?'}
+                        </span>
+                        <span className="text-sm flex-1" style={{ color: 'var(--color-text-dark)' }}>
+                          {contract.type || contract.number || '—'}
+                        </span>
+                      </div>
+                    ))
+                  }
+                  {contractList.filter(c => c.amendmentNumber || c.amendment_number).length === 0 && (
+                    <p className="text-sm text-center py-4" style={{ color: 'var(--color-text-muted)' }}>
+                      Žádné dodatky s číslem
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           )}
-        </div>
-        
-        {/* Content */}
-        {!selectedCarrierId ? (
-          <EmptyState message="Vyberte dopravce v hlavičce stránky" />
-        ) : isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <div className="animate-spin w-8 h-8 border-4 border-slate-200 border-t-blue-500 rounded-full" />
-          </div>
-        ) : !hasAnyData ? (
-          <EmptyState message="Pro tohoto dopravce nejsou nahrány žádné ceníky. Nahrajte smlouvu v sekci Dokumenty." />
-        ) : (
-          <>
-            <LinehaulTable 
-              linehaulRates={processedData.linehaulRates} 
-              depots={processedData.depots} 
-            />
-            
-            <RozvozTable 
-              fixRates={processedData.fixRates} 
-              kmRates={processedData.kmRates} 
-            />
-            
-            <DepoNakladyTable 
-              depoRates={processedData.depoRates} 
-              depots={processedData.depots} 
-            />
-            
-            <BonusyTable 
-              bonusRates={processedData.bonusRates} 
-            />
-          </>
-        )}
-      </div>
+        </>
+      )}
     </div>
   )
 }
