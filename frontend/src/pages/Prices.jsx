@@ -476,18 +476,20 @@ export default function Prices() {
     
     sortedPriceList.forEach(priceConfig => {
       const dodatek = contractMap[priceConfig.contractId || priceConfig.contract_id]
-      const type = (priceConfig.type || '').toLowerCase()
       
-      // Urči kategorii
-      let category = 'alzabox'
-      if (type.includes('třídírna') || type.includes('tridirna')) {
-        category = 'tridirna'
-      }
-      
-      // Zpracuj Linehaul rates
+      // Zpracuj Linehaul rates - kategorie podle CÍLOVÉ DESTINACE
       const linehaulRates = priceConfig.linehaulRates || priceConfig.linehaul_rates || []
       linehaulRates.forEach(rate => {
+        const toCode = (rate.toCode || rate.to_code || '').toLowerCase()
         const toDepot = normalizeDepotName(rate.toCode || rate.to_code)
+        
+        // Urči kategorii podle cíle:
+        // - Cíl = třídírna (CZTC1) → SVOZ TŘÍDÍRNA
+        // - Cíl = depo (Vratimov, NB) → ROZVOZ ALZABOX
+        let category = 'alzabox'
+        if (toCode.includes('cztc1') || toCode.includes('tridirna') || toCode.includes('třídírna')) {
+          category = 'tridirna'
+        }
         
         if (!result[category][toDepot]) {
           result[category][toDepot] = {
@@ -510,7 +512,7 @@ export default function Prices() {
         }
       })
       
-      // Zpracuj FIX rates
+      // Zpracuj FIX rates - vždy pod ALZABOX (rozvozové sazby)
       const fixRates = priceConfig.fixRates || priceConfig.fix_rates || []
       fixRates.forEach(rate => {
         const routeType = rate.routeType || rate.route_type || ''
@@ -522,6 +524,8 @@ export default function Prices() {
         } else if (routeType.toLowerCase().includes('bydzov') || routeType.toLowerCase().includes('bydžov')) {
           depot = 'Nový Bydžov'
         }
+        
+        const category = 'alzabox'  // FIX sazby jsou vždy pro rozvoz
         
         if (!result[category][depot]) {
           result[category][depot] = {
@@ -543,23 +547,24 @@ export default function Prices() {
         }
       })
       
-      // Zpracuj KM rates - přiřaď ke všem depům v kategorii
+      // Zpracuj KM rates - přiřaď ke všem ALZABOX depům
       const kmRates = priceConfig.kmRates || priceConfig.km_rates || []
       kmRates.forEach(rate => {
-        Object.keys(result[category]).forEach(depot => {
-          const exists = result[category][depot].kmRates.some(r => 
+        Object.keys(result.alzabox).forEach(depot => {
+          const exists = result.alzabox[depot].kmRates.some(r => 
             (r.routeType || r.route_type) === (rate.routeType || rate.route_type)
           )
           if (!exists) {
-            result[category][depot].kmRates.push({ ...rate, dodatek })
+            result.alzabox[depot].kmRates.push({ ...rate, dodatek })
           }
         })
       })
       
-      // Zpracuj Depo rates
+      // Zpracuj Depo rates - vždy pod ALZABOX
       const depoRates = priceConfig.depoRates || priceConfig.depo_rates || []
       depoRates.forEach(rate => {
         const depot = normalizeDepotName(rate.depoName || rate.depo_name)
+        const category = 'alzabox'
         
         if (!result[category][depot]) {
           result[category][depot] = {
@@ -580,11 +585,11 @@ export default function Prices() {
         }
       })
       
-      // Zpracuj Bonus rates
+      // Zpracuj Bonus rates - patří k Nový Bydžov (sklad), pod ALZABOX
       const bonusRates = priceConfig.bonusRates || priceConfig.bonus_rates || []
       bonusRates.forEach(rate => {
-        // Bonusy patří k depu Nový Bydžov (sklad)
         const depot = 'Nový Bydžov'
+        const category = 'alzabox'
         
         if (!result[category][depot]) {
           result[category][depot] = {
