@@ -1,7 +1,6 @@
 """
 SQLAlchemy Models - matching the Prisma schema exactly
-Updated: 2025-12-05 - Added Warehouse, StartLocationMapping, RouteNameMapping
-                      Updated FixRate, KmRate, LinehaulRate, DepoRate, BonusRate
+Updated: 2025-12-07 - Fixed RoutePlan and RoutePlanRoute columns
 """
 from datetime import datetime
 from decimal import Decimal
@@ -397,7 +396,7 @@ class ProofDailyDetail(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
     date: Mapped[datetime] = mapped_column(DateTime)
-    day_of_week: Mapped[str] = mapped_column("dayOfWeek", String(10))
+    day_of_week: Mapped[Optional[str]] = mapped_column("dayOfWeek", String(10))
     dr_dpo_count: Mapped[int] = mapped_column("drDpoCount", Integer, default=0)
     lh_dpo_count: Mapped[int] = mapped_column("lhDpoCount", Integer, default=0)
     dr_sd_count: Mapped[int] = mapped_column("drSdCount", Integer, default=0)
@@ -411,6 +410,19 @@ class ProofDailyDetail(Base):
     bydzov_dr_sd: Mapped[int] = mapped_column("bydzovDrSd", Integer, default=0)
     bydzov_lh_sd: Mapped[int] = mapped_column("bydzovLhSd", Integer, default=0)
     depo_hours: Mapped[Optional[Decimal]] = mapped_column("depoHours", Numeric(8, 2), default=0)
+    # KM columns
+    dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("drDpoKm", Numeric(10, 2), default=0)
+    lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("lhDpoKm", Numeric(10, 2), default=0)
+    dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("drSdKm", Numeric(10, 2), default=0)
+    lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("lhSdKm", Numeric(10, 2), default=0)
+    vratimov_dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("vratimovDrDpoKm", Numeric(10, 2), default=0)
+    vratimov_lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("vratimovLhDpoKm", Numeric(10, 2), default=0)
+    vratimov_dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("vratimovDrSdKm", Numeric(10, 2), default=0)
+    vratimov_lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("vratimovLhSdKm", Numeric(10, 2), default=0)
+    bydzov_dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("bydzovDrDpoKm", Numeric(10, 2), default=0)
+    bydzov_lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("bydzovLhDpoKm", Numeric(10, 2), default=0)
+    bydzov_dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("bydzovDrSdKm", Numeric(10, 2), default=0)
+    bydzov_lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("bydzovLhSdKm", Numeric(10, 2), default=0)
 
     proof: Mapped["Proof"] = relationship(back_populates="daily_details")
 
@@ -515,7 +527,21 @@ class AuditLog(Base):
 
 
 # =============================================================================
-# ROUTE PLANNING MODELS
+# LOGIN LOG MODEL
+# =============================================================================
+
+class LoginLog(Base):
+    __tablename__ = "LoginLog"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255))
+    login_at: Mapped[datetime] = mapped_column("loginAt", DateTime, default=datetime.utcnow)
+    ip_address: Mapped[Optional[str]] = mapped_column("ipAddress", String(50))
+    user_agent: Mapped[Optional[str]] = mapped_column("userAgent", Text)
+
+
+# =============================================================================
+# ROUTE PLANNING MODELS (FIXED)
 # =============================================================================
 
 class RoutePlan(Base):
@@ -533,10 +559,24 @@ class RoutePlan(Base):
     total_km: Mapped[Optional[Decimal]] = mapped_column("totalKm", Numeric(12, 2))
     total_stops: Mapped[int] = mapped_column("totalStops", Integer, default=0)
     total_duration_minutes: Mapped[int] = mapped_column("totalDurationMinutes", Integer, default=0)
+    # DPO/SD counts
+    dpo_routes_count: Mapped[int] = mapped_column("dpoRoutesCount", Integer, default=0)
+    sd_routes_count: Mapped[int] = mapped_column("sdRoutesCount", Integer, default=0)
+    dpo_linehaul_count: Mapped[int] = mapped_column("dpoLinehaulCount", Integer, default=0)
+    sd_linehaul_count: Mapped[int] = mapped_column("sdLinehaulCount", Integer, default=0)
+    # Per depot counts - Vratimov
     vratimov_dpo_count: Mapped[int] = mapped_column("vratimovDpoCount", Integer, default=0)
     vratimov_sd_count: Mapped[int] = mapped_column("vratimovSdCount", Integer, default=0)
+    vratimov_stops: Mapped[int] = mapped_column("vratimovStops", Integer, default=0)
+    vratimov_km: Mapped[Optional[Decimal]] = mapped_column("vratimovKm", Numeric(10, 2), default=0)
+    vratimov_duration_min: Mapped[int] = mapped_column("vratimovDurationMin", Integer, default=0)
+    # Per depot counts - Nový Bydžov
     bydzov_dpo_count: Mapped[int] = mapped_column("bydzovDpoCount", Integer, default=0)
     bydzov_sd_count: Mapped[int] = mapped_column("bydzovSdCount", Integer, default=0)
+    bydzov_stops: Mapped[int] = mapped_column("bydzovStops", Integer, default=0)
+    bydzov_km: Mapped[Optional[Decimal]] = mapped_column("bydzovKm", Numeric(10, 2), default=0)
+    bydzov_duration_min: Mapped[int] = mapped_column("bydzovDurationMin", Integer, default=0)
+    # Timestamps
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -552,7 +592,10 @@ class RoutePlanRoute(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     route_plan_id: Mapped[int] = mapped_column("routePlanId", ForeignKey("RoutePlan.id", ondelete="CASCADE"))
     route_name: Mapped[str] = mapped_column("routeName", String(100))
+    route_letter: Mapped[Optional[str]] = mapped_column("routeLetter", String(10))
     carrier_name: Mapped[Optional[str]] = mapped_column("carrierName", String(100))
+    route_type: Mapped[str] = mapped_column("routeType", String(20), default="DPO")
+    delivery_type: Mapped[Optional[str]] = mapped_column("deliveryType", String(20))
     stops_count: Mapped[int] = mapped_column("stopsCount", Integer, default=0)
     start_location: Mapped[Optional[str]] = mapped_column("startLocation", String(200))
     max_capacity: Mapped[Optional[Decimal]] = mapped_column("maxCapacity", Numeric(10, 2))
