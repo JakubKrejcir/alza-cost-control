@@ -2,7 +2,7 @@
 
 > **Verze:** 3.11.0  
 > **Datum:** Prosinec 2025  
-> **Aktualizace:** Přidána dokumentace naming conventions
+> **Aktualizace:** Redesign ceníků (hierarchie typ závozu → depo), amendment_number automatizace, naming conventions
 
 ---
 
@@ -41,7 +41,7 @@
 
 ## 📝 NAMING CONVENTIONS
 
-### Přehled konvencí podle vrstvy
+### Přehled konvencí napříč vrstvami
 
 | Vrstva | Konvence | Příklad |
 |--------|----------|---------|
@@ -50,161 +50,177 @@
 | **API response (JSON)** | camelCase | `carrierId`, `validFrom` |
 | **Frontend (JavaScript)** | camelCase | `carrierId`, `validFrom` |
 
-### Databáze (PostgreSQL)
-
-Tabulky i sloupce používají **camelCase** (původně z Prisma):
+### SQL dotazy - POZOR na uvozovky!
 
 ```sql
--- Správně (camelCase)
+-- ✅ SPRÁVNĚ (camelCase s uvozovkami)
 SELECT "carrierId", "validFrom", "priceConfigId" FROM "PriceConfig";
 SELECT "fromCode", "toCode", "vehicleType" FROM "LinehaulRate";
+SELECT "amendmentNumber" FROM "Contract";
 
--- Špatně (snake_case) - NEFUNGUJE!
-SELECT carrier_id, valid_from FROM price_config;  -- ❌
+-- ❌ ŠPATNĚ (snake_case) - NEFUNGUJE!
+SELECT carrier_id, valid_from FROM price_config;
 ```
 
-**Příklady sloupců:**
-- `PriceConfig`: `id`, `carrierId`, `contractId`, `validFrom`, `validTo`, `isActive`
-- `LinehaulRate`: `priceConfigId`, `fromCode`, `toCode`, `vehicleType`, `isPosila`
-- `FixRate`: `priceConfigId`, `routeType`, `routeCategory`, `depotId`
-- `Contract`: `carrierId`, `validFrom`, `validTo`, `amendmentNumber`
+### Databázové sloupce (camelCase)
 
-### Python Backend
+**Contract:**
+- `id`, `carrierId`, `number`, `type`, `validFrom`, `validTo`, `documentUrl`, `notes`, `amendmentNumber`, `createdAt`
 
-Interně používá **snake_case**, ale SQLAlchemy mapuje na camelCase v DB:
+**PriceConfig:**
+- `id`, `carrierId`, `contractId`, `type`, `validFrom`, `validTo`, `isActive`, `createdAt`
+
+**LinehaulRate:**
+- `id`, `priceConfigId`, `fromCode`, `toCode`, `vehicleType`, `rate`, `isPosila`, `palletCapacityMin`, `palletCapacityMax`
+
+**FixRate:**
+- `id`, `priceConfigId`, `routeType`, `rate`, `routeCategory`, `depotId`
+
+**DepoRate:**
+- `id`, `priceConfigId`, `depoName`, `rateType`, `rate`, `depotId`
+
+### SQLAlchemy mapování (models.py)
 
 ```python
-# models.py - mapování snake_case → camelCase
-class PriceConfig(Base):
+class Contract(Base):
+    __tablename__ = "Contract"
+    
     carrier_id: Mapped[int] = mapped_column("carrierId", ForeignKey(...))
     valid_from: Mapped[datetime] = mapped_column("validFrom", DateTime)
-    is_active: Mapped[bool] = mapped_column("isActive", Boolean)
+    amendment_number: Mapped[Optional[int]] = mapped_column("amendmentNumber", Integer, nullable=True)
 ```
 
-### API Response (JSON)
-
-Pydantic schémata automaticky konvertují na **camelCase** pro frontend:
+### Pydantic auto-konverze (schemas.py)
 
 ```python
-# schemas.py
+from humps import camelize
+
+def to_camel(string: str) -> str:
+    return camelize(string)
+
 class CamelModel(BaseModel):
     model_config = ConfigDict(
-        alias_generator=to_camel,  # snake_case → camelCase
-        by_alias=True
+        alias_generator=to_camel,
+        populate_by_name=True,
+        from_attributes=True,
     )
-
-class PriceConfigResponse(CamelModel):
-    carrier_id: int      # → JSON: "carrierId"
-    valid_from: datetime # → JSON: "validFrom"
 ```
 
-### Frontend (JavaScript)
+---
 
-Vždy pracuje s **camelCase** (nativní JS konvence):
+## 🏭 ZOBRAZENÍ CENÍKŮ (Prices.jsx)
+
+### Hierarchie zobrazení (v3.11.0)
+
+```
+DOPRAVCE (např. Drivecool)
+│
+├── 📦 ROZVOZ ALZABOX
+│   │
+│   ├── 🔴 Depo Vratimov
+│   │   ├── LINEHAUL (přeprava ze skladu na depo)
+│   │   │   ├── Z Úžice (CZTC1): Dodávka/Solo/Kamion [D8]
+│   │   │   └── Z Chrášťan (CZLC4): Dodávka/Solo/Kamion [D8]
+│   │   ├── ROZVOZ (FIX za trasu + KM)
+│   │   │   └── FIX 2 500 Kč | KM 10,97 Kč [D7]
+│   │   └── NÁKLADY DEPA
+│   │       └── Práce na depu: 850 Kč/h [D7]
+│   │
+│   ├── 🟢 Depo Nový Bydžov
+│   │   ├── LINEHAUL
+│   │   ├── ROZVOZ (FIX + KM)
+│   │   ├── NÁKLADY DEPA
+│   │   │   ├── Sklad ALL IN: 410 000 Kč/měs [D12]
+│   │   │   ├── Sklad ALL IN (se slevou): 396 000 Kč/měs [D12]
+│   │   │   ├── Skladníci: 194 800 Kč/měs [D12]
+│   │   │   └── Brigádník: 1 600 Kč/den [D12]
+│   │   └── SKLADOVÉ SLUŽBY (bonusy)
+│   │       ├── ≥98%: +35 600 Kč [D12]
+│   │       └── ≥97.5%: +30 000 Kč [D12]
+│   │
+│   └── 🔵 Depo Praha/STČ
+│       └── ROZVOZ (Direct trasy)
+│           └── FIX 3 200 Kč | KM 10,97 Kč [D7]
+│
+└── 🏭 SVOZ TŘÍDÍRNA (pokud existují sazby směr → CZTC1)
+    └── ... (zatím prázdné pro Drivecool)
+```
+
+### Mapování DepoRate na depa
+
+| depoName v DB | Skutečné depo | Zobrazení |
+|---------------|---------------|-----------|
+| `Sklad_ALL_IN` | Nový Bydžov | Sklad ALL IN |
+| `Sklad_ALL_IN_sleva` | Nový Bydžov | Sklad ALL IN (se slevou) |
+| `Skladnici` | Nový Bydžov | Skladníci |
+| `Brigadnik` | Nový Bydžov | Brigádník |
+| `Vratimov` | Vratimov | Práce na depu |
+
+### Logika kategorizace
 
 ```javascript
-// Data z API přicházejí v camelCase
-const { carrierId, validFrom, contractId } = priceConfig
+// LINEHAUL - kategorie podle CÍLOVÉ DESTINACE
+if (toCode.includes('cztc1')) {
+  category = 'tridirna'  // Svoz NA třídírnu
+} else {
+  category = 'alzabox'   // Rozvoz Z skladu na depo
+}
 
-// Mapa contract_id → číslo dodatku
-contractList?.forEach(c => {
-  contractMap[c.id] = c.amendmentNumber || '?'
-})
+// DEPO RATES - mapování podle názvu
+if (depoName.includes('sklad') || depoName.includes('skladni') || depoName.includes('brigadnik')) {
+  depot = 'Nový Bydžov'
+} else if (depoName.includes('vratimov')) {
+  depot = 'Vratimov'
+}
 ```
 
----
+### Čísla dodatků (DodatekBadge)
 
-## ⚠️ KRITICKÉ: ASYNC SQLALCHEMY
+Každá sazba zobrazuje badge s číslem dodatku [D7], [D8], [D12]...
 
-### Backend používá ASYNCHRONNÍ SQLAlchemy!
-
-**SPRÁVNÝ přístup (async):**
-```python
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-
-async def get_items(db: AsyncSession):
-    result = await db.execute(select(Model))
-    items = result.scalars().all()
-    
-    db.add(new_item)
-    await db.flush()
-    await db.commit()
-```
-
-**ŠPATNÝ přístup (sync) - NEFUNGUJE:**
-```python
-# ❌ TOTO NEFUNGUJE!
-db.query(Model).filter(...).all()
-```
-
-### Klíčové rozdíly
-
-| Operace | Sync (ŠPATNĚ) | Async (SPRÁVNĚ) |
-|---------|---------------|-----------------|
-| Select all | `db.query(M).all()` | `await db.execute(select(M))` + `.scalars().all()` |
-| Filter | `db.query(M).filter(...)` | `select(M).where(...)` |
-| Count | `db.query(M).count()` | `select(func.count(M.id))` |
-| Get by ID | `db.query(M).get(id)` | `await db.get(M, id)` |
-
----
-
-## ⚠️ KRITICKÉ: FRONTEND API CLIENT
-
-### Vždy používat centrální api.js!
-
-**SPRÁVNÝ přístup:**
 ```jsx
-import { alzabox as alzaboxApi } from '../lib/api'
-const data = await alzaboxApi.getSummary({ start_date, end_date })
+<DodatekBadge number={rate.dodatek} />
 ```
 
-**ŠPATNÝ přístup (NEFUNGUJE na produkci):**
-```jsx
-// ❌ TOTO NEFUNGUJE!
-const data = await fetch('/api/alzabox/stats/summary').then(r => r.json())
-```
+Číslo dodatku se získává z:
+1. `Contract.amendmentNumber` v DB
+2. Mapování `PriceConfig.contractId` → `Contract`
+3. Frontend spojí přes `contractMap[priceConfig.contractId]`
 
 ---
 
-## 📁 STRUKTURA PROJEKTU
+## 📄 AUTOMATIZACE AMENDMENT_NUMBER
 
+### Při uploadu nové smlouvy (contracts.py)
+
+```python
+# Extrahuj číslo dodatku z názvu
+amendment_num = None
+if contract_info['number']:
+    num_match = re.search(r'(\d+)', contract_info['number'])
+    if num_match:
+        amendment_num = int(num_match.group(1))
+
+# Vytvoř smlouvu s amendment_number
+contract = Contract(
+    carrier_id=carrier.id,
+    number=contract_info['number'],
+    amendment_number=amendment_num,  # ← Automaticky nastaveno
+    ...
+)
 ```
-transport-brain/
-├── backend/
-│   └── app/
-│       ├── main.py
-│       ├── database.py
-│       ├── models.py
-│       ├── api_key_middleware.py
-│       └── routers/
-│           ├── carriers.py
-│           ├── proofs.py
-│           ├── invoices.py
-│           ├── contracts.py      # PDF extrakce ceníků ⭐
-│           ├── prices.py
-│           ├── route_plans.py
-│           ├── analysis.py
-│           ├── depots.py
-│           ├── alzabox.py
-│           ├── auth.py
-│           └── expected_billing.py
-│
-├── frontend/
-│   └── src/
-│       ├── App.jsx
-│       ├── components/
-│       │   ├── Layout.jsx
-│       │   └── LoginGate.jsx
-│       ├── pages/
-│       │   ├── Dashboard.jsx
-│       │   ├── Documents.jsx
-│       │   ├── Prices.jsx        # Ceníky per typ + depo ⭐
-│       │   ├── Carriers.jsx
-│       │   ├── AlzaBoxBI.jsx
-│       │   └── ExpectedBilling.jsx
-│       └── lib/
-│           └── api.js
+
+### Ruční oprava existujících dat
+
+```sql
+-- Vyplň amendment_number z názvu smlouvy
+UPDATE "Contract" 
+SET "amendmentNumber" = CAST(REGEXP_REPLACE(number, '[^0-9]', '', 'g') AS INTEGER)
+WHERE number LIKE 'Dodatek č.%' AND "amendmentNumber" IS NULL;
+
+-- Napáruj PriceConfig s Contract podle validFrom
+UPDATE "PriceConfig" SET "contractId" = 50 
+WHERE "validFrom" = '2025-04-01' AND "carrierId" = 1;
 ```
 
 ---
@@ -228,65 +244,6 @@ transport-brain/
 1. **Tabulkový formát**: číslo před názvem
 2. **Inline formát**: název před číslem
 3. **Třídírna tabulky**: speciální line-by-line parsing
-
----
-
-## 🏭 ZOBRAZENÍ CENÍKŮ (Prices.jsx)
-
-### Hierarchie zobrazení
-
-```
-Typ služby (AlzaBox, Třídírna, XL...)
-└── Rozvozové depo (Vratimov, Nový Bydžov)
-    ├── Linehaul (s počtem palet)
-    ├── Rozvoz z depa (FIX, KM, DEPO)
-    └── Skladové služby + Bonusy
-```
-
-### Expediční sklady vs Rozvozová depa
-
-| Typ | Lokace | Kód | Účel |
-|-----|--------|-----|------|
-| Expediční sklad | Úžice | CZTC1 | Třídírna, zdroj linehaulů |
-| Expediční sklad | Chrášťany | CZLC4 | Hlavní sklad, expedice |
-| Rozvozové depo | Vratimov | - | Linehaul → třídění → rozvoz |
-| Rozvozové depo | Nový Bydžov | - | Direct trasy + sklad |
-
-### Deduplikace ceníků
-
-Zobrazuje se **pouze nejnovější platná sazba**:
-
-```jsx
-function deduplicateRates(rates, getKey) {
-  const map = new Map()
-  rates.forEach(rate => {
-    const key = getKey(rate)
-    const existing = map.get(key)
-    if (!existing || new Date(rate.validFrom) > new Date(existing.validFrom)) {
-      map.set(key, rate)
-    }
-  })
-  return Array.from(map.values())
-}
-```
-
-### Linehaul typy vozů
-
-| Typ | Palety |
-|-----|--------|
-| Dodávka | 8-10 pal |
-| Solo | 15-21 pal |
-| Kamion | 33 pal |
-
-### Typy služeb
-
-| Typ | Ikona | Barva |
-|-----|-------|-------|
-| AlzaBox | 📦 | Modrá #3b82f6 |
-| Třídírna | 🏭 | Fialová #8b5cf6 |
-| DROP 2.0 | 📦 | Zelená #10b981 |
-| XL | 🚚 | Oranžová #f59e0b |
-| Pobočka | 🏢 | Tyrkysová #06b6d4 |
 
 ---
 
@@ -334,7 +291,25 @@ FRONTEND_URL=<frontend url for CORS>
 | Frontend vrací HTML | Použít api.js místo fetch() |
 | Ceníky se neextrahují | Zkontrolovat PDF formát |
 | Auth 404 | Zkontrolovat prefix v auth.py |
-| SQL column not found | Použít camelCase: `"carrierId"` ne `carrier_id` |
+| Chybí amendmentNumber | Přidat do models.py + schemas.py |
+| DepoRate špatné depo | Zkontrolovat mapování v Prices.jsx |
+| VITE_API_URL nefunguje | Hard refresh (Cmd+Shift+R), vymazat cache |
+
+---
+
+## 📊 CHANGELOG
+
+### v3.11.0 (Prosinec 2025)
+- ✅ **Redesign ceníků**: Hierarchie Typ závozu → Depo → Služba
+- ✅ **DepoRate mapování**: Sklad_ALL_IN → Nový Bydžov, Vratimov → Vratimov
+- ✅ **amendment_number**: Automatické nastavení při uploadu smlouvy
+- ✅ **Naming conventions**: Dokumentace camelCase (DB) vs snake_case (Python)
+- ✅ **DodatekBadge**: Zobrazení čísla dodatku u každé sazby
+
+### v3.10.0 (Prosinec 2025)
+- Restrukturace ceníků per depo
+- Zachování čísel dodatků
+- Deduplikace sazeb
 
 ---
 
