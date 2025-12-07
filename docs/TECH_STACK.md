@@ -283,6 +283,33 @@ const data = await fetch('/api/alzabox/stats/summary').then(r => r.json())
 2. **API autentizace** - automaticky přidává `X-API-Key` header
 3. **Error handling** - centralizované zpracování chyb
 
+### FormData upload (správný způsob)
+
+```javascript
+// V api.js - definice upload funkce
+export const myResource = {
+  // ... ostatní metody ...
+  
+  upload: (file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/myresource/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }).then(r => r.data)
+  }
+}
+
+// V komponentě - použití
+const handleUpload = async (file) => {
+  try {
+    const result = await myResource.upload(file)
+    console.log('Nahráno:', result)
+  } catch (error) {
+    console.error('Chyba uploadu:', error)
+  }
+}
+```
+
 ### API Timeouty (frontend/src/lib/api.js)
 ```javascript
 // Default
@@ -1043,6 +1070,7 @@ const navigation = [
 - ✅ **Naming conventions**: Dokumentace rozdílu `total_km` (RoutePlan) vs `total_distance_km` (RoutePlanRoute)
 - ✅ **SQL migrace**: Kompletní skripty pro opravu DB schématu
 - ✅ **Konsolidace dokumentace**: Sloučení všech předchozích verzí do jednoho souboru
+- ✅ **FormData upload**: Přidán příklad správného uploadu souborů
 
 ### v3.11.0 (Prosinec 2025)
 - ✅ **Redesign ceníků**: Hierarchie Typ závozu → Depo → Služba
