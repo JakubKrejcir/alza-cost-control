@@ -738,7 +738,7 @@ async def get_route_plans(
             'sdRoutesCount': p.sd_routes_count,
             'dpoLinehaulCount': p.dpo_linehaul_count,
             'sdLinehaulCount': p.sd_linehaul_count,
-            'totalDistanceKm': float(p.total_distance_km) if p.total_distance_km else 0,
+            'totalDistanceKm': float(p.total_km) if p.total_km else 0,
             'totalStops': p.total_stops,
         }
         for p in plans
@@ -815,7 +815,7 @@ async def upload_route_plan(
         sd_routes_count=plan_data['summary']['sd_routes_count'],
         dpo_linehaul_count=plan_data['summary']['dpo_linehaul_count'],
         sd_linehaul_count=plan_data['summary']['sd_linehaul_count'],
-        total_distance_km=plan_data['summary']['total_distance_km'],
+        total_km=plan_data['summary']['total_distance_km'],
         total_stops=plan_data['summary']['total_stops'],
         # Per depot counts
         vratimov_dpo_count=plan_data['summary']['vratimov_dpo_count'],
@@ -873,7 +873,7 @@ async def upload_route_plan(
             'sdRoutesCount': route_plan.sd_routes_count,
             'dpoLinehaulCount': route_plan.dpo_linehaul_count,
             'sdLinehaulCount': route_plan.sd_linehaul_count,
-            'totalDistanceKm': float(route_plan.total_distance_km) if route_plan.total_distance_km else 0,
+            'totalDistanceKm': float(route_plan.total_km) if route_plan.total_km else 0,
             'totalStops': route_plan.total_stops,
         }
     }
@@ -952,7 +952,7 @@ async def upload_route_plans_batch(
                 sd_routes_count=plan_data['summary']['sd_routes_count'],
                 dpo_linehaul_count=plan_data['summary']['dpo_linehaul_count'],
                 sd_linehaul_count=plan_data['summary']['sd_linehaul_count'],
-                total_distance_km=plan_data['summary']['total_distance_km'],
+                total_km=plan_data['summary']['total_distance_km'],
                 total_stops=plan_data['summary']['total_stops'],
                 # Per depot counts
                 vratimov_dpo_count=plan_data['summary']['vratimov_dpo_count'],
@@ -1206,7 +1206,7 @@ async def get_route_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
         'sdRoutesCount': plan.sd_routes_count,
         'dpoLinehaulCount': plan.dpo_linehaul_count,
         'sdLinehaulCount': plan.sd_linehaul_count,
-        'totalDistanceKm': float(plan.total_distance_km) if plan.total_distance_km else 0,
+        'totalDistanceKm': float(plan.total_km) if plan.total_km else 0,
         'totalStops': plan.total_stops,
         'routes': [
             {
