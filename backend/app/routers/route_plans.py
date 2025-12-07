@@ -841,7 +841,7 @@ async def upload_route_plan(
             route_letter=route_data['route_letter'],
             carrier_name=route_data['carrier_name'],
             route_type=route_data['route_type'],
-            delivery_type=route_data['delivery_type'],
+            dr_lh=route_data['delivery_type'],
             depot=route_data.get('depot'),
             start_location=route_data['start_location'],
             stops_count=route_data['stops_count'],
@@ -849,7 +849,7 @@ async def upload_route_plan(
             start_time=route_data['start_time'],
             end_time=route_data['end_time'],
             work_time=route_data['work_time'],
-            distance_km=route_data['distance_km'],
+            total_distance_km=route_data['distance_km'],
         )
         db.add(route)
         await db.flush()
