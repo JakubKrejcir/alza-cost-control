@@ -384,6 +384,11 @@ async def calculate_expected_billing(
     depot_days = {}
     
     for plan in plans:
+        # Použij celkové km z plánu (route.total_distance_km je většinou NULL)
+        plan_total_km = Decimal(str(plan.total_km or 0))
+        routes_count = len(plan.routes) or 1
+        avg_km_per_route = plan_total_km / routes_count
+        
         for route in plan.routes:
             # Detekce kategorie a depa
             route_category = detect_route_category(
@@ -419,8 +424,10 @@ async def calculate_expected_billing(
                 else:
                     sd_linehauls += lh_count
             
-            # KM
+            # KM - použij hodnotu z trasy, nebo průměr z plánu
             route_km = Decimal(str(route.total_distance_km or 0))
+            if route_km == 0:
+                route_km = avg_km_per_route
             total_km += route_km * trips
             
             # Depo dny
