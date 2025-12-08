@@ -12,6 +12,7 @@ from app.routers import (
     route_plans,
     alzabox,
     auth,
+    routes,
     expected_billing
 )
 
@@ -26,5 +27,6 @@ __all__ = [
     "route_plans",
     "alzabox",
     "auth",
+    "routes",
     "expected_billing"
 ]

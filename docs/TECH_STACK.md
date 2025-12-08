@@ -610,22 +610,28 @@ DOPRAVCE (např. Drivecool)
 │   │       ├── ≥98%: +35 600 Kč [D12]
 │   │       └── ≥97.5%: +30 000 Kč [D12]
 │   │
-│   └── 🔵 Depo Praha/STČ
+│   ├── 🔵 Depo Chrášťany (CZLC4) - Praha/STČ + část MSK
+│   │   └── ROZVOZ (Direct trasy)
+│   │       └── FIX 3 200 Kč | KM 10,97 Kč [D7]
+│   │
+│   └── 🔵 Depo Třídírna (CZTC1) - Praha/STČ (AlzaTrade)
 │       └── ROZVOZ (Direct trasy)
-│           └── FIX 3 200 Kč | KM 10,97 Kč [D7]
+│           └── (sazby dle smlouvy)
 │
 └── 🏭 SVOZ TŘÍDÍRNA (pokud existují sazby směr → CZTC1)
     └── ... (zatím prázdné pro Drivecool)
 ```
 
-### Expediční sklady vs Rozvozová depa
+### Lokace a depa
 
-| Typ | Lokace | Kód | Účel |
-|-----|--------|-----|------|
-| Expediční sklad | Úžice | CZTC1 | Třídírna, zdroj linehaulů |
-| Expediční sklad | Chrášťany | CZLC4 | Hlavní sklad, expedice |
-| Rozvozové depo | Vratimov | - | Linehaul → třídění → rozvoz |
-| Rozvozové depo | Nový Bydžov | - | Direct trasy + sklad |
+| Lokace | Kód | Role | Název depa |
+|--------|-----|------|------------|
+| Chrášťany | CZLC4 | Sklad + Depo | **Depo Chrášťany** |
+| Úžice | CZTC1 | Třídírna + Depo | **Depo Třídírna** |
+| Vratimov | - | Depo (pouze) | **Depo Vratimov** |
+| Nový Bydžov | - | Depo (pouze) | **Depo Nový Bydžov** |
+
+> **Poznámka:** Praha/STČ má 2 depa - Depo Chrášťany (zboží ze skladu) a Depo Třídírna (AlzaTrade 2.0)
 
 ### Mapování DepoRate na depa
 
@@ -1071,6 +1077,13 @@ const navigation = [
 - ✅ **SQL migrace**: Kompletní skripty pro opravu DB schématu
 - ✅ **Konsolidace dokumentace**: Sloučení všech předchozích verzí do jednoho souboru
 - ✅ **FormData upload**: Přidán příklad správného uploadu souborů
+
+### v3.12.0 (7. prosince 2025)
+- ✅ **DB schema opravy**: RoutePlan, RoutePlanRoute, LoginLog, ProofDailyDetail
+- ✅ **Terminologie lokací a dep**:
+  - CZLC4 (Chrášťany) = Sklad + Depo Chrášťany
+  - CZTC1 (Úžice) = Třídírna + Depo Třídírna
+  - Praha/STČ má 2 depa: Depo Chrášťany + Depo Třídírna
 
 ### v3.11.0 (Prosinec 2025)
 - ✅ **Redesign ceníků**: Hierarchie Typ závozu → Depo → Služba

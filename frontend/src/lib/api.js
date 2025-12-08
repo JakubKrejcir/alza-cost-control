@@ -224,4 +224,20 @@ export const alzabox = {
     api.get('/alzabox/diagnostics/carrier-mapping').then(r => r.data)
 }
 
+  // Depots
+  export const depots = {
+    getAll: (params) => api.get('/depots', { params }).then(r => r.data),
+    getOne: (id) => api.get(`/depots/${id}`).then(r => r.data),
+    getStats: () => api.get('/depots/stats').then(r => r.data),
+    getMappings: () => api.get('/depots/mappings').then(r => r.data),
+    resolveName: (planName) => 
+      api.get('/depots/resolve-name', { params: { plan_name: planName } }).then(r => r.data),
+  }
+
+  // Routes
+  export const routes = {
+    getAll: (params) => api.get('/routes', { params }).then(r => r.data),
+    getByRegion: () => api.get('/routes/by-region').then(r => r.data),
+  }
+
 export default api

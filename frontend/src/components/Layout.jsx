@@ -25,6 +25,7 @@ const navItems = [
   { path: '/upload', label: 'Dokumenty', icon: FileText, needsCarrier: true, needsPeriod: true },
   { path: '/alzabox', label: 'AlzaBox BI', icon: Package, needsCarrier: false, needsPeriod: false },
   { path: '/carriers', label: 'Dopravci', icon: Truck, needsCarrier: false, needsPeriod: false },
+  { path: '/depots', label: 'Depa & Trasy', icon: Building2, needsCarrier: false, needsPeriod: false },
 ]
 
 export default function Layout() {
