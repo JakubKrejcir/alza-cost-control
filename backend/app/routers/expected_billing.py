@@ -397,17 +397,26 @@ async def calculate_expected_billing(
         current_date = date(year, month, day)
         day_key = current_date.strftime('%Y-%m-%d')
         
-        # Najdi platný plán pro tento den (poslední plán kde valid_from <= current_date)
-        valid_plan = None
+        # Najdi VŠECHNY platné plány pro tento den
+        # Pro každou kombinaci (depot, plan_type) vyber nejnovější platný plán
+        valid_plans_by_key = {}  # key = (depot, plan_type) -> plan
+        
         for plan in sorted_plans:
             plan_start = (plan.valid_from or plan.plan_date).date() if (plan.valid_from or plan.plan_date) else None
             plan_end = plan.valid_to.date() if plan.valid_to else None
             
             if plan_start and plan_start <= current_date:
                 if plan_end is None or plan_end >= current_date:
-                    valid_plan = plan
+                    # Plán je platný pro tento den
+                    key = (plan.depot, plan.plan_type)
+                    # Novější plán (vyšší valid_from) přepíše starší
+                    if key not in valid_plans_by_key or plan_start >= (valid_plans_by_key[key].valid_from or valid_plans_by_key[key].plan_date).date():
+                        valid_plans_by_key[key] = plan
+        
+        valid_plans = list(valid_plans_by_key.values())
         
         # Inicializace denního záznamu
+        plan_names = [p.file_name for p in valid_plans] if valid_plans else []
         daily_breakdown[day_key] = {
             'date': day_key,
             'routes': 0,
@@ -420,12 +429,12 @@ async def calculate_expected_billing(
             'dpoRoutes': 0,
             'sdRoutes': 0,
             'linehauls': 0,
-            'planId': valid_plan.id if valid_plan else None,
-            'planName': valid_plan.file_name if valid_plan else None,
+            'planCount': len(valid_plans),
+            'planName': ', '.join(plan_names) if plan_names else None,
         }
         
-        # Pokud máme platný plán, spočítej náklady pro tento den
-        if valid_plan:
+        # Pokud máme platné plány, spočítej náklady pro tento den
+        for valid_plan in valid_plans:
             plan_total_km = Decimal(str(valid_plan.total_distance_km or 0))
             routes_count = len(valid_plan.routes) or 1
             avg_km_per_route = plan_total_km / routes_count if routes_count > 0 else Decimal('0')
