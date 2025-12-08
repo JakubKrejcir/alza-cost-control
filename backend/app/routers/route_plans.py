@@ -873,7 +873,7 @@ async def upload_route_plan(
             'sdRoutesCount': route_plan.sd_routes_count,
             'dpoLinehaulCount': route_plan.dpo_linehaul_count,
             'sdLinehaulCount': route_plan.sd_linehaul_count,
-            'totalDistanceKm': float(route_plan.total_km) if route_plan.total_km else 0,
+            'totalDistanceKm': float(route_plan.total_distance_km) if route_plan.total_distance_km else 0,
             'totalStops': route_plan.total_stops,
         }
     }
@@ -1206,7 +1206,7 @@ async def get_route_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
         'sdRoutesCount': plan.sd_routes_count,
         'dpoLinehaulCount': plan.dpo_linehaul_count,
         'sdLinehaulCount': plan.sd_linehaul_count,
-        'totalDistanceKm': float(plan.total_km) if plan.total_km else 0,
+        'totalDistanceKm': float(plan.total_distance_km) if plan.total_distance_km else 0,
         'totalStops': plan.total_stops,
         'routes': [
             {
