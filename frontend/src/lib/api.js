@@ -20,7 +20,12 @@ export const carriers = {
 
 // Depots
 export const depots = {
-  getAll: (params) => api.get('/depots', { params }).then(r => r.data),
+  getAll: (params) => {
+    const queryParams = typeof params === 'number' 
+      ? { carrier_id: params } 
+      : params
+    return api.get('/depots', { params: queryParams }).then(r => r.data)
+  },
   getOne: (id) => api.get(`/depots/${id}`).then(r => r.data),
   create: (data) => api.post('/depots', data).then(r => r.data),
   update: (id, data) => api.put(`/depots/${id}`, data).then(r => r.data),
