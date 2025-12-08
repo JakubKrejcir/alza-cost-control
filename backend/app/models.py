@@ -1,7 +1,8 @@
 """
 SQLAlchemy Models - matching the Prisma schema exactly
-Updated: 2025-12-07 - Added Route, RouteDepotHistory, RouteCarrierHistory, DepotNameMapping
+Updated: 2025-12-08 - Added Route, RouteDepotHistory, RouteCarrierHistory, DepotNameMapping
                       Updated Depot model with operatorType, validFrom/validTo
+                      FIXED: Restored InvoiceItem model
 """
 from datetime import datetime
 from decimal import Decimal
@@ -351,11 +352,11 @@ class PriceConfig(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     carrier_id: Mapped[int] = mapped_column("carrierId", ForeignKey("Carrier.id", ondelete="CASCADE"))
     contract_id: Mapped[Optional[int]] = mapped_column("contractId", ForeignKey("Contract.id"))
-    type: Mapped[str] = mapped_column(String(50))
     valid_from: Mapped[datetime] = mapped_column("validFrom", DateTime)
     valid_to: Mapped[Optional[datetime]] = mapped_column("validTo", DateTime)
-    is_active: Mapped[bool] = mapped_column("isActive", Boolean, default=True)
+    name: Mapped[Optional[str]] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Relationships
     carrier: Mapped["Carrier"] = relationship(back_populates="prices")
@@ -368,7 +369,7 @@ class PriceConfig(Base):
 
 
 # =============================================================================
-# FIX RATE MODEL
+# RATE MODELS
 # =============================================================================
 
 class FixRate(Base):
@@ -377,9 +378,9 @@ class FixRate(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     price_config_id: Mapped[int] = mapped_column("priceConfigId", ForeignKey("PriceConfig.id", ondelete="CASCADE"))
     route_type: Mapped[str] = mapped_column("routeType", String(50))
+    delivery_type: Mapped[str] = mapped_column("deliveryType", String(50))
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
-    route_category: Mapped[Optional[str]] = mapped_column("routeCategory", String(50))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -387,17 +388,14 @@ class FixRate(Base):
     depot: Mapped[Optional["Depot"]] = relationship(back_populates="fix_rates", foreign_keys=[depot_id])
 
 
-# =============================================================================
-# KM RATE MODEL
-# =============================================================================
-
 class KmRate(Base):
     __tablename__ = "KmRate"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     price_config_id: Mapped[int] = mapped_column("priceConfigId", ForeignKey("PriceConfig.id", ondelete="CASCADE"))
-    route_type: Mapped[Optional[str]] = mapped_column("routeType", String(50))
-    rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    route_type: Mapped[str] = mapped_column("routeType", String(50))
+    delivery_type: Mapped[str] = mapped_column("deliveryType", String(50))
+    rate: Mapped[Decimal] = mapped_column(Numeric(10, 4))
     depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
@@ -406,17 +404,12 @@ class KmRate(Base):
     depot: Mapped[Optional["Depot"]] = relationship(back_populates="km_rates", foreign_keys=[depot_id])
 
 
-# =============================================================================
-# DEPO RATE MODEL
-# =============================================================================
-
 class DepoRate(Base):
     __tablename__ = "DepoRate"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     price_config_id: Mapped[int] = mapped_column("priceConfigId", ForeignKey("PriceConfig.id", ondelete="CASCADE"))
-    depo_name: Mapped[str] = mapped_column("depoName", String(100))
-    rate_type: Mapped[str] = mapped_column("rateType", String(50))
+    service_type: Mapped[str] = mapped_column("serviceType", String(100))
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
@@ -426,10 +419,6 @@ class DepoRate(Base):
     depot: Mapped[Optional["Depot"]] = relationship(back_populates="depo_rates_by_depot", foreign_keys=[depot_id])
 
 
-# =============================================================================
-# LINEHAUL RATE MODEL
-# =============================================================================
-
 class LinehaulRate(Base):
     __tablename__ = "LinehaulRate"
 
@@ -437,15 +426,9 @@ class LinehaulRate(Base):
     price_config_id: Mapped[int] = mapped_column("priceConfigId", ForeignKey("PriceConfig.id", ondelete="CASCADE"))
     from_depot_id: Mapped[Optional[int]] = mapped_column("fromDepotId", ForeignKey("Depot.id"))
     to_depot_id: Mapped[Optional[int]] = mapped_column("toDepotId", ForeignKey("Depot.id"))
-    from_code: Mapped[Optional[str]] = mapped_column("fromCode", String(50))
-    to_code: Mapped[Optional[str]] = mapped_column("toCode", String(50))
+    from_warehouse_id: Mapped[Optional[int]] = mapped_column("fromWarehouseId", ForeignKey("Warehouse.id"))
     vehicle_type: Mapped[str] = mapped_column("vehicleType", String(50))
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    is_posila: Mapped[bool] = mapped_column("isPosila", Boolean, default=False)
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    from_warehouse_id: Mapped[Optional[int]] = mapped_column("fromWarehouseId", ForeignKey("Warehouse.id"))
-    pallet_capacity_min: Mapped[Optional[int]] = mapped_column("palletCapacityMin", Integer)
-    pallet_capacity_max: Mapped[Optional[int]] = mapped_column("palletCapacityMax", Integer)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -454,10 +437,6 @@ class LinehaulRate(Base):
     to_depot: Mapped[Optional["Depot"]] = relationship(back_populates="linehaul_to", foreign_keys=[to_depot_id])
     from_warehouse: Mapped[Optional["Warehouse"]] = relationship(back_populates="linehaul_from", foreign_keys=[from_warehouse_id])
 
-
-# =============================================================================
-# BONUS RATE MODEL
-# =============================================================================
 
 class BonusRate(Base):
     __tablename__ = "BonusRate"
@@ -573,32 +552,60 @@ class ProofDailyDetail(Base):
     routes_count: Mapped[int] = mapped_column("routesCount", Integer, default=0)
     total_km: Mapped[Decimal] = mapped_column("totalKm", Numeric(10, 2), default=0)
     total_stops: Mapped[int] = mapped_column("totalStops", Integer, default=0)
-    fix_amount: Mapped[Optional[Decimal]] = mapped_column("fixAmount", Numeric(10, 2))
-    km_amount: Mapped[Optional[Decimal]] = mapped_column("kmAmount", Numeric(10, 2))
-    day_of_week: Mapped[Optional[str]] = mapped_column("dayOfWeek", String(10))
+    # Detailní počty tras
+    dr_dpo_count: Mapped[int] = mapped_column("drDpoCount", Integer, default=0)
+    lh_dpo_count: Mapped[int] = mapped_column("lhDpoCount", Integer, default=0)
+    dr_sd_count: Mapped[int] = mapped_column("drSdCount", Integer, default=0)
+    lh_sd_count: Mapped[int] = mapped_column("lhSdCount", Integer, default=0)
+    vratimov_dr_dpo: Mapped[int] = mapped_column("vratimovDrDpo", Integer, default=0)
+    vratimov_lh_dpo: Mapped[int] = mapped_column("vratimovLhDpo", Integer, default=0)
+    vratimov_dr_sd: Mapped[int] = mapped_column("vratimovDrSd", Integer, default=0)
+    vratimov_lh_sd: Mapped[int] = mapped_column("vratimovLhSd", Integer, default=0)
+    bydzov_dr_dpo: Mapped[int] = mapped_column("bydzovDrDpo", Integer, default=0)
+    bydzov_lh_dpo: Mapped[int] = mapped_column("bydzovLhDpo", Integer, default=0)
+    bydzov_dr_sd: Mapped[int] = mapped_column("bydzovDrSd", Integer, default=0)
+    bydzov_lh_sd: Mapped[int] = mapped_column("bydzovLhSd", Integer, default=0)
+    depo_hours: Mapped[Optional[Decimal]] = mapped_column("depoHours", Numeric(8, 2), default=0)
+    # KM columns
+    dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("drDpoKm", Numeric(10, 2), default=0)
+    lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("lhDpoKm", Numeric(10, 2), default=0)
+    dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("drSdKm", Numeric(10, 2), default=0)
+    lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("lhSdKm", Numeric(10, 2), default=0)
+    vratimov_dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("vratimovDrDpoKm", Numeric(10, 2), default=0)
+    vratimov_lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("vratimovLhDpoKm", Numeric(10, 2), default=0)
+    vratimov_dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("vratimovDrSdKm", Numeric(10, 2), default=0)
+    vratimov_lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("vratimovLhSdKm", Numeric(10, 2), default=0)
+    bydzov_dr_dpo_km: Mapped[Optional[Decimal]] = mapped_column("bydzovDrDpoKm", Numeric(10, 2), default=0)
+    bydzov_lh_dpo_km: Mapped[Optional[Decimal]] = mapped_column("bydzovLhDpoKm", Numeric(10, 2), default=0)
+    bydzov_dr_sd_km: Mapped[Optional[Decimal]] = mapped_column("bydzovDrSdKm", Numeric(10, 2), default=0)
+    bydzov_lh_sd_km: Mapped[Optional[Decimal]] = mapped_column("bydzovLhSdKm", Numeric(10, 2), default=0)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     proof: Mapped["Proof"] = relationship(back_populates="daily_details")
 
+    @property
+    def total_dpo_count(self) -> int:
+        return self.dr_dpo_count + self.lh_dpo_count
 
-class ProofAnalysis(Base):
-    __tablename__ = "ProofAnalysis"
+    @property
+    def total_sd_count(self) -> int:
+        return self.dr_sd_count + self.lh_sd_count
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
-    analysis_type: Mapped[str] = mapped_column("analysisType", String(50))
-    metric_name: Mapped[str] = mapped_column("metricName", String(100))
-    metric_value: Mapped[Decimal] = mapped_column("metricValue", Numeric(15, 4))
-    comparison_value: Mapped[Optional[Decimal]] = mapped_column("comparisonValue", Numeric(15, 4))
-    difference_pct: Mapped[Optional[Decimal]] = mapped_column("differencePct", Numeric(8, 2))
-    notes: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
-
-    proof: Mapped["Proof"] = relationship(back_populates="analyses")
+    @property
+    def total_routes(self) -> int:
+        return self.total_dpo_count + self.total_sd_count
+    
+    @property
+    def vratimov_total(self) -> int:
+        return self.vratimov_dr_dpo + self.vratimov_lh_dpo + self.vratimov_dr_sd + self.vratimov_lh_sd
+    
+    @property
+    def bydzov_total(self) -> int:
+        return self.bydzov_dr_dpo + self.bydzov_lh_dpo + self.bydzov_dr_sd + self.bydzov_lh_sd
 
 
 # =============================================================================
-# INVOICE MODEL
+# INVOICE MODELS (FIXED - InvoiceItem restored)
 # =============================================================================
 
 class Invoice(Base):
@@ -607,16 +614,75 @@ class Invoice(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     carrier_id: Mapped[int] = mapped_column("carrierId", ForeignKey("Carrier.id", ondelete="CASCADE"))
     proof_id: Mapped[Optional[int]] = mapped_column("proofId", ForeignKey("Proof.id"))
-    number: Mapped[str] = mapped_column(String(100))
-    issue_date: Mapped[datetime] = mapped_column("issueDate", DateTime)
-    due_date: Mapped[datetime] = mapped_column("dueDate", DateTime)
-    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    invoice_number: Mapped[str] = mapped_column("invoiceNumber", String(50))
+    period: Mapped[str] = mapped_column(String(20))
+    issue_date: Mapped[Optional[datetime]] = mapped_column("issueDate", DateTime)
+    due_date: Mapped[Optional[datetime]] = mapped_column("dueDate", DateTime)
+    total_without_vat: Mapped[Optional[Decimal]] = mapped_column("totalWithoutVat", Numeric(12, 2))
+    vat_amount: Mapped[Optional[Decimal]] = mapped_column("vatAmount", Numeric(12, 2))
+    total_with_vat: Mapped[Optional[Decimal]] = mapped_column("totalWithVat", Numeric(12, 2))
     status: Mapped[str] = mapped_column(String(50), default="pending")
-    document_url: Mapped[Optional[str]] = mapped_column("documentUrl", Text)
+    file_url: Mapped[Optional[str]] = mapped_column("fileUrl", Text)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Relationships
     carrier: Mapped["Carrier"] = relationship(back_populates="invoices")
     proof: Mapped[Optional["Proof"]] = relationship(back_populates="invoices")
+    items: Mapped[List["InvoiceItem"]] = relationship(back_populates="invoice", cascade="all, delete-orphan")
+
+
+class InvoiceItem(Base):
+    """Položky faktury"""
+    __tablename__ = "InvoiceItem"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column("invoiceId", ForeignKey("Invoice.id", ondelete="CASCADE"))
+    item_type: Mapped[str] = mapped_column("itemType", String(50))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+
+    invoice: Mapped["Invoice"] = relationship(back_populates="items")
+
+
+# =============================================================================
+# PROOF ANALYSIS MODEL
+# =============================================================================
+
+class ProofAnalysis(Base):
+    __tablename__ = "ProofAnalysis"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    proof_id: Mapped[int] = mapped_column("proofId", ForeignKey("Proof.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(50))
+    errors_json: Mapped[Optional[str]] = mapped_column("errorsJson", Text)
+    warnings_json: Mapped[Optional[str]] = mapped_column("warningsJson", Text)
+    ok_json: Mapped[Optional[str]] = mapped_column("okJson", Text)
+    diff_fix: Mapped[Optional[Decimal]] = mapped_column("diffFix", Numeric(12, 2))
+    diff_km: Mapped[Optional[Decimal]] = mapped_column("diffKm", Numeric(12, 2))
+    diff_linehaul: Mapped[Optional[Decimal]] = mapped_column("diffLinehaul", Numeric(12, 2))
+    diff_depo: Mapped[Optional[Decimal]] = mapped_column("diffDepo", Numeric(12, 2))
+    missing_rates_json: Mapped[Optional[str]] = mapped_column("missingRatesJson", Text)
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
+
+    proof: Mapped["Proof"] = relationship(back_populates="analyses")
+
+
+# =============================================================================
+# AUDIT LOG MODEL
+# =============================================================================
+
+class AuditLog(Base):
+    __tablename__ = "AuditLog"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column("entityType", String(50))
+    entity_id: Mapped[int] = mapped_column("entityId", Integer)
+    action: Mapped[str] = mapped_column(String(50))
+    old_values: Mapped[Optional[str]] = mapped_column("oldValues", Text)
+    new_values: Mapped[Optional[str]] = mapped_column("newValues", Text)
+    user_email: Mapped[Optional[str]] = mapped_column("userEmail", String(255))
+    created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
 
 # =============================================================================
@@ -643,11 +709,14 @@ class RoutePlan(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     carrier_id: Mapped[int] = mapped_column("carrierId", ForeignKey("Carrier.id", ondelete="CASCADE"))
     plan_date: Mapped[datetime] = mapped_column("planDate", DateTime)
+    valid_from: Mapped[Optional[datetime]] = mapped_column("validFrom", DateTime)
+    valid_to: Mapped[Optional[datetime]] = mapped_column("validTo", DateTime)
     file_name: Mapped[Optional[str]] = mapped_column("fileName", String(255))
     file_url: Mapped[Optional[str]] = mapped_column("fileUrl", Text)
-    routes_count: Mapped[int] = mapped_column("routesCount", Integer, default=0)
+    plan_type: Mapped[Optional[str]] = mapped_column("planType", String(50))
+    total_routes: Mapped[int] = mapped_column("totalRoutes", Integer, default=0)
     total_stops: Mapped[int] = mapped_column("totalStops", Integer, default=0)
-    total_km: Mapped[Optional[Decimal]] = mapped_column("totalKm", Numeric(10, 2))
+    total_distance_km: Mapped[Optional[Decimal]] = mapped_column("totalDistanceKm", Numeric(10, 2))
     status: Mapped[str] = mapped_column(String(50), default="pending")
     notes: Mapped[Optional[str]] = mapped_column(Text)
     # Additional aggregation columns
