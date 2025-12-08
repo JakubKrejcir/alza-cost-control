@@ -13,6 +13,7 @@ from app.routers import carriers, depots, contracts, prices, proofs, invoices, a
 from app.routers import route_plans
 from app.routers import alzabox
 from app.routers import auth
+from app.routers import routes
 from app.routers import expected_billing
 
 
