@@ -738,7 +738,7 @@ async def get_route_plans(
             'sdRoutesCount': p.sd_routes_count,
             'dpoLinehaulCount': p.dpo_linehaul_count,
             'sdLinehaulCount': p.sd_linehaul_count,
-            'totalDistanceKm': float(p.total_km) if p.total_km else 0,
+            'totalDistanceKm': float(p.total_distance_km) if p.total_distance_km else 0,
             'totalStops': p.total_stops,
         }
         for p in plans
