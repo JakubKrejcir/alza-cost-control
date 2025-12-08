@@ -103,29 +103,67 @@ def detect_depot_code(start_location: str, route_name: str) -> Optional[str]:
     return None
 
 
-def count_trips(dr_lh: str) -> int:
-    """Spočítá počet jízd z DR/LH sloupce"""
+def count_trips(dr_lh: str, plan_type: str = "BOTH") -> int:
+    """
+    Spočítá počet rozjezdů z DR/LH sloupce.
+    
+    Pravidla pro KOMBINOVANÝ plán (BOTH):
+    - DR = 1 rozjezd (DPO svoz)
+    - DR-DR = 2 rozjezdy (DPO + SD svoz)
+    - DR-DR-DR = 3 rozjezdy (DPO + 2x SD svoz)
+    - LH, LH-LH, LH-LH-LH = 1 rozjezd (linehauly se NENÁSOBÍ!)
+    
+    Pro ODDĚLENÉ plány (DPO nebo SD):
+    - Vždy 1 rozjezd (trasy už jsou v oddělených souborech)
+    
+    Args:
+        dr_lh: Hodnota ze sloupce DR/LH (např. "DR", "DR-DR", "LH-LH")
+        plan_type: Typ plánu ("BOTH", "DPO", "SD")
+    
+    Returns:
+        Počet rozjezdů pro danou trasu
+    """
     if not dr_lh:
         return 1
     
-    dr_lh_upper = dr_lh.upper()
+    # Pokud jsou oddělené plány (DPO nebo SD), nenásobíme
+    # Trasy už jsou v oddělených souborech
+    if plan_type and plan_type.upper() in ('DPO', 'SD'):
+        return 1
     
-    # Počítej DR a LH
+    dr_lh_upper = dr_lh.upper().strip()
+    
+    # Počítej POUZE DR vzory (ne LH!)
+    # DR = 1, DR-DR = 2, DR-DR-DR = 3
+    # LH, LH-LH, LH-LH-LH = vždy 1 (nenásobí se)
     dr_count = dr_lh_upper.count('DR')
-    lh_count = dr_lh_upper.count('LH')
     
-    return max(dr_count, lh_count, 1)
+    # Pokud obsahuje LH ale ne DR, vracíme 1
+    if dr_count == 0:
+        return 1
+    
+    return dr_count
 
 
 def has_linehaul(dr_lh: str) -> bool:
-    """Zjistí, zda trasa má linehaul"""
+    """
+    Zjistí, zda trasa má linehaul.
+    
+    TODO: Linehauly se budou počítat z jiného souboru!
+    Tato funkce je zatím placeholder.
+    """
     if not dr_lh:
         return False
     return 'LH' in dr_lh.upper()
 
 
 def count_linehauls(dr_lh: str) -> int:
-    """Spočítá počet linehaulů"""
+    """
+    Spočítá počet linehaulů.
+    
+    TODO: Linehauly se budou počítat z jiného souboru!
+    Tato funkce je zatím placeholder a NEPOUŽÍVAT pro produkční výpočty.
+    """
     if not dr_lh:
         return 0
     return dr_lh.upper().count('LH')
@@ -450,8 +488,9 @@ async def calculate_expected_billing(
                     route.route_name or ''
                 )
                 
-                # Počet jízd
-                trips = count_trips(route.dr_lh)
+                # Počet rozjezdů (závisí na typu plánu)
+                # Oddělené plány (DPO/SD) = 1, Kombinované (BOTH) = podle DR vzoru
+                trips = count_trips(route.dr_lh, valid_plan.plan_type)
                 
                 # KM - použij hodnotu z trasy, nebo průměr z plánu
                 route_km = Decimal(str(route.total_distance_km or 0))
@@ -539,7 +578,7 @@ async def calculate_expected_billing(
                 route.start_location or '',
                 route.route_name or ''
             )
-            trips = count_trips(route.dr_lh)
+            trips = count_trips(route.dr_lh, plan.plan_type)
             route_km = Decimal(str(route.total_distance_km or 0))
             if route_km == 0:
                 route_km = avg_km_per_route

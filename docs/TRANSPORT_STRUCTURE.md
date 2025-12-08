@@ -117,14 +117,47 @@ Zboží jede **linehaulem na depo**, kde se přetřídí, a pak dodávky rozvá�
 
 ## 4. Sloupec DR/LH - význam
 
-| Hodnota | Popis | Počet jízd | Linehaul |
-|---------|-------|------------|----------|
-| **DR** | Direct 1x denně | 1 | Ne |
-| **DR-DR** | Direct 2x denně | 2 | Ne |
-| **DR-DR-DR** | Direct 3x denně | 3 | Ne |
-| **LH-** | Linehaul ráno (DPO) | 1 | Ano (ráno) |
-| **-LH** | Linehaul večer (SD) | 1 | Ano (večer) |
-| **LH-LH** | Linehaul 2x denně | 2 | Ano (2x) |
+### 4.1 Pravidla pro počítání rozjezdů
+
+| Hodnota | Popis | Rozjezdů | Linehaul | Poznámka |
+|---------|-------|----------|----------|----------|
+| **DR** | Direct 1x denně | 1 | Ne | DPO svoz |
+| **DR-DR** | Direct 2x denně | 2 | Ne | DPO + SD svoz |
+| **DR-DR-DR** | Direct 3x denně | 3 | Ne | DPO + 2x SD svoz |
+| **LH** | Linehaul | 1 | Ano | Nenásobí se! |
+| **LH-LH** | Linehaul 2x | 1 | Ano | Nenásobí se! |
+| **LH-LH-LH** | Linehaul 3x | 1 | Ano | Nenásobí se! |
+
+> ⚠️ **DŮLEŽITÉ**: 
+> - Počet rozjezdů se násobí POUZE u DR vzorů!
+> - LH vzory se NENÁSOBÍ - vždy 1 rozjezd bez ohledu na počet LH
+> - Počet linehaulů se počítá z **jiného souboru** (ne z plánovacího souboru)
+
+### 4.2 Rozdíl mezi kombinovaným a oddělenými plány
+
+**Kombinovaný plán** (jeden soubor pro celý den):
+- DR-DR = 2 rozjezdy (DPO + SD)
+- DR-DR-DR = 3 rozjezdy
+
+**Oddělené plány** (DPO a SD soubory zvlášť):
+- Každý soubor obsahuje své trasy
+- NENÁSOBÍME - každá trasa = 1 rozjezd
+- Typ plánu se pozná z názvu souboru: `*_DPO.xlsx` nebo `*_SD.xlsx`
+
+### 4.3 Příklad výpočtu
+
+```
+Kombinovaný plán "Drivecool 25-11-07.xlsx":
+- Trasa A (DR) = 1 rozjezd
+- Trasa B (DR-DR) = 2 rozjezdy
+- Trasa C (LH-LH) = 1 rozjezd
+CELKEM: 4 rozjezdy
+
+Oddělené plány:
+"Drivecool 25-11-07_DPO.xlsx" - 23 tras = 23 rozjezdů
+"Drivecool 25-11-07_SD.xlsx" - 12 tras = 12 rozjezdů
+CELKEM: 35 rozjezdů
+```
 
 ---
 
@@ -337,8 +370,10 @@ def calculate_planned_cost(route: RoutePlanRoute, prices: PriceConfig) -> dict:
         depot = detect_depot_from_route_name(route.route_name)
         fix_rate = prices.get_fix_rate(f"DIRECT_{depot}")  # 2500 Kč
     
-    # 3. Spočítat počet jízd z DR/LH
-    trips = count_trips(route.dr_lh)  # DR-DR-DR = 3, LH-LH = 2, atd.
+    # 3. Spočítat počet rozjezdů z DR/LH
+    # DŮLEŽITÉ: Násobí se POUZE DR vzory, LH se NENÁSOBÍ!
+    # DR-DR = 2, DR-DR-DR = 3, ale LH-LH = 1!
+    trips = count_trips(route.dr_lh, plan.plan_type)
     
     result["fix"] = fix_rate * trips
     
@@ -347,8 +382,9 @@ def calculate_planned_cost(route: RoutePlanRoute, prices: PriceConfig) -> dict:
     result["km"] = km_rate * route.total_distance_km * trips
     
     # 5. Linehaul (pouze pro VIA LINEHAUL trasy)
+    # TODO: Linehauly se počítají z jiného souboru!
     if route_type == "VIA_LINEHAUL" and "LH" in route.dr_lh:
-        linehaul_count = count_linehauls(route.dr_lh)
+        linehaul_count = get_linehaul_count_from_external_file(...)  # Z jiného souboru
         linehaul_rate = prices.get_linehaul_rate(...)  # Podle warehouse a vehicle
         result["linehaul"] = linehaul_rate * linehaul_count
     
@@ -363,6 +399,7 @@ def calculate_planned_cost(route: RoutePlanRoute, prices: PriceConfig) -> dict:
 
 | Datum | Změna | Autor |
 |-------|-------|-------|
+| 2025-12-08 | Oprava logiky počítání rozjezdů: LH vzory se NENÁSOBÍ, pouze DR vzory. Přidána podpora DR-DR-DR. Linehauly se počítají z jiného souboru. | Claude |
 | 2025-12-05 | Vytvoření dokumentace | Claude |
 
 ---

@@ -290,15 +290,20 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
             delivery_type = sheet.cell(row=row, column=col_map['delivery_type']).value if col_map['delivery_type'] else None
             delivery_type_str = str(delivery_type).strip().upper() if delivery_type else None
             
-            # DR-DR means route runs twice daily (once DPO, once SD)
-            # So it counts as both DPO and SD
-            is_dr_dr = delivery_type_str == 'DR-DR'
+            # Počet rozjezdů z DR/LH:
+            # DR = 1 rozjezd (DPO)
+            # DR-DR = 2 rozjezdy (DPO + SD)
+            # DR-DR-DR = 3 rozjezdy (DPO + 2x SD)
+            # LH, LH-LH, LH-LH-LH = 1 rozjezd (linehauly se NENÁSOBÍ!)
+            dr_count = delivery_type_str.count('DR') if delivery_type_str else 0
+            is_multi_dr = dr_count >= 2  # DR-DR nebo DR-DR-DR
             
             # Determine depot based on route name
             # "Moravskoslezsko" = Vratimov, everything else = Nový Bydžov
             is_vratimov = 'MORAVSKOSLEZSKO' in str(route_name).upper()
             
-            # Count linehauls per batch (LH-LH = 2 kamiony)
+            # TODO: Linehauly se budou počítat z jiného souboru!
+            # Tato logika je zatím placeholder
             if delivery_type_str and 'LH' in delivery_type_str:
                 lh_count = parse_linehaul_count(delivery_type_str)
                 if route_type == 'DPO':
@@ -313,7 +318,7 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
                 'route_name': str(route_name),
                 'route_letter': extract_route_letter(str(route_name)),
                 'carrier_name': sheet.cell(row=row, column=col_map['carrier']).value if col_map['carrier'] else None,
-                'route_type': 'BOTH' if is_dr_dr else route_type,  # Mark as BOTH if DR-DR
+                'route_type': 'BOTH' if is_multi_dr else route_type,  # Mark as BOTH if DR-DR or DR-DR-DR
                 'delivery_type': delivery_type_str,
                 'start_location': sheet.cell(row=row, column=col_map['start_location']).value if col_map['start_location'] else None,
                 'stops_count': stops_count,
@@ -322,7 +327,7 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
                 'end_time': time_to_str(sheet.cell(row=row, column=col_map['end_time']).value if col_map['end_time'] else None),
                 'work_time': time_to_str(sheet.cell(row=row, column=col_map['work_time']).value if col_map['work_time'] else None),
                 'distance_km': distance,
-                'is_dr_dr': is_dr_dr,  # Flag for DR-DR routes
+                'dr_count': dr_count,  # Počet DR vzorů pro výpočet rozjezdů
                 'depot': 'VRATIMOV' if is_vratimov else 'BYDZOV',  # Depot assignment
             }
             
@@ -344,17 +349,19 @@ def parse_route_plan_xlsx(file_content: bytes, filename: str) -> dict:
                 result['summary']['bydzov_km'] += distance
                 result['summary']['bydzov_duration_min'] += work_time_minutes
             
-            # DR-DR counts as both DPO and SD (runs twice daily)
-            if is_dr_dr:
+            # DR-DR = DPO + SD, DR-DR-DR = DPO + 2x SD
+            # Pro statistiky počítáme kolik tras je DPO a kolik SD
+            if dr_count >= 2:
+                # DR-DR nebo DR-DR-DR - trasa jede vícekrát denně
                 result['summary']['dpo_routes_count'] += 1
-                result['summary']['sd_routes_count'] += 1
+                result['summary']['sd_routes_count'] += (dr_count - 1)  # DR-DR = 1 SD, DR-DR-DR = 2 SD
                 # Per depot
                 if is_vratimov:
                     result['summary']['vratimov_dpo_count'] += 1
-                    result['summary']['vratimov_sd_count'] += 1
+                    result['summary']['vratimov_sd_count'] += (dr_count - 1)
                 else:
                     result['summary']['bydzov_dpo_count'] += 1
-                    result['summary']['bydzov_sd_count'] += 1
+                    result['summary']['bydzov_sd_count'] += (dr_count - 1)
             elif route_type == 'DPO':
                 result['summary']['dpo_routes_count'] += 1
                 if is_vratimov:
