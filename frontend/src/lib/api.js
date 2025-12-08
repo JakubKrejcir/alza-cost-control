@@ -20,12 +20,23 @@ export const carriers = {
 
 // Depots
 export const depots = {
-  getAll: (carrierId) => api.get('/depots', { params: { carrier_id: carrierId } }).then(r => r.data),
+  getAll: (params) => api.get('/depots', { params }).then(r => r.data),
   getOne: (id) => api.get(`/depots/${id}`).then(r => r.data),
   create: (data) => api.post('/depots', data).then(r => r.data),
   update: (id, data) => api.put(`/depots/${id}`, data).then(r => r.data),
-  delete: (id) => api.delete(`/depots/${id}`)
+  delete: (id) => api.delete(`/depots/${id}`),
+  getStats: () => api.get('/depots/stats').then(r => r.data),
+  getMappings: () => api.get('/depots/mappings').then(r => r.data),
+  resolveName: (planName) => 
+    api.get('/depots/resolve-name', { params: { plan_name: planName } }).then(r => r.data),
 }
+
+  // Routes
+  export const routes = {
+    getAll: (params) => api.get('/routes', { params }).then(r => r.data),
+    getByRegion: () => api.get('/routes/by-region').then(r => r.data),
+  }
+
 
 // Contracts
 export const contracts = {
@@ -223,21 +234,5 @@ export const alzabox = {
   getDiagnostics: () =>
     api.get('/alzabox/diagnostics/carrier-mapping').then(r => r.data)
 }
-
-  // Depots
-  export const depots = {
-    getAll: (params) => api.get('/depots', { params }).then(r => r.data),
-    getOne: (id) => api.get(`/depots/${id}`).then(r => r.data),
-    getStats: () => api.get('/depots/stats').then(r => r.data),
-    getMappings: () => api.get('/depots/mappings').then(r => r.data),
-    resolveName: (planName) => 
-      api.get('/depots/resolve-name', { params: { plan_name: planName } }).then(r => r.data),
-  }
-
-  // Routes
-  export const routes = {
-    getAll: (params) => api.get('/routes', { params }).then(r => r.data),
-    getByRegion: () => api.get('/routes/by-region').then(r => r.data),
-  }
 
 export default api
