@@ -355,6 +355,7 @@ class PriceConfig(Base):
     valid_from: Mapped[datetime] = mapped_column("validFrom", DateTime)
     valid_to: Mapped[Optional[datetime]] = mapped_column("validTo", DateTime)
     name: Mapped[Optional[str]] = mapped_column(String(100))
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
