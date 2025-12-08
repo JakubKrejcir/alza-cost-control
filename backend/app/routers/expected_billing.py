@@ -141,27 +141,29 @@ def find_fix_rate(
     depot_code: Optional[str]
 ) -> Optional[Decimal]:
     """
-    Najde FIX sazbu podle kategorie a depa.
+    Najde FIX sazbu podle depa a route_type.
     Priorita:
-    1. route_category + depot_id match
-    2. route_category match
-    3. route_type text match (fallback)
+    1. depot match (podle depot.code nebo route_type obsahující depot název)
+    2. route_type text match (DIRECT_Praha, DIRECT_Vratimov, etc.)
+    3. Fallback na první dostupnou
     """
-    # Priorita 1: Přesná shoda category + depot
-    for rate in fix_rates:
-        if rate.route_category == route_category:
-            if depot_code and rate.depot:
-                if rate.depot.code == depot_code:
-                    return rate.rate
+    # Priorita 1: Přesná shoda depot
+    if depot_code:
+        for rate in fix_rates:
+            if rate.depot and rate.depot.code == depot_code:
+                return rate.rate
     
-    # Priorita 2: Shoda category
-    for rate in fix_rates:
-        if rate.route_category == route_category:
-            return rate.rate
+    # Priorita 2: route_type obsahuje depot název
+    if depot_code:
+        depot_search = depot_code.upper().replace('_', ' ')
+        for rate in fix_rates:
+            rt = (rate.route_type or '').upper()
+            if depot_search in rt or depot_code.upper() in rt:
+                return rate.rate
     
-    # Priorita 3: Fallback na route_type text
+    # Priorita 3: Fallback na route_type text podle kategorie
     if route_category == 'DIRECT_SKLAD':
-        search_terms = ['PRAHA', 'DIRECT_Praha']
+        search_terms = ['PRAHA', 'DIRECT_PRAHA', 'STČ']
     else:
         search_terms = [depot_code or 'VRATIMOV', 'DIRECT_']
     
@@ -385,7 +387,7 @@ async def calculate_expected_billing(
     
     for plan in plans:
         # Použij celkové km z plánu (route.total_distance_km je většinou NULL)
-        plan_total_km = Decimal(str(plan.total_km or 0))
+        plan_total_km = Decimal(str(plan.total_distance_km or 0))
         routes_count = len(plan.routes) or 1
         avg_km_per_route = plan_total_km / routes_count
         
