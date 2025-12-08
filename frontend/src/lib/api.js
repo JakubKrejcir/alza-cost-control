@@ -36,12 +36,15 @@ export const depots = {
     api.get('/depots/resolve-name', { params: { plan_name: planName } }).then(r => r.data),
 }
 
-  // Routes
-  export const routes = {
-    getAll: (params) => api.get('/routes', { params }).then(r => r.data),
-    getByRegion: () => api.get('/routes/by-region').then(r => r.data),
-  }
-
+// Routes
+export const routes = {
+  getAll: (params) => api.get('/routes', { params }).then(r => r.data),
+  getByRegion: () => api.get('/routes/by-region').then(r => r.data),
+  getOne: (id) => api.get(`/routes/${id}`).then(r => r.data),
+  create: (data) => api.post('/routes', data).then(r => r.data),
+  update: (id, data) => api.put(`/routes/${id}`, data).then(r => r.data),
+  delete: (id) => api.delete(`/routes/${id}`),
+}
 
 // Contracts
 export const contracts = {
@@ -168,6 +171,15 @@ export const analysis = {
   analyzeProof: (proofId) => api.post(`/analysis/proof/${proofId}`).then(r => r.data),
   getProofAnalysis: (proofId) => api.get(`/analysis/proof/${proofId}`).then(r => r.data),
   getDashboard: (params) => api.get('/analysis/dashboard', { params }).then(r => r.data)
+}
+
+// Expected Billing
+export const expectedBilling = {
+  calculate: (carrierId, period) => 
+    api.get('/expected-billing/calculate', { 
+      params: { carrier_id: carrierId, period },
+      timeout: 60000
+    }).then(r => r.data),
 }
 
 // Alzabox - S DELŠÍM TIMEOUTEM pro velké soubory
