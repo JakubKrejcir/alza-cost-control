@@ -186,6 +186,7 @@ class ContractResponse(CamelModel):
 
 class FixRateBase(BaseModel):
     route_type: str
+    delivery_type: Optional[str] = None
     rate: Decimal
     # NEW FIELDS
     depot_id: Optional[int] = None
@@ -195,6 +196,7 @@ class FixRateBase(BaseModel):
 class FixRateResponse(CamelModel):
     id: int
     route_type: str
+    delivery_type: Optional[str] = None
     rate: Decimal
     # NEW FIELDS
     depot_id: Optional[int] = None
@@ -205,6 +207,7 @@ class FixRateResponse(CamelModel):
 
 class KmRateBase(BaseModel):
     route_type: Optional[str] = None
+    delivery_type: Optional[str] = None
     rate: Decimal
     # NEW FIELDS
     depot_id: Optional[int] = None
@@ -213,6 +216,7 @@ class KmRateBase(BaseModel):
 class KmRateResponse(CamelModel):
     id: int
     route_type: Optional[str] = None
+    delivery_type: Optional[str] = None
     rate: Decimal
     # NEW FIELDS
     depot_id: Optional[int] = None
@@ -220,8 +224,7 @@ class KmRateResponse(CamelModel):
 
 
 class DepoRateBase(BaseModel):
-    depo_name: str
-    rate_type: str
+    service_type: str
     rate: Decimal
     # NEW FIELDS
     depot_id: Optional[int] = None
@@ -229,8 +232,7 @@ class DepoRateBase(BaseModel):
 
 class DepoRateResponse(CamelModel):
     id: int
-    depo_name: str
-    rate_type: str
+    service_type: str
     rate: Decimal
     # NEW FIELDS
     depot_id: Optional[int] = None
