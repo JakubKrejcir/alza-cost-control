@@ -421,6 +421,104 @@ export default function ExpectedBilling() {
             </div>
           </div>
 
+          {/* Denní rozpad */}
+          {billingData.dailyBreakdown?.length > 0 && (
+            <div className="card">
+              <div className="card-header">
+                <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
+                  <Receipt size={20} />
+                  Denní rozpad fakturace ({billingData.dailyBreakdown.length} dnů)
+                </h3>
+              </div>
+              <div className="p-4">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                        <th className="text-left py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Datum</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Tras</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>DPO</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>SD</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>LH</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>KM</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>FIX</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>KM nákl.</th>
+                        <th className="text-right py-2 px-3" style={{ color: 'var(--color-text-muted)' }}>Linehaul</th>
+                        <th className="text-right py-2 px-3 font-semibold" style={{ color: 'var(--color-text-dark)' }}>Celkem</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {billingData.dailyBreakdown.map((day, idx) => {
+                        const isWeekend = new Date(day.date).getDay() === 0 || new Date(day.date).getDay() === 6
+                        return (
+                          <tr 
+                            key={day.date} 
+                            style={{ 
+                              borderBottom: '1px solid var(--color-border-light)',
+                              backgroundColor: isWeekend ? 'var(--color-bg)' : 'transparent'
+                            }}
+                          >
+                            <td className="py-2 px-3">
+                              <span className="font-medium">{day.dayShort}</span>
+                              <span className="ml-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                                {['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'][new Date(day.date).getDay()]}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right font-medium">{day.routes}</td>
+                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-purple)' }}>{day.dpoRoutes}</td>
+                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-green)' }}>{day.sdRoutes}</td>
+                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-orange)' }}>{day.linehauls || 0}</td>
+                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-text-muted)' }}>
+                              {Math.round(day.km).toLocaleString('cs-CZ')}
+                            </td>
+                            <td className="py-2 px-3 text-right">{formatCZK(day.fix)}</td>
+                            <td className="py-2 px-3 text-right">{formatCZK(day.kmCost)}</td>
+                            <td className="py-2 px-3 text-right">{formatCZK(day.linehaul)}</td>
+                            <td className="py-2 px-3 text-right font-semibold" style={{ color: 'var(--color-primary)' }}>
+                              {formatCZK(day.total)}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ borderTop: '2px solid var(--color-border)', backgroundColor: 'var(--color-bg)' }}>
+                        <td className="py-3 px-3 font-semibold">CELKEM</td>
+                        <td className="py-3 px-3 text-right font-semibold">
+                          {billingData.dailyBreakdown.reduce((sum, d) => sum + d.routes, 0)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold" style={{ color: 'var(--color-purple)' }}>
+                          {billingData.dailyBreakdown.reduce((sum, d) => sum + d.dpoRoutes, 0)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold" style={{ color: 'var(--color-green)' }}>
+                          {billingData.dailyBreakdown.reduce((sum, d) => sum + d.sdRoutes, 0)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold" style={{ color: 'var(--color-orange)' }}>
+                          {billingData.dailyBreakdown.reduce((sum, d) => sum + (d.linehauls || 0), 0)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+                          {Math.round(billingData.dailyBreakdown.reduce((sum, d) => sum + d.km, 0)).toLocaleString('cs-CZ')}
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold">
+                          {formatCZK(billingData.dailyBreakdown.reduce((sum, d) => sum + d.fix, 0))}
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold">
+                          {formatCZK(billingData.dailyBreakdown.reduce((sum, d) => sum + d.kmCost, 0))}
+                        </td>
+                        <td className="py-3 px-3 text-right font-semibold">
+                          {formatCZK(billingData.dailyBreakdown.reduce((sum, d) => sum + d.linehaul, 0))}
+                        </td>
+                        <td className="py-3 px-3 text-right font-bold" style={{ color: 'var(--color-primary)' }}>
+                          {formatCZK(billingData.dailyBreakdown.reduce((sum, d) => sum + d.total, 0))}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Použité plánovací soubory */}
           {billingData.plans?.length > 0 && (
             <div className="card">
