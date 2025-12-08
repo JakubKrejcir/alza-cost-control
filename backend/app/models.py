@@ -431,8 +431,12 @@ class LinehaulRate(Base):
     from_depot_id: Mapped[Optional[int]] = mapped_column("fromDepotId", ForeignKey("Depot.id"))
     to_depot_id: Mapped[Optional[int]] = mapped_column("toDepotId", ForeignKey("Depot.id"))
     from_warehouse_id: Mapped[Optional[int]] = mapped_column("fromWarehouseId", ForeignKey("Warehouse.id"))
+    from_code: Mapped[Optional[str]] = mapped_column("fromCode", String(50))
+    to_code: Mapped[Optional[str]] = mapped_column("toCode", String(50))
     vehicle_type: Mapped[str] = mapped_column("vehicleType", String(50))
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    pallet_capacity_min: Mapped[Optional[int]] = mapped_column("palletCapacityMin", Integer)
+    pallet_capacity_max: Mapped[Optional[int]] = mapped_column("palletCapacityMax", Integer)
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
 
     # Relationships
