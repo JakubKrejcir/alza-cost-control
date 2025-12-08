@@ -112,9 +112,8 @@ class DepotBase(BaseModel):
 
 
 class DepotCreate(DepotBase):
-    carrier_id: Optional[int] = None  
-    operator_type: Optional[str] = 'CARRIER'
-    operator_carrier_id: Optional[int] = None
+    carrier_id: int
+
 
 class DepotUpdate(BaseModel):
     name: Optional[str] = None
@@ -129,21 +128,16 @@ class DepotUpdate(BaseModel):
 
 class DepotResponse(CamelModel):
     id: int
-    carrier_id: Optional[int] = None  
+    carrier_id: int
     name: str
     code: Optional[str] = None
     type: Optional[str] = None
     address: Optional[str] = None
+    # NEW FIELDS
     latitude: Optional[Decimal] = None
     longitude: Optional[Decimal] = None
     region: Optional[str] = None
     depot_type: Optional[str] = None
-    # NEW FIELDS
-    operator_type: Optional[str] = None
-    operator_carrier_id: Optional[int] = None
-    valid_from: Optional[datetime] = None
-    valid_to: Optional[datetime] = None
-    location_code: Optional[str] = None
     created_at: datetime
 
 
@@ -299,7 +293,7 @@ class BonusRateResponse(CamelModel):
 class PriceConfigBase(BaseModel):
     carrier_id: int
     contract_id: Optional[int] = None
-    type: str
+    type: Optional[str] = None
     valid_from: datetime
     valid_to: Optional[datetime] = None
     is_active: bool = True
@@ -329,7 +323,7 @@ class PriceConfigResponse(CamelModel):
     id: int
     carrier_id: int
     contract_id: Optional[int] = None
-    type: str
+    type: Optional[str] = None
     valid_from: datetime
     valid_to: Optional[datetime] = None
     is_active: bool

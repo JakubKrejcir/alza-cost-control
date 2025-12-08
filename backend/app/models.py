@@ -354,6 +354,7 @@ class PriceConfig(Base):
     contract_id: Mapped[Optional[int]] = mapped_column("contractId", ForeignKey("Contract.id"))
     valid_from: Mapped[datetime] = mapped_column("validFrom", DateTime)
     valid_to: Mapped[Optional[datetime]] = mapped_column("validTo", DateTime)
+    type: Mapped[Optional[str]] = mapped_column(String(50))
     name: Mapped[Optional[str]] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
