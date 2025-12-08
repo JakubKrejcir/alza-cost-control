@@ -357,6 +357,7 @@ class PriceConfig(Base):
     name: Mapped[Optional[str]] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column("updatedAt", DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active: Mapped[bool] = mapped_column("isActive", Boolean, default=True)
 
     # Relationships
     carrier: Mapped["Carrier"] = relationship(back_populates="prices")
