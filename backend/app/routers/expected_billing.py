@@ -473,6 +473,29 @@ async def calculate_expected_billing(
                 daily_breakdown[day_key]['total'] += fix_cost + km_cost + linehaul_cost
                 daily_breakdown[day_key]['linehauls'] += lh_count
                 
+                # Per-depot agregace (pro denní souhrn)
+                if depot_code:
+                    if depot_code not in per_depot:
+                        per_depot[depot_code] = {
+                            'routes': 0,
+                            'trips': 0,
+                            'km': Decimal('0'),
+                            'fix': Decimal('0'),
+                            'km_cost': Decimal('0'),
+                            'linehaul': Decimal('0'),
+                        }
+                    per_depot[depot_code]['routes'] += 1
+                    per_depot[depot_code]['trips'] += trips
+                    per_depot[depot_code]['km'] += route_km * trips
+                    per_depot[depot_code]['fix'] += fix_cost
+                    per_depot[depot_code]['km_cost'] += km_cost
+                    per_depot[depot_code]['linehaul'] += linehaul_cost
+                    
+                    # Depo dny pro DEPO sazby
+                    if depot_code not in depot_days:
+                        depot_days[depot_code] = set()
+                    depot_days[depot_code].add(day_key)
+                
                 # DPO/SD pro denní agregaci
                 plan_type = (route.plan_type or valid_plan.plan_type or '').upper()
                 if 'DPO' in plan_type:
@@ -485,15 +508,20 @@ async def calculate_expected_billing(
                     else:
                         daily_breakdown[day_key]['sdRoutes'] += trips
     
-    # Hlavní smyčka pro celkové součty (původní logika)
+    # === ROUTES BREAKDOWN (pro debugging) ===
+    # Zobraz unikátní trasy ze všech plánů (každou trasu jen jednou)
+    seen_routes = set()
     for plan in plans:
-        # Použij celkové km z plánu (route.total_distance_km je většinou NULL)
         plan_total_km = Decimal(str(plan.total_distance_km or 0))
         routes_count = len(plan.routes) or 1
-        avg_km_per_route = plan_total_km / routes_count
+        avg_km_per_route = plan_total_km / routes_count if routes_count > 0 else Decimal('0')
         
         for route in plan.routes:
-            # Detekce kategorie a depa
+            route_key = f"{plan.id}-{route.route_name}"
+            if route_key in seen_routes:
+                continue
+            seen_routes.add(route_key)
+            
             route_category = detect_route_category(
                 route.start_location or '',
                 route.dr_lh or ''
@@ -502,82 +530,17 @@ async def calculate_expected_billing(
                 route.start_location or '',
                 route.route_name or ''
             )
-            
-            # Počet jízd
             trips = count_trips(route.dr_lh)
-            
-            # DPO/SD rozlišení
-            plan_type = (route.plan_type or plan.plan_type or '').upper()
-            if 'DPO' in plan_type:
-                dpo_routes += trips
-            elif 'SD' in plan_type:
-                sd_routes += trips
-            else:
-                # Default podle času
-                if route.start_time and route.start_time < '12:00':
-                    dpo_routes += trips
-                else:
-                    sd_routes += trips
-            
-            # Linehauly
-            if has_linehaul(route.dr_lh):
-                lh_count = count_linehauls(route.dr_lh)
-                if 'DPO' in plan_type or (route.start_time and route.start_time < '12:00'):
-                    dpo_linehauls += lh_count
-                else:
-                    sd_linehauls += lh_count
-            
-            # KM - použij hodnotu z trasy, nebo průměr z plánu
             route_km = Decimal(str(route.total_distance_km or 0))
             if route_km == 0:
                 route_km = avg_km_per_route
-            total_km += route_km * trips
             
-            # Depo dny
-            if depot_code:
-                if depot_code not in depot_days:
-                    depot_days[depot_code] = set()
-                # Každý pracovní den kde je trasa
-                depot_days[depot_code].add(depot_code)
-            
-            # === HLEDÁNÍ SAZEB ===
-            
-            # FIX
             fix_rate = find_fix_rate(all_fix_rates, route_category, depot_code)
-            fix_cost = (fix_rate or Decimal('0')) * trips
-            
-            # KM
             km_rate = find_km_rate(all_km_rates, depot_code)
-            km_cost = (km_rate or Decimal('0')) * route_km * trips
-            
-            # Linehaul
             linehaul_cost = Decimal('0')
             if has_linehaul(route.dr_lh):
                 lh_rate = find_linehaul_rate(all_linehaul_rates, depot_code)
                 linehaul_cost = (lh_rate or Decimal('0')) * count_linehauls(route.dr_lh)
-            
-            # Přičti k totals
-            totals['fix'] += fix_cost
-            totals['km'] += km_cost
-            totals['linehaul'] += linehaul_cost
-            
-            # Per depot agregace
-            if depot_code:
-                if depot_code not in per_depot:
-                    per_depot[depot_code] = {
-                        'routes': 0,
-                        'trips': 0,
-                        'km': Decimal('0'),
-                        'fix': Decimal('0'),
-                        'km_cost': Decimal('0'),
-                        'linehaul': Decimal('0'),
-                    }
-                per_depot[depot_code]['routes'] += 1
-                per_depot[depot_code]['trips'] += trips
-                per_depot[depot_code]['km'] += route_km * trips
-                per_depot[depot_code]['fix'] += fix_cost
-                per_depot[depot_code]['km_cost'] += km_cost
-                per_depot[depot_code]['linehaul'] += linehaul_cost
             
             routes_breakdown.append({
                 'routeName': route.route_name,
@@ -589,10 +552,10 @@ async def calculate_expected_billing(
                 'km': float(route_km),
                 'fixRate': float(fix_rate) if fix_rate else None,
                 'kmRate': float(km_rate) if km_rate else None,
-                'fixCost': float(fix_cost),
-                'kmCost': float(km_cost),
+                'fixCost': float((fix_rate or Decimal('0')) * trips),
+                'kmCost': float((km_rate or Decimal('0')) * route_km * trips),
                 'linehaulCost': float(linehaul_cost),
-                'totalCost': float(fix_cost + km_cost + linehaul_cost),
+                'planName': plan.file_name,
             })
     
     # === DEPO NÁKLADY ===
@@ -623,6 +586,39 @@ async def calculate_expected_billing(
                 'days': days,
                 'amount': float(depo_amount),
             })
+    
+    # === PŘEPOČET TOTALS Z DENNÍHO ROZPADU ===
+    # Totals by měly být součtem denních hodnot, ne z původní smyčky
+    daily_totals = {
+        'fix': Decimal('0'),
+        'km': Decimal('0'),
+        'linehaul': Decimal('0'),
+        'routes': 0,
+        'trips': 0,
+        'total_km': Decimal('0'),
+        'dpo_routes': 0,
+        'sd_routes': 0,
+        'linehauls': 0,
+    }
+    
+    for day_data in daily_breakdown.values():
+        daily_totals['fix'] += day_data['fix']
+        daily_totals['km'] += day_data['kmCost']
+        daily_totals['linehaul'] += day_data['linehaul']
+        daily_totals['routes'] += day_data['routes']
+        daily_totals['trips'] += day_data['trips']
+        daily_totals['total_km'] += day_data['km']
+        daily_totals['dpo_routes'] += day_data['dpoRoutes']
+        daily_totals['sd_routes'] += day_data['sdRoutes']
+        daily_totals['linehauls'] += day_data['linehauls']
+    
+    # Použij denní součty místo původních
+    totals['fix'] = daily_totals['fix']
+    totals['km'] = daily_totals['km']
+    totals['linehaul'] = daily_totals['linehaul']
+    total_km = daily_totals['total_km']
+    dpo_routes = daily_totals['dpo_routes']
+    sd_routes = daily_totals['sd_routes']
     
     # Celkem
     grand_total = totals['fix'] + totals['km'] + totals['linehaul'] + totals['depo']
