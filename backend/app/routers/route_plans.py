@@ -815,7 +815,7 @@ async def upload_route_plan(
         sd_routes_count=plan_data['summary']['sd_routes_count'],
         dpo_linehaul_count=plan_data['summary']['dpo_linehaul_count'],
         sd_linehaul_count=plan_data['summary']['sd_linehaul_count'],
-        total_km=plan_data['summary']['total_distance_km'],
+        total_distance_km=plan_data['summary']['total_distance_km'],
         total_stops=plan_data['summary']['total_stops'],
         # Per depot counts
         vratimov_dpo_count=plan_data['summary']['vratimov_dpo_count'],
@@ -952,7 +952,7 @@ async def upload_route_plans_batch(
                 sd_routes_count=plan_data['summary']['sd_routes_count'],
                 dpo_linehaul_count=plan_data['summary']['dpo_linehaul_count'],
                 sd_linehaul_count=plan_data['summary']['sd_linehaul_count'],
-                total_km=plan_data['summary']['total_distance_km'],
+                total_distance_km=plan_data['summary']['total_distance_km'],
                 total_stops=plan_data['summary']['total_stops'],
                 # Per depot counts
                 vratimov_dpo_count=plan_data['summary']['vratimov_dpo_count'],
