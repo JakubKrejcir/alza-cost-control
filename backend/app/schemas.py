@@ -224,7 +224,9 @@ class KmRateResponse(CamelModel):
 
 
 class DepoRateBase(BaseModel):
-    service_type: str
+    depo_name: Optional[str] = None
+    rate_type: Optional[str] = None
+    service_type: Optional[str] = None
     rate: Decimal
     # NEW FIELDS
     depot_id: Optional[int] = None
@@ -232,7 +234,9 @@ class DepoRateBase(BaseModel):
 
 class DepoRateResponse(CamelModel):
     id: int
-    service_type: str
+    depo_name: Optional[str] = None
+    rate_type: Optional[str] = None
+    service_type: Optional[str] = None
     rate: Decimal
     # NEW FIELDS
     depot_id: Optional[int] = None

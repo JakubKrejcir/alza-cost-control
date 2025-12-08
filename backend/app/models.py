@@ -411,7 +411,9 @@ class DepoRate(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     price_config_id: Mapped[int] = mapped_column("priceConfigId", ForeignKey("PriceConfig.id", ondelete="CASCADE"))
-    service_type: Mapped[str] = mapped_column("serviceType", String(100))
+    depo_name: Mapped[Optional[str]] = mapped_column("depoName", String(100))
+    rate_type: Mapped[Optional[str]] = mapped_column("rateType", String(50))
+    service_type: Mapped[Optional[str]] = mapped_column("serviceType", String(100))
     rate: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     depot_id: Mapped[Optional[int]] = mapped_column("depotId", ForeignKey("Depot.id"))
     created_at: Mapped[datetime] = mapped_column("createdAt", DateTime, default=datetime.utcnow)
