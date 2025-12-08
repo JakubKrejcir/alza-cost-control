@@ -427,7 +427,7 @@ export default function ExpectedBilling() {
               <div className="card-header">
                 <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--color-text-dark)' }}>
                   <Receipt size={20} />
-                  Denní rozpad fakturace ({billingData.dailyBreakdown.length} dnů)
+                  Denní rozpad fakturace ({billingData.dailyBreakdown.filter(d => d.routes > 0).length} aktivních dnů)
                 </h3>
               </div>
               <div className="p-4">
@@ -450,13 +450,16 @@ export default function ExpectedBilling() {
                     <tbody>
                       {billingData.dailyBreakdown.map((day, idx) => {
                         const isWeekend = new Date(day.date).getDay() === 0 || new Date(day.date).getDay() === 6
+                        const hasData = day.routes > 0
                         return (
                           <tr 
                             key={day.date} 
                             style={{ 
                               borderBottom: '1px solid var(--color-border-light)',
-                              backgroundColor: isWeekend ? 'var(--color-bg)' : 'transparent'
+                              backgroundColor: isWeekend ? 'var(--color-bg)' : 'transparent',
+                              opacity: hasData ? 1 : 0.5
                             }}
+                            title={day.planName ? `Plán: ${day.planName}` : 'Žádný platný plán'}
                           >
                             <td className="py-2 px-3">
                               <span className="font-medium">{day.dayShort}</span>
@@ -464,18 +467,18 @@ export default function ExpectedBilling() {
                                 {['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'][new Date(day.date).getDay()]}
                               </span>
                             </td>
-                            <td className="py-2 px-3 text-right font-medium">{day.routes}</td>
-                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-purple)' }}>{day.dpoRoutes}</td>
-                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-green)' }}>{day.sdRoutes}</td>
-                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-orange)' }}>{day.linehauls || 0}</td>
+                            <td className="py-2 px-3 text-right font-medium">{day.routes || '—'}</td>
+                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-purple)' }}>{day.dpoRoutes || '—'}</td>
+                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-green)' }}>{day.sdRoutes || '—'}</td>
+                            <td className="py-2 px-3 text-right" style={{ color: 'var(--color-orange)' }}>{day.linehauls || '—'}</td>
                             <td className="py-2 px-3 text-right" style={{ color: 'var(--color-text-muted)' }}>
-                              {Math.round(day.km).toLocaleString('cs-CZ')}
+                              {hasData ? Math.round(day.km).toLocaleString('cs-CZ') : '—'}
                             </td>
-                            <td className="py-2 px-3 text-right">{formatCZK(day.fix)}</td>
-                            <td className="py-2 px-3 text-right">{formatCZK(day.kmCost)}</td>
-                            <td className="py-2 px-3 text-right">{formatCZK(day.linehaul)}</td>
-                            <td className="py-2 px-3 text-right font-semibold" style={{ color: 'var(--color-primary)' }}>
-                              {formatCZK(day.total)}
+                            <td className="py-2 px-3 text-right">{hasData ? formatCZK(day.fix) : '—'}</td>
+                            <td className="py-2 px-3 text-right">{hasData ? formatCZK(day.kmCost) : '—'}</td>
+                            <td className="py-2 px-3 text-right">{hasData ? formatCZK(day.linehaul) : '—'}</td>
+                            <td className="py-2 px-3 text-right font-semibold" style={{ color: hasData ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
+                              {hasData ? formatCZK(day.total) : '—'}
                             </td>
                           </tr>
                         )
