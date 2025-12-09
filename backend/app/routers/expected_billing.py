@@ -545,16 +545,27 @@ async def calculate_expected_billing(
                     depot_days[depot_code].add(day_key)
                 
                 # DPO/SD pro denní agregaci
-                plan_type = (route.plan_type or valid_plan.plan_type or '').upper()
-                if 'DPO' in plan_type:
-                    daily_breakdown[day_key]['dpoRoutes'] += trips
-                elif 'SD' in plan_type:
-                    daily_breakdown[day_key]['sdRoutes'] += trips
+                # DR-DR = 1 DPO + 1 SD, DR-DR-DR = 1 DPO + 2 SD
+                dr_lh_upper = (route.dr_lh or '').upper()
+                dr_pattern_count = dr_lh_upper.count('DR')
+                
+                if dr_pattern_count >= 2:
+                    # DR-DR nebo DR-DR-DR - rozdělíme mezi DPO a SD
+                    daily_breakdown[day_key]['dpoRoutes'] += 1
+                    daily_breakdown[day_key]['sdRoutes'] += (dr_pattern_count - 1)
                 else:
-                    if route.start_time and route.start_time < '12:00':
-                        daily_breakdown[day_key]['dpoRoutes'] += trips
+                    # Ostatní (DR, LH, LH-LH, atd.) - 1 rozjezd
+                    plan_type = (route.plan_type or valid_plan.plan_type or '').upper()
+                    if 'DPO' in plan_type:
+                        daily_breakdown[day_key]['dpoRoutes'] += 1
+                    elif 'SD' in plan_type:
+                        daily_breakdown[day_key]['sdRoutes'] += 1
                     else:
-                        daily_breakdown[day_key]['sdRoutes'] += trips
+                        # Default podle času startu
+                        if route.start_time and route.start_time < '12:00':
+                            daily_breakdown[day_key]['dpoRoutes'] += 1
+                        else:
+                            daily_breakdown[day_key]['sdRoutes'] += 1
     
     # === ROUTES BREAKDOWN (pro debugging) ===
     # Zobraz unikátní trasy ze všech plánů (každou trasu jen jednou)
