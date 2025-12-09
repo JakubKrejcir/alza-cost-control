@@ -8,6 +8,7 @@ Při uploadu plánovacího souboru:
 4. Zkontroluje RouteCarrierHistory - pokud trasa není přiřazena k dopravci, vytvoří přiřazení
 
 Created: 2025-12-09
+Updated: 2025-12-09 - Fixed MultipleResultsFound error by handling duplicate active assignments
 """
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -95,16 +96,23 @@ async def ensure_route_depot_assignment(
     Returns:
         True pokud bylo vytvořeno nové přiřazení, False pokud již existovalo
     """
-    # Najdi aktuální aktivní přiřazení
+    # Najdi aktuální aktivní přiřazení (může být více - vezmeme první)
     result = await db.execute(
         select(RouteDepotHistory).where(
             and_(
                 RouteDepotHistory.route_id == route_id,
                 RouteDepotHistory.valid_to.is_(None)
             )
-        )
+        ).order_by(RouteDepotHistory.id.desc())
     )
-    current_assignment = result.scalar_one_or_none()
+    current_assignments = result.scalars().all()
+    
+    # Pokud jsou duplicity, ukončíme všechny kromě poslední
+    if len(current_assignments) > 1:
+        for old_assignment in current_assignments[1:]:
+            old_assignment.valid_to = valid_from
+    
+    current_assignment = current_assignments[0] if current_assignments else None
     
     if current_assignment:
         if current_assignment.depot_id == depot_id:
@@ -138,16 +146,23 @@ async def ensure_route_carrier_assignment(
     Returns:
         True pokud bylo vytvořeno nové přiřazení, False pokud již existovalo
     """
-    # Najdi aktuální aktivní přiřazení
+    # Najdi aktuální aktivní přiřazení (může být více - vezmeme první)
     result = await db.execute(
         select(RouteCarrierHistory).where(
             and_(
                 RouteCarrierHistory.route_id == route_id,
                 RouteCarrierHistory.valid_to.is_(None)
             )
-        )
+        ).order_by(RouteCarrierHistory.id.desc())
     )
-    current_assignment = result.scalar_one_or_none()
+    current_assignments = result.scalars().all()
+    
+    # Pokud jsou duplicity, ukončíme všechny kromě poslední
+    if len(current_assignments) > 1:
+        for old_assignment in current_assignments[1:]:
+            old_assignment.valid_to = valid_from
+    
+    current_assignment = current_assignments[0] if current_assignments else None
     
     if current_assignment:
         if current_assignment.carrier_id == carrier_id:
