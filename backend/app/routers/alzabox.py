@@ -1,7 +1,7 @@
 """
 AlzaBox Router - Import dat a BI API (ASYNC verze)
-Verze: 3.11.0 - Carrier matching pomocí name + alias
-Updated: 2025-12-09 - Fixed box detail response: deliveries → history (frontend compatibility)
+Verze: 3.12.0 - Added avgDelayMinutes to by-route, fixed box detail history
+Updated: 2025-12-09
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -534,7 +534,8 @@ async def get_by_route(
         SELECT 
             d."routeName",
             COUNT(*) as total,
-            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time,
+            AVG(CASE WHEN d."onTime" = false THEN d."delayMinutes" ELSE NULL END) as avg_delay
         FROM "AlzaBoxDelivery" d
         """
         
@@ -564,7 +565,8 @@ async def get_by_route(
                 "routeName": row[0],
                 "totalDeliveries": row[1],
                 "onTimeDeliveries": row[2] or 0,
-                "onTimePct": round((row[2] or 0) / row[1] * 100, 1) if row[1] > 0 else 0
+                "onTimePct": round((row[2] or 0) / row[1] * 100, 1) if row[1] > 0 else 0,
+                "avgDelayMinutes": round(float(row[3]), 1) if row[3] else None
             }
             for row in rows
         ]

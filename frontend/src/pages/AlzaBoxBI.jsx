@@ -145,6 +145,7 @@ function CarrierBreakdown({ data, isLoading }) {
       <div className="space-y-2">
         {data.map((carrier) => {
           const colors = getStatusColor(carrier.onTimePct)
+          const lateCount = carrier.totalDeliveries - carrier.onTimeDeliveries
           return (
             <div key={carrier.carrierId || 'null'} className="flex items-center justify-between text-sm">
               <span style={{ color: 'var(--color-text-dark)' }}>
@@ -155,7 +156,7 @@ function CarrierBreakdown({ data, isLoading }) {
                   {carrier.onTimePct}%
                 </span>
                 <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                  ({carrier.lateDeliveries} pozdě)
+                  ({lateCount} pozdě)
                 </span>
               </div>
             </div>
@@ -511,6 +512,12 @@ export default function AlzaBoxBI() {
   const summaryColors = getStatusColor(summary?.onTimePct || 0)
   const lateDeliveries = (summary?.totalDeliveries || 0) - (summary?.onTimeDeliveries || 0)
   const routesBelowTarget = routeStats?.filter(r => r.onTimePct < TARGET_PCT).length || 0
+  
+  // Průměrné zpoždění tras pod cílem
+  const routesBelowTargetData = routeStats?.filter(r => r.onTimePct < TARGET_PCT) || []
+  const avgDelayBelowTarget = routesBelowTargetData.length > 0
+    ? Math.round(routesBelowTargetData.reduce((sum, r) => sum + (r.avgDelayMinutes || 0), 0) / routesBelowTargetData.length)
+    : 0
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -644,7 +651,18 @@ export default function AlzaBoxBI() {
               value={routesBelowTarget}
               subtext={`< ${TARGET_PCT}% včasnost`}
               color={routesBelowTarget === 0 ? 'green' : 'red'}
-            />
+            >
+              {routesBelowTarget > 0 && avgDelayBelowTarget > 0 && (
+                <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border-light)' }}>
+                  <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    Průměrné zpoždění
+                  </div>
+                  <div className="text-lg font-semibold" style={{ color: 'var(--color-red)' }}>
+                    +{avgDelayBelowTarget} min
+                  </div>
+                </div>
+              )}
+            </StatCard>
           </div>
 
           {/* Daily Chart */}
