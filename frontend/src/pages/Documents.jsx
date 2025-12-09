@@ -369,7 +369,9 @@ export default function Documents() {
           uploadInvoiceMutation.mutate({ file, carrierId: selectedCarrierId, period: selectedPeriod })
         }
       } else if (ext === 'xlsx' || ext === 'xls') {
-        if (fileName.includes('drivecool') || fileName.includes('plan') || fileName.includes('route')) {
+        // Detekce plánu: obsahuje datum YY-MM-DD nebo DD.MM.YYYY nebo klíčová slova
+        const hasDatePattern = /\d{2}-\d{2}-\d{2}/.test(fileName) || /\d{2}\.\d{2}\.\d{4}/.test(fileName)
+        if (hasDatePattern || fileName.includes('plan') || fileName.includes('route')) {
           uploadPlanMutation.mutate({ file, carrierId: selectedCarrierId })
         } else {
           uploadProofMutation.mutate({ file, carrierId: selectedCarrierId, period: selectedPeriod })
@@ -573,7 +575,7 @@ export default function Documents() {
             </label>
 
             <div className="flex flex-wrap justify-center gap-4 mt-4 text-xs text-gray-500">
-              <div className="flex items-center gap-1.5"><Map size={16} className="text-purple-400" /> Drivecool*.xlsx = Plán</div>
+              <div className="flex items-center gap-1.5"><Map size={16} className="text-purple-400" /> *YY-MM-DD*.xlsx = Plán</div>
               <div className="flex items-center gap-1.5"><FileSpreadsheet size={16} className="text-green-400" /> *.xlsx = Proof</div>
               <div className="flex items-center gap-1.5"><FileText size={16} className="text-red-400" /> *.pdf = Faktura</div>
               <div className="flex items-center gap-1.5"><FileSignature size={16} className="text-blue-400" /> *smlouva*.pdf = Smlouva</div>
