@@ -3,6 +3,7 @@ SQLAlchemy Models - matching the Prisma schema exactly
 Updated: 2025-12-08 - Added Route, RouteDepotHistory, RouteCarrierHistory, DepotNameMapping
                       Updated Depot model with operatorType, validFrom/validTo
                       FIXED: Restored InvoiceItem model
+Updated: 2025-12-09 - Fixed AlzaBox model: box_id→code, added alza_id, removed address/zip_code
 """
 from datetime import datetime
 from decimal import Decimal
@@ -808,12 +809,11 @@ class AlzaBox(Base):
     __tablename__ = "AlzaBox"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    box_id: Mapped[str] = mapped_column("boxId", String(20), unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    alza_id: Mapped[Optional[int]] = mapped_column("alzaId", Integer)
     name: Mapped[str] = mapped_column(String(255))
-    address: Mapped[Optional[str]] = mapped_column(Text)
-    city: Mapped[Optional[str]] = mapped_column(String(100))
-    zip_code: Mapped[Optional[str]] = mapped_column("zipCode", String(10))
     country: Mapped[str] = mapped_column(String(5), default='CZ')
+    city: Mapped[Optional[str]] = mapped_column(String(100))
     region: Mapped[Optional[str]] = mapped_column(String(100))
     gps_lat: Mapped[Optional[Decimal]] = mapped_column("gpsLat", Numeric(10, 6))
     gps_lon: Mapped[Optional[Decimal]] = mapped_column("gpsLon", Numeric(10, 6))

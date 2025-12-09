@@ -2,6 +2,7 @@
 Pydantic schemas for request/response validation
 Updated: 2025-12-05 - Added depot_id, route_category, from_warehouse_id fields
 Updated: 2025-12-09 - Fixed DepotResponse/DepotCreate carrier_id to Optional for ALZA depots
+Updated: 2025-12-09 - Fixed AlzaBoxResponse: box_id→code, added alza_id, removed address/zip_code
 """
 from datetime import datetime
 from decimal import Decimal
@@ -554,12 +555,11 @@ class RoutePlanResponse(CamelModel):
 
 class AlzaBoxResponse(CamelModel):
     id: int
-    box_id: str
+    code: str
+    alza_id: Optional[int] = None
     name: str
-    address: Optional[str] = None
-    city: Optional[str] = None
-    zip_code: Optional[str] = None
     country: str
+    city: Optional[str] = None
     region: Optional[str] = None
     gps_lat: Optional[Decimal] = None
     gps_lon: Optional[Decimal] = None
