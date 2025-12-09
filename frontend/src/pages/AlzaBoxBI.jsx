@@ -168,6 +168,47 @@ function CarrierBreakdown({ data, isLoading }) {
 }
 
 // =============================================================================
+// CARRIER DELAY BREAKDOWN COMPONENT
+// =============================================================================
+
+function CarrierDelayBreakdown({ data, isLoading }) {
+  if (isLoading) {
+    return <div className="text-sm mt-4" style={{ color: 'var(--color-text-muted)' }}>Načítání...</div>
+  }
+  
+  if (!data || data.length === 0) {
+    return null
+  }
+
+  // Filtruj pouze dopravce s nějakým zpožděním
+  const carriersWithDelay = data.filter(c => c.avgDelayMinutes && c.avgDelayMinutes > 0)
+  
+  if (carriersWithDelay.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border-light)' }}>
+      <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
+        Podle dopravce
+      </div>
+      <div className="space-y-2">
+        {carriersWithDelay.map((carrier) => (
+          <div key={carrier.carrierId || 'null'} className="flex items-center justify-between text-sm">
+            <span style={{ color: 'var(--color-text-dark)' }}>
+              {carrier.carrierName}
+            </span>
+            <span className="font-medium" style={{ color: 'var(--color-red)' }}>
+              +{Math.round(carrier.avgDelayMinutes)} min
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
 // DAILY CHART COMPONENT
 // =============================================================================
 
@@ -662,6 +703,7 @@ export default function AlzaBoxBI() {
                   </div>
                 </div>
               )}
+              <CarrierDelayBreakdown data={carrierStats} isLoading={carrierStatsLoading} />
             </StatCard>
           </div>
 

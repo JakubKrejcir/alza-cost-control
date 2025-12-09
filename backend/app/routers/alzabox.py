@@ -1,6 +1,6 @@
 """
 AlzaBox Router - Import dat a BI API (ASYNC verze)
-Verze: 3.12.0 - Added avgDelayMinutes to by-route, fixed box detail history
+Verze: 3.13.0 - Fixed carrier filtering to use AlzaBoxDelivery.carrierId directly
 Updated: 2025-12-09
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
@@ -451,6 +451,9 @@ async def get_summary(
         if delivery_type:
             sql += ' AND "deliveryType" = :delivery_type'
             params['delivery_type'] = delivery_type
+        if carrier_id:
+            sql += ' AND "carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
         
         result = await db.execute(text(sql), params)
         row = result.fetchone()
@@ -486,10 +489,10 @@ async def get_by_carrier(
             c.name,
             c.id,
             COUNT(d.id) as total,
-            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time
+            SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time,
+            AVG(CASE WHEN d."onTime" = false THEN d."delayMinutes" ELSE NULL END) as avg_delay
         FROM "AlzaBoxDelivery" d
-        LEFT JOIN "AlzaBoxAssignment" a ON d."boxId" = a."boxId" AND a."validTo" IS NULL
-        LEFT JOIN "Carrier" c ON a."carrierId" = c.id
+        LEFT JOIN "Carrier" c ON d."carrierId" = c.id
         WHERE 1=1
         """
         params = {}
@@ -512,7 +515,8 @@ async def get_by_carrier(
                 "carrierId": row[1],
                 "totalDeliveries": row[2],
                 "onTimeDeliveries": row[3] or 0,
-                "onTimePct": round((row[3] or 0) / row[2] * 100, 1) if row[2] > 0 else 0
+                "onTimePct": round((row[3] or 0) / row[2] * 100, 1) if row[2] > 0 else 0,
+                "avgDelayMinutes": round(float(row[4]), 1) if row[4] else None
             }
             for row in rows
         ]
@@ -537,12 +541,8 @@ async def get_by_route(
             SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time,
             AVG(CASE WHEN d."onTime" = false THEN d."delayMinutes" ELSE NULL END) as avg_delay
         FROM "AlzaBoxDelivery" d
+        WHERE d."routeName" IS NOT NULL
         """
-        
-        if carrier_id:
-            sql += ' JOIN "AlzaBoxAssignment" a ON d."boxId" = a."boxId" AND a."validTo" IS NULL'
-        
-        sql += ' WHERE d."routeName" IS NOT NULL'
         params = {}
         
         if start_date:
@@ -552,7 +552,7 @@ async def get_by_route(
             sql += ' AND d."deliveryDate" <= :end_date'
             params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
         if carrier_id:
-            sql += ' AND a."carrierId" = :carrier_id'
+            sql += ' AND d."carrierId" = :carrier_id'
             params['carrier_id'] = carrier_id
         
         sql += ' GROUP BY d."routeName" ORDER BY d."routeName"'
@@ -590,12 +590,8 @@ async def get_by_day(
             COUNT(*) as total,
             SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time
         FROM "AlzaBoxDelivery" d
+        WHERE 1=1
         """
-        
-        if carrier_id:
-            sql += ' JOIN "AlzaBoxAssignment" a ON d."boxId" = a."boxId" AND a."validTo" IS NULL'
-        
-        sql += ' WHERE 1=1'
         params = {}
         
         if start_date:
@@ -605,7 +601,7 @@ async def get_by_day(
             sql += ' AND d."deliveryDate" <= :end_date'
             params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
         if carrier_id:
-            sql += ' AND a."carrierId" = :carrier_id'
+            sql += ' AND d."carrierId" = :carrier_id'
             params['carrier_id'] = carrier_id
         
         sql += ' GROUP BY DATE(d."deliveryDate") ORDER BY date'
@@ -642,19 +638,15 @@ async def get_by_box(
             SUM(CASE WHEN d."onTime" = true THEN 1 ELSE 0 END) as on_time
         FROM "AlzaBox" b
         JOIN "AlzaBoxDelivery" d ON b.id = d."boxId"
+        WHERE 1=1
         """
-        
-        if carrier_id:
-            sql += ' JOIN "AlzaBoxAssignment" a ON b.id = a."boxId" AND a."validTo" IS NULL'
-        
-        sql += ' WHERE 1=1'
         params = {}
         
         if route_name:
             sql += ' AND d."routeName" = :route_name'
             params['route_name'] = route_name
         if carrier_id:
-            sql += ' AND a."carrierId" = :carrier_id'
+            sql += ' AND d."carrierId" = :carrier_id'
             params['carrier_id'] = carrier_id
         
         sql += ' GROUP BY b.id, b.code, b.name, b.city ORDER BY b.code'
@@ -775,9 +767,8 @@ async def get_routes(carrier_id: Optional[int] = Query(None), db: AsyncSession =
         
         if carrier_id:
             sql = """
-            SELECT DISTINCT d."routeName" FROM "AlzaBoxDelivery" d
-            JOIN "AlzaBoxAssignment" a ON d."boxId" = a."boxId" AND a."validTo" IS NULL
-            WHERE d."routeName" IS NOT NULL AND a."carrierId" = :carrier_id
+            SELECT DISTINCT "routeName" FROM "AlzaBoxDelivery"
+            WHERE "routeName" IS NOT NULL AND "carrierId" = :carrier_id
             """
             params['carrier_id'] = carrier_id
         
