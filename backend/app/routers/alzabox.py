@@ -1,6 +1,7 @@
 """
 AlzaBox Router - Import dat a BI API (ASYNC verze)
 Verze: 3.11.0 - Carrier matching pomocí name + alias
+Updated: 2025-12-09 - Fixed box detail response: deliveries → history (frontend compatibility)
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -716,7 +717,7 @@ async def get_box_detail(box_id: int, db: AsyncSession = Depends(get_db)):
                 "onTimeDeliveries": on_time,
                 "onTimePct": round(on_time / total * 100, 1) if total > 0 else 0
             },
-            "deliveries": [
+            "history": [
                 {
                     "date": str(d[0].date()) if d[0] else None,
                     "routeName": d[1],
