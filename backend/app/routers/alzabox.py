@@ -835,3 +835,57 @@ async def get_diagnostics(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         logger.error(f"Error in diagnostics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# SYNC CARRIER IDS
+# =============================================================================
+
+@router.post("/sync-carrier-ids")
+async def sync_carrier_ids(db: AsyncSession = Depends(get_db)):
+    """
+    Synchronizuje carrierId v AlzaBoxDelivery na základě RoutePlanRoute.
+    Volat po uploadu nových plánovacích souborů.
+    """
+    try:
+        # Update carrierId based on routeName match with RoutePlanRoute
+        result = await db.execute(text("""
+            UPDATE "AlzaBoxDelivery" d
+            SET "carrierId" = (
+                SELECT DISTINCT rp."carrierId"
+                FROM "RoutePlanRoute" rpr
+                JOIN "RoutePlan" rp ON rpr."routePlanId" = rp.id
+                WHERE rpr."routeName" = d."routeName"
+                LIMIT 1
+            )
+            WHERE d."carrierId" IS NULL
+              AND d."routeName" IS NOT NULL
+        """))
+        
+        updated_count = result.rowcount
+        await db.commit()
+        
+        # Get current stats
+        stats_result = await db.execute(text("""
+            SELECT 
+                COUNT(*) as total,
+                COUNT("carrierId") as with_carrier,
+                COUNT(*) - COUNT("carrierId") as without_carrier
+            FROM "AlzaBoxDelivery"
+        """))
+        stats = stats_result.fetchone()
+        
+        return {
+            "success": True,
+            "updated": updated_count,
+            "stats": {
+                "total": stats[0],
+                "withCarrier": stats[1],
+                "withoutCarrier": stats[2]
+            }
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error syncing carrier IDs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

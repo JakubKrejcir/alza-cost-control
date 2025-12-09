@@ -138,7 +138,7 @@ export default function Documents() {
   // Upload mutations pro dopravce
   const uploadPlanMutation = useMutation({
     mutationFn: ({ file, carrierId }) => routePlans.upload(file, carrierId),
-    onSuccess: (data, variables) => {
+    onSuccess: async (data, variables) => {
       setUploadResults(prev => [...prev, { 
         type: 'plan', 
         fileName: variables.file.name, 
@@ -146,6 +146,23 @@ export default function Documents() {
         message: `Plán nahrán: ${data.data?.validFrom || 'OK'}`
       }])
       queryClient.invalidateQueries(['route-plans'])
+      
+      // Automaticky synchronizovat carrierId v AlzaBoxDelivery
+      try {
+        const syncResult = await alzabox.syncCarrierIds()
+        if (syncResult.updated > 0) {
+          setUploadResults(prev => [...prev, { 
+            type: 'sync', 
+            fileName: 'AlzaBox sync', 
+            success: true,
+            message: `Aktualizováno ${syncResult.updated} dojezdů`
+          }])
+          queryClient.invalidateQueries(['alzabox-summary-global'])
+          queryClient.invalidateQueries(['alzabox-carrier-stats'])
+        }
+      } catch (e) {
+        console.warn('Sync carrier IDs failed:', e)
+      }
     },
     onError: (error, variables) => {
       setUploadResults(prev => [...prev, { 

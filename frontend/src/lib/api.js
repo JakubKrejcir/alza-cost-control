@@ -249,7 +249,11 @@ export const alzabox = {
   
   // Diagnostika
   getDiagnostics: () =>
-    api.get('/alzabox/diagnostics/carrier-mapping').then(r => r.data)
+    api.get('/alzabox/diagnostics/carrier-mapping').then(r => r.data),
+  
+  // Sync carrier IDs (po uploadu plánovacích souborů)
+  syncCarrierIds: () =>
+    api.post('/alzabox/sync-carrier-ids').then(r => r.data)
 }
 
 export default api
