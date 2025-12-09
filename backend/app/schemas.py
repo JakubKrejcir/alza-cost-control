@@ -1,6 +1,7 @@
 """
 Pydantic schemas for request/response validation
 Updated: 2025-12-05 - Added depot_id, route_category, from_warehouse_id fields
+Updated: 2025-12-09 - Fixed DepotResponse/DepotCreate carrier_id to Optional for ALZA depots
 """
 from datetime import datetime
 from decimal import Decimal
@@ -115,7 +116,10 @@ class DepotBase(BaseModel):
 
 
 class DepotCreate(DepotBase):
-    carrier_id: int
+    carrier_id: Optional[int] = None  # Nullable for ALZA depots
+    # NEW: Operator fields
+    operator_type: Optional[str] = 'CARRIER'
+    operator_carrier_id: Optional[int] = None
 
 
 class DepotUpdate(BaseModel):
@@ -127,11 +131,15 @@ class DepotUpdate(BaseModel):
     longitude: Optional[Decimal] = None
     region: Optional[str] = None
     depot_type: Optional[str] = None
+    # NEW: Operator fields
+    operator_type: Optional[str] = None
+    operator_carrier_id: Optional[int] = None
+    location_code: Optional[str] = None
 
 
 class DepotResponse(CamelModel):
     id: int
-    carrier_id: int
+    carrier_id: Optional[int] = None  # Nullable for ALZA depots
     name: str
     code: Optional[str] = None
     type: Optional[str] = None
@@ -141,7 +149,13 @@ class DepotResponse(CamelModel):
     longitude: Optional[Decimal] = None
     region: Optional[str] = None
     depot_type: Optional[str] = None
-    created_at: datetime
+    # NEW: Operator and validity fields
+    operator_type: Optional[str] = None
+    operator_carrier_id: Optional[int] = None
+    location_code: Optional[str] = None
+    valid_from: Optional[datetime] = None
+    valid_to: Optional[datetime] = None
+    created_at: Optional[datetime] = None
 
 
 # =============================================================================
