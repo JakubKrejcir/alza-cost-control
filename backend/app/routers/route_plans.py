@@ -17,8 +17,9 @@ from sqlalchemy.orm import selectinload
 import openpyxl
 
 from app.database import get_db
-from app.models import RoutePlan, RoutePlanRoute, RoutePlanDetail, Carrier, Proof
+from app.models import RoutePlan, RoutePlanRoute, RoutePlanDetail, Carrier, Proof, Route, RouteDepotHistory, RouteCarrierHistory
 from app.depot_resolver import resolve_all_depots_for_plan
+from app.route_resolver import resolve_all_routes_for_plan
 
 router = APIRouter()
 
@@ -802,6 +803,15 @@ async def upload_route_plan(
         db=db
     )
     
+    # Resolve routes - create Route records and assignments
+    route_lookup = await resolve_all_routes_for_plan(
+        routes_data=plan_data['routes'],
+        depot_lookup=depot_lookup,
+        carrier_id=carrier_id,
+        valid_from=parsed_date,
+        db=db
+    )
+    
     # Check for existing plan with same type and date - replace it
     existing_result = await db.execute(
         select(RoutePlan).where(
@@ -849,12 +859,16 @@ async def upload_route_plan(
     db.add(route_plan)
     await db.flush()
     
-    # Create routes with depot_id
+    # Create routes with depot_id and route_id
     route_map = {}
     for route_data in plan_data['routes']:
         # Get depot_id from lookup
         start_loc = (route_data.get('start_location') or '').strip()
         depot_id = depot_lookup.get(start_loc) if start_loc else None
+        
+        # Get route_id from lookup (master Route table)
+        route_name = (route_data.get('route_name') or '').strip()
+        route_id = route_lookup.get(route_name) if route_name else None
         
         route = RoutePlanRoute(
             route_plan_id=route_plan.id,
@@ -864,7 +878,8 @@ async def upload_route_plan(
             route_type=route_data['route_type'],
             dr_lh=route_data['delivery_type'],
             depot=route_data.get('depot'),
-            depot_id=depot_id,  # NEW: FK to Depot table
+            depot_id=depot_id,  # FK to Depot table
+            route_id=route_id,  # NEW: FK to Route master table
             start_location=route_data['start_location'],
             stops_count=route_data['stops_count'],
             max_capacity=route_data['max_capacity'],
@@ -953,6 +968,15 @@ async def upload_route_plans_batch(
                 db=db
             )
             
+            # Resolve routes - create Route records and assignments
+            route_lookup = await resolve_all_routes_for_plan(
+                routes_data=plan_data['routes'],
+                depot_lookup=depot_lookup,
+                carrier_id=carrier_id,
+                valid_from=parsed_date,
+                db=db
+            )
+            
             # Check for existing plan with same type, date and depot - replace it
             existing_result = await db.execute(
                 select(RoutePlan).where(
@@ -999,10 +1023,14 @@ async def upload_route_plans_batch(
             db.add(route_plan)
             await db.flush()
             
-            # Create routes with depot_id
+            # Create routes with depot_id and route_id
             for route_data in plan_data['routes']:
                 start_loc = (route_data.get('start_location') or '').strip()
                 depot_id = depot_lookup.get(start_loc) if start_loc else None
+                
+                # Get route_id from lookup (master Route table)
+                route_name = (route_data.get('route_name') or '').strip()
+                route_id = route_lookup.get(route_name) if route_name else None
                 
                 route = RoutePlanRoute(
                     route_plan_id=route_plan.id,
@@ -1012,7 +1040,8 @@ async def upload_route_plans_batch(
                     route_type=route_data['route_type'],
                     delivery_type=route_data['delivery_type'],
                     depot=route_data.get('depot'),
-                    depot_id=depot_id,  # NEW: FK to Depot table
+                    depot_id=depot_id,  # FK to Depot table
+                    route_id=route_id,  # NEW: FK to Route master table
                     start_location=route_data['start_location'],
                     stops_count=route_data['stops_count'],
                     max_capacity=route_data['max_capacity'],
