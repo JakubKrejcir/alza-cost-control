@@ -2,6 +2,7 @@
 Route Plans API Router - with XLSX upload and parsing
 UPDATED: Support for plan_type (BOTH/DPO/SD) based on filename suffix
 UPDATED: Aggregated comparison - proof vs all plans valid in the month
+UPDATED: 2025-12-09 - Integrated depot_resolver for automatic depot creation from start_location
 """
 from typing import List, Optional
 from datetime import datetime, timedelta
@@ -17,6 +18,7 @@ import openpyxl
 
 from app.database import get_db
 from app.models import RoutePlan, RoutePlanRoute, RoutePlanDetail, Carrier, Proof
+from app.depot_resolver import resolve_all_depots_for_plan
 
 router = APIRouter()
 
@@ -792,6 +794,14 @@ async def upload_route_plan(
     if conflict_error:
         raise HTTPException(status_code=409, detail=conflict_error)
     
+    # Resolve depots from start_location values
+    depot_lookup = await resolve_all_depots_for_plan(
+        routes_data=plan_data['routes'],
+        carrier_id=carrier_id,
+        valid_from=parsed_date,
+        db=db
+    )
+    
     # Check for existing plan with same type and date - replace it
     existing_result = await db.execute(
         select(RoutePlan).where(
@@ -839,9 +849,13 @@ async def upload_route_plan(
     db.add(route_plan)
     await db.flush()
     
-    # Create routes
+    # Create routes with depot_id
     route_map = {}
     for route_data in plan_data['routes']:
+        # Get depot_id from lookup
+        start_loc = (route_data.get('start_location') or '').strip()
+        depot_id = depot_lookup.get(start_loc) if start_loc else None
+        
         route = RoutePlanRoute(
             route_plan_id=route_plan.id,
             route_name=route_data['route_name'],
@@ -850,6 +864,7 @@ async def upload_route_plan(
             route_type=route_data['route_type'],
             dr_lh=route_data['delivery_type'],
             depot=route_data.get('depot'),
+            depot_id=depot_id,  # NEW: FK to Depot table
             start_location=route_data['start_location'],
             stops_count=route_data['stops_count'],
             max_capacity=route_data['max_capacity'],
@@ -930,6 +945,14 @@ async def upload_route_plans_batch(
                 })
                 continue
             
+            # Resolve depots from start_location values
+            depot_lookup = await resolve_all_depots_for_plan(
+                routes_data=plan_data['routes'],
+                carrier_id=carrier_id,
+                valid_from=parsed_date,
+                db=db
+            )
+            
             # Check for existing plan with same type, date and depot - replace it
             existing_result = await db.execute(
                 select(RoutePlan).where(
@@ -976,8 +999,11 @@ async def upload_route_plans_batch(
             db.add(route_plan)
             await db.flush()
             
-            # Create routes
+            # Create routes with depot_id
             for route_data in plan_data['routes']:
+                start_loc = (route_data.get('start_location') or '').strip()
+                depot_id = depot_lookup.get(start_loc) if start_loc else None
+                
                 route = RoutePlanRoute(
                     route_plan_id=route_plan.id,
                     route_name=route_data['route_name'],
@@ -986,6 +1012,7 @@ async def upload_route_plans_batch(
                     route_type=route_data['route_type'],
                     delivery_type=route_data['delivery_type'],
                     depot=route_data.get('depot'),
+                    depot_id=depot_id,  # NEW: FK to Depot table
                     start_location=route_data['start_location'],
                     stops_count=route_data['stops_count'],
                     max_capacity=route_data['max_capacity'],
@@ -1222,6 +1249,8 @@ async def get_route_plan(plan_id: int, db: AsyncSession = Depends(get_db)):
                 'routeLetter': r.route_letter,
                 'routeType': r.route_type,
                 'deliveryType': r.delivery_type,
+                'depot': r.depot,
+                'depotId': r.depot_id,  # NEW: FK reference
                 'startLocation': r.start_location,
                 'stopsCount': r.stops_count,
                 'maxCapacity': r.max_capacity,
