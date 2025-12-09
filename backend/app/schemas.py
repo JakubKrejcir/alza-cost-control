@@ -30,6 +30,7 @@ class CamelModel(BaseModel):
 
 class CarrierBase(BaseModel):
     name: str
+    alias: Optional[str] = None  # Krátký název pro matching v Excel souborech
     ico: Optional[str] = None
     dic: Optional[str] = None
     address: Optional[str] = None
@@ -42,6 +43,7 @@ class CarrierCreate(CarrierBase):
 
 class CarrierUpdate(BaseModel):
     name: Optional[str] = None
+    alias: Optional[str] = None
     ico: Optional[str] = None
     dic: Optional[str] = None
     address: Optional[str] = None
@@ -51,6 +53,7 @@ class CarrierUpdate(BaseModel):
 class CarrierResponse(CamelModel):
     id: int
     name: str
+    alias: Optional[str] = None
     ico: Optional[str] = None
     dic: Optional[str] = None
     address: Optional[str] = None

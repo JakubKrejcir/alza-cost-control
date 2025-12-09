@@ -9,7 +9,7 @@ import { carriers, depots, contracts } from '../lib/api'
 export default function Carriers() {
   const [showModal, setShowModal] = useState(false)
   const [editingCarrier, setEditingCarrier] = useState(null)
-  const [formData, setFormData] = useState({ name: '', ico: '', dic: '', address: '', contact: '' })
+  const [formData, setFormData] = useState({ name: '', alias: '', ico: '', dic: '', address: '', contact: '' })
   
   // State pro upload smlouvy
   const [uploadMode, setUploadMode] = useState(false) // false = ruční, true = ze smlouvy
@@ -71,6 +71,7 @@ export default function Carriers() {
       setEditingCarrier(carrier)
       setFormData({
         name: carrier.name || '',
+        alias: carrier.alias || '',
         ico: carrier.ico || '',
         dic: carrier.dic || '',
         address: carrier.address || '',
@@ -79,7 +80,7 @@ export default function Carriers() {
       setUploadMode(false)
     } else {
       setEditingCarrier(null)
-      setFormData({ name: '', ico: '', dic: '', address: '', contact: '' })
+      setFormData({ name: '', alias: '', ico: '', dic: '', address: '', contact: '' })
       setUploadMode(false)
     }
     setParsedData(null)
@@ -91,7 +92,7 @@ export default function Carriers() {
   const closeModal = () => {
     setShowModal(false)
     setEditingCarrier(null)
-    setFormData({ name: '', ico: '', dic: '', address: '', contact: '' })
+    setFormData({ name: '', alias: '', ico: '', dic: '', address: '', contact: '' })
     setUploadMode(false)
     setParsedData(null)
     setParseError(null)
@@ -135,9 +136,11 @@ export default function Carriers() {
       const data = await response.json()
       setParsedData(data)
       
-      // Vyplň formulář extrahovanými daty
+      // Vyplň formulář extrahovanými daty (alias se generuje z názvu)
+      const extractedName = data.carrier?.name || ''
       setFormData({
-        name: data.carrier?.name || '',
+        name: extractedName,
+        alias: generateAlias(extractedName),
         ico: data.carrier?.ico || '',
         dic: data.carrier?.dic || '',
         address: data.carrier?.address || '',
@@ -150,6 +153,22 @@ export default function Carriers() {
     } finally {
       setIsParsingPdf(false)
     }
+  }
+
+  // Helper: generuje alias z oficiálního názvu
+  const generateAlias = (name) => {
+    if (!name) return ''
+    // Odstraň právní formy a zbytečná slova
+    let alias = name
+      .replace(/s\.r\.o\./gi, '')
+      .replace(/a\.s\./gi, '')
+      .replace(/spol\./gi, '')
+      .replace(/Logistic Group/gi, '')
+      .replace(/Group/gi, '')
+      .trim()
+    // Odstraň mezery navíc
+    alias = alias.replace(/\s+/g, ' ').trim()
+    return alias
   }
 
   const handleSubmit = (e) => {
@@ -194,88 +213,67 @@ export default function Carriers() {
           Načítám...
         </div>
       ) : carrierList?.length === 0 ? (
-        <div className="card p-8 text-center">
-          <Truck className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--color-text-muted)' }} />
-          <p style={{ color: 'var(--color-text-muted)' }}>Žádní dopravci</p>
+        <div className="card p-8 text-center" style={{ color: 'var(--color-text-muted)' }}>
+          <Truck size={48} className="mx-auto mb-4 opacity-50" />
+          <p>Zatím nejsou žádní dopravci</p>
           <button onClick={() => openModal()} className="btn btn-primary mt-4">
             Přidat prvního dopravce
           </button>
         </div>
       ) : (
         <div className="grid gap-4">
-          {carrierList?.map(carrier => (
-            <div key={carrier.id} className="card p-6">
+          {carrierList.map(carrier => (
+            <div key={carrier.id} className="card p-4">
               <div className="flex items-start justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-xl flex items-center justify-center"
-                    style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                    <Truck className="w-6 h-6" />
+                <div className="flex items-start gap-4">
+                  <div 
+                    className="p-3 rounded-lg"
+                    style={{ backgroundColor: 'var(--color-primary-light)' }}
+                  >
+                    <Truck size={24} style={{ color: 'var(--color-primary)' }} />
                   </div>
                   <div>
                     <h3 className="font-semibold text-lg" style={{ color: 'var(--color-text-dark)' }}>
                       {carrier.name}
                     </h3>
-                    <div className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                    {carrier.alias && carrier.alias !== carrier.name && (
+                      <p className="text-sm" style={{ color: 'var(--color-primary)' }}>
+                        Alias: {carrier.alias}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-4 mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
                       {carrier.ico && <span>IČO: {carrier.ico}</span>}
-                      {carrier.ico && carrier.dic && <span className="mx-2">•</span>}
                       {carrier.dic && <span>DIČ: {carrier.dic}</span>}
+                    </div>
+                    <div className="flex items-center gap-4 mt-2">
+                      <span className="flex items-center gap-1 text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--color-bg-light)' }}>
+                        <FileText size={12} />
+                        {carrier.contractsCount || 0} smluv
+                      </span>
+                      <span className="flex items-center gap-1 text-xs px-2 py-1 rounded" style={{ backgroundColor: 'var(--color-bg-light)' }}>
+                        <Building size={12} />
+                        {carrier.proofsCount || 0} proofů
+                      </span>
                     </div>
                   </div>
                 </div>
-                
                 <div className="flex items-center gap-2">
-                  <button
+                  <button 
                     onClick={() => openModal(carrier)}
-                    className="p-2 rounded-lg hover:bg-gray-100"
-                    style={{ color: 'var(--color-text-muted)' }}
+                    className="p-2 rounded hover:bg-gray-100"
+                    title="Upravit"
                   >
-                    <Edit2 size={18} />
+                    <Edit2 size={16} style={{ color: 'var(--color-text-muted)' }} />
                   </button>
-                  <button
+                  <button 
                     onClick={() => handleDelete(carrier)}
-                    className="p-2 rounded-lg hover:bg-red-50"
-                    style={{ color: 'var(--color-text-muted)' }}
+                    className="p-2 rounded hover:bg-red-50"
+                    title="Smazat"
                   >
-                    <Trash2 size={18} />
+                    <Trash2 size={16} style={{ color: 'var(--color-red)' }} />
                   </button>
                 </div>
               </div>
-              
-              {/* Stats */}
-              <div className="flex gap-6 mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border-light)' }}>
-                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  <Building size={16} />
-                  {carrier.depots?.length || 0} dep
-                </div>
-                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  <FileText size={16} />
-                  {carrier.proofsCount || 0} proofů
-                </div>
-                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  <FileText size={16} />
-                  {carrier.invoicesCount || 0} faktur
-                </div>
-                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                  <FileText size={16} />
-                  {carrier.contractsCount || 0} smluv
-                </div>
-              </div>
-              
-              {/* Depots */}
-              {carrier.depots?.length > 0 && (
-                <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--color-border-light)' }}>
-                  <div className="text-sm mb-2" style={{ color: 'var(--color-text-muted)' }}>Depa:</div>
-                  <div className="flex flex-wrap gap-2">
-                    {carrier.depots.map(depot => (
-                      <span key={depot.id} className="px-2 py-1 rounded-full text-xs font-medium"
-                        style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                        {depot.name}
-                        {depot.code && ` (${depot.code})`}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           ))}
         </div>
@@ -283,150 +281,99 @@ export default function Carriers() {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="card w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--color-border)' }}>
-              <h2 className="font-semibold" style={{ color: 'var(--color-text-dark)' }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4" style={{ backgroundColor: 'var(--color-bg-card)' }}>
+            <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-dark)' }}>
                 {editingCarrier ? 'Upravit dopravce' : 'Nový dopravce'}
               </h2>
-              <button onClick={closeModal} style={{ color: 'var(--color-text-muted)' }}>
-                <X size={20} />
+              <button onClick={closeModal} className="p-1 rounded hover:bg-gray-100">
+                <X size={20} style={{ color: 'var(--color-text-muted)' }} />
               </button>
             </div>
             
-            <div className="flex-1 overflow-auto p-6">
-              {/* Přepínač režimu - pouze při vytváření nového */}
+            <div className="p-4">
+              {/* Přepínač režimu - pouze pro nového dopravce */}
               {!editingCarrier && (
-                <div className="mb-6">
-                  <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setUploadMode(false)
-                        setParsedData(null)
-                        setParseError(null)
-                        setSelectedFile(null)
-                      }}
-                      className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
-                        !uploadMode ? 'text-white' : ''
-                      }`}
-                      style={{ 
-                        backgroundColor: !uploadMode ? 'var(--color-primary)' : 'transparent',
-                        color: !uploadMode ? 'white' : 'var(--color-text-muted)'
-                      }}
-                    >
-                      Zadat ručně
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setUploadMode(true)}
-                      className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${
-                        uploadMode ? 'text-white' : ''
-                      }`}
-                      style={{ 
-                        backgroundColor: uploadMode ? 'var(--color-primary)' : 'transparent',
-                        color: uploadMode ? 'white' : 'var(--color-text-muted)'
-                      }}
-                    >
-                      Načíst ze smlouvy
-                    </button>
-                  </div>
+                <div className="flex gap-2 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => { setUploadMode(false); setParsedData(null); setSelectedFile(null) }}
+                    className={`flex-1 py-2 px-3 rounded text-sm font-medium transition-colors ${
+                      !uploadMode 
+                        ? 'bg-blue-500 text-white' 
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    Ruční zadání
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUploadMode(true)}
+                    className={`flex-1 py-2 px-3 rounded text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
+                      uploadMode 
+                        ? 'bg-blue-500 text-white' 
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    <Upload size={16} />
+                    Ze smlouvy (PDF)
+                  </button>
                 </div>
               )}
 
-              {/* Upload smlouvy */}
+              {/* Upload zone */}
               {uploadMode && !editingCarrier && (
-                <div className="mb-6">
-                  <label className="block text-sm font-medium mb-2" style={{ color: 'var(--color-text-muted)' }}>
-                    Nahrát smlouvu (PDF)
-                  </label>
-                  
-                  <div 
-                    className="border-2 border-dashed rounded-lg p-6 text-center transition-colors"
-                    style={{ 
-                      borderColor: parseError ? 'var(--color-red)' : selectedFile ? 'var(--color-green)' : 'var(--color-border)',
-                      backgroundColor: selectedFile ? 'var(--color-green-light)' : 'var(--color-bg)'
-                    }}
+                <div className="mb-4">
+                  <label 
+                    className={`
+                      flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-lg cursor-pointer
+                      transition-colors
+                      ${isParsingPdf ? 'bg-blue-50 border-blue-300' : 'hover:bg-gray-50 border-gray-300'}
+                    `}
                   >
+                    <input 
+                      type="file" 
+                      accept=".pdf"
+                      onChange={handleFileSelect}
+                      className="hidden"
+                      disabled={isParsingPdf}
+                    />
                     {isParsingPdf ? (
-                      <div className="flex flex-col items-center gap-2">
-                        <Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
-                        <span style={{ color: 'var(--color-text-muted)' }}>Analyzuji smlouvu...</span>
-                      </div>
+                      <>
+                        <Loader2 size={32} className="animate-spin text-blue-500 mb-2" />
+                        <span className="text-sm text-blue-600">Zpracovávám PDF...</span>
+                      </>
                     ) : selectedFile ? (
-                      <div className="flex flex-col items-center gap-2">
-                        <File className="w-8 h-8" style={{ color: 'var(--color-green)' }} />
-                        <span className="font-medium" style={{ color: 'var(--color-green)' }}>
-                          {selectedFile.name}
-                        </span>
-                        {parsedData && (
-                          <span className="text-sm flex items-center gap-1" style={{ color: 'var(--color-green)' }}>
-                            <Check size={14} /> Data extrahována
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedFile(null)
-                            setParsedData(null)
-                            setFormData({ name: '', ico: '', dic: '', address: '', contact: '' })
-                          }}
-                          className="text-sm underline mt-1"
-                          style={{ color: 'var(--color-text-muted)' }}
-                        >
-                          Změnit soubor
-                        </button>
-                      </div>
+                      <>
+                        <File size={32} className="text-green-500 mb-2" />
+                        <span className="text-sm font-medium">{selectedFile.name}</span>
+                        <span className="text-xs text-gray-500 mt-1">Klikněte pro změnu</span>
+                      </>
                     ) : (
                       <>
-                        <Upload className="w-8 h-8 mx-auto mb-2" style={{ color: 'var(--color-text-muted)' }} />
-                        <p style={{ color: 'var(--color-text-muted)' }}>
-                          Přetáhněte PDF sem nebo
-                        </p>
-                        <label className="btn btn-secondary mt-2 cursor-pointer inline-flex items-center gap-2">
-                          <Upload size={16} />
-                          Vybrat soubor
-                          <input
-                            type="file"
-                            accept=".pdf"
-                            onChange={handleFileSelect}
-                            className="hidden"
-                          />
-                        </label>
+                        <Upload size={32} className="text-gray-400 mb-2" />
+                        <span className="text-sm text-gray-600">Nahrát smlouvu (PDF)</span>
+                        <span className="text-xs text-gray-400 mt-1">Automaticky extrahuje údaje</span>
                       </>
                     )}
-                  </div>
+                  </label>
                   
                   {parseError && (
-                    <div className="mt-2 p-3 rounded-lg flex items-center gap-2"
-                      style={{ backgroundColor: 'var(--color-red-light)', color: 'var(--color-red)' }}>
+                    <div className="mt-2 p-2 bg-red-50 text-red-600 text-sm rounded flex items-center gap-2">
                       <AlertCircle size={16} />
-                      <span className="text-sm">{parseError}</span>
+                      {parseError}
                     </div>
                   )}
-
-                  {/* Náhled extrahovaných sazeb */}
-                  {parsedData?.rates && (
-                    <div className="mt-4 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-bg)' }}>
-                      <h4 className="text-sm font-medium mb-2" style={{ color: 'var(--color-text-dark)' }}>
-                        Extrahované sazby (budou přidány do ceníku):
-                      </h4>
-                      <div className="text-sm space-y-1" style={{ color: 'var(--color-text-muted)' }}>
-                        {parsedData.rates.fixRates?.length > 0 && (
-                          <div>FIX: {parsedData.rates.fixRates.map(r => `${r.routeType}: ${r.rate} Kč`).join(', ')}</div>
-                        )}
-                        {parsedData.rates.kmRates?.length > 0 && (
-                          <div>KM: {parsedData.rates.kmRates.map(r => `${r.rate} Kč/km`).join(', ')}</div>
-                        )}
-                        {parsedData.rates.depoRates?.length > 0 && (
-                          <div>DEPO: {parsedData.rates.depoRates.map(r => `${r.depoName}: ${r.rate} Kč`).join(', ')}</div>
-                        )}
-                        {!parsedData.rates.fixRates?.length && !parsedData.rates.kmRates?.length && !parsedData.rates.depoRates?.length && (
-                          <div>Žádné sazby nebyly nalezeny</div>
-                        )}
+                  
+                  {parsedData && (
+                    <div className="mt-2 p-3 bg-green-50 rounded text-sm">
+                      <div className="flex items-center gap-2 text-green-700 font-medium mb-2">
+                        <Check size={16} />
+                        Data extrahována ze smlouvy
                       </div>
                       {parsedData.contract && (
-                        <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--color-border-light)' }}>
+                        <div className="text-gray-600 pt-2" style={{ borderTop: '1px solid var(--color-border-light)' }}>
                           <span style={{ color: 'var(--color-text-muted)' }}>Smlouva: </span>
                           <span style={{ color: 'var(--color-text-dark)' }}>
                             {parsedData.contract.number || 'Neznámá'}
@@ -443,7 +390,7 @@ export default function Carriers() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                    Název *
+                    Oficiální název *
                   </label>
                   <input
                     type="text"
@@ -451,8 +398,24 @@ export default function Carriers() {
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="input w-full"
                     required
-                    placeholder="Název dopravce"
+                    placeholder="FA Dvořáček s.r.o."
                   />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                    Alias (krátký název pro Excel soubory)
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.alias}
+                    onChange={(e) => setFormData({ ...formData, alias: e.target.value })}
+                    className="input w-full"
+                    placeholder="FADvořáček"
+                  />
+                  <p className="text-xs mt-1" style={{ color: 'var(--color-text-light)' }}>
+                    Používá se pro matching při importu plánovacích souborů
+                  </p>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">

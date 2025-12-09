@@ -50,6 +50,7 @@ class Carrier(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
+    alias: Mapped[Optional[str]] = mapped_column(String(100))  # Krátký název pro matching v Excel souborech
     ico: Mapped[Optional[str]] = mapped_column(String(20))
     dic: Mapped[Optional[str]] = mapped_column(String(20))
     address: Mapped[Optional[str]] = mapped_column(Text)

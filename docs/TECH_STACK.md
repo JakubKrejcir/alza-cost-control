@@ -1,8 +1,8 @@
 # Technická dokumentace - Transport Brain
 
-> **Verze:** 3.12.0  
-> **Datum:** 7. prosince 2025  
-> **Aktualizace:** Opravy DB schématu, Expected Billing, konsolidace veškeré dokumentace
+> **Verze:** 3.13.0  
+> **Datum:** 9. prosince 2025  
+> **Aktualizace:** Carrier Alias systém pro matching dopravců v Excel importech
 
 ---
 
@@ -361,6 +361,7 @@ transport-brain/
 │       ├── database.py          # SQLAlchemy async konfigurace
 │       ├── models.py            # Databázové modely
 │       ├── schemas.py           # Pydantic schémata
+│       ├── carrier_matching.py  # Helper pro matching dopravců (name + alias)
 │       ├── api_key_middleware.py
 │       └── routers/
 │           ├── auth.py          # /api/auth/*
@@ -1069,6 +1070,14 @@ const navigation = [
 
 ## 📊 CHANGELOG
 
+### v3.13.0 (9. prosince 2025)
+- ✅ **Carrier Alias systém**: Dopravci mají `name` (oficiální) + `alias` (pro Excel matching)
+- ✅ **carrier_matching.py**: Nový helper pro lookup podle name i alias
+- ✅ **alzabox.py v3.11.0**: Import lokací používá alias matching
+- ✅ **Carriers.jsx**: Formulář s polem pro alias
+- ✅ **DB migrace**: `ALTER TABLE "Carrier" ADD COLUMN alias`
+- ✅ **Vyčištění duplicit**: Smazány prázdné záznamy dopravců (id 9, 12, 13)
+
 ### v3.12.0 (7. prosince 2025)
 - ✅ **DB Schema opravy**: Přidány chybějící sloupce do RoutePlan, RoutePlanRoute, LoginLog, ProofDailyDetail
 - ✅ **route_plans.py oprava**: `total_distance_km` → `total_km` pro RoutePlan (5 míst)
@@ -1109,4 +1118,81 @@ const navigation = [
 
 ---
 
-*Aktualizováno: 7. prosince 2025 - v3.12.0*
+## 🏷️ CARRIER ALIAS SYSTÉM (2025-12-09)
+
+### Problém
+Smlouvy obsahují oficiální názvy jako "FA Dvořáček s.r.o.", ale plánovací Excel soubory používají zkrácené aliasy jako "FADvořáček".
+
+### Řešení
+Dopravce má dva názvy:
+- **name** - Oficiální název (ze smlouvy)
+- **alias** - Krátký název pro matching v Excel souborech
+
+### Datový model
+
+```python
+class Carrier(Base):
+    id: Mapped[int]
+    name: Mapped[str]                          # "FA Dvořáček s.r.o."
+    alias: Mapped[Optional[str]]               # "FADvořáček"
+    ico: Mapped[Optional[str]]
+    dic: Mapped[Optional[str]]
+    # ...
+```
+
+### Carrier Matching Helper
+
+Nový soubor `backend/app/carrier_matching.py`:
+
+```python
+from app.carrier_matching import build_carrier_lookup, find_carrier_id
+
+# Vytvoření lookup slovníku (name i alias)
+result = await db.execute(select(Carrier))
+carrier_lookup = build_carrier_lookup(result.scalars().all())
+
+# Hledání podle jména z Excel souboru
+carrier_id = find_carrier_id("FADvořáček", carrier_lookup)  # Najde id=2
+```
+
+### Aktuální aliasy
+
+| ID | Oficiální název | Alias |
+|----|-----------------|-------|
+| 1 | Drivecool | Drivecool |
+| 2 | FA Dvořáček s.r.o. | FADvořáček |
+| 3 | ASEN Logistic Group s.r.o. | Asen |
+| 4 | L Car Care s.r.o. | L-CarCare |
+| 6 | GEM | GEM |
+| 7 | Zítek | Zítek |
+| 8 | Lantaron | Lantaron |
+| 10 | Fismo | Fismo |
+| 11 | Davcol | Davcol |
+
+### Použití v parserech
+
+#### alzabox.py (import lokací)
+```python
+# PŘED (jen name):
+carriers = {c.name: c.id for c in result.scalars().all()}
+carrier_id = carriers.get(carrier_name)
+
+# PO (name i alias):
+from app.carrier_matching import build_carrier_lookup, find_carrier_id
+carrier_lookup = build_carrier_lookup(result.scalars().all())
+carrier_id = find_carrier_id(carrier_name, carrier_lookup)
+```
+
+#### contracts.py (validace smlouvy)
+Smlouvy se párují podle **IČO** (ne podle názvu), takže alias není potřeba.
+
+### UI - Formulář dopravce
+
+V `Carriers.jsx` je pole pro alias:
+- Při vytvoření ze smlouvy se alias automaticky generuje z názvu
+- Uživatel může alias upravit ručně
+- Alias se zobrazuje v seznamu dopravců
+
+---
+
+*Aktualizováno: 9. prosince 2025 - v3.13.0 (Carrier Alias)*

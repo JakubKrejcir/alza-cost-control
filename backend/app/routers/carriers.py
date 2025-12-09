@@ -1,5 +1,6 @@
 """
 Carriers API Router
+Updated: 2025-12-09 - Added alias support
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException
@@ -41,6 +42,7 @@ async def get_carriers(db: AsyncSession = Depends(get_db)):
         response.append(CarrierWithCounts(
             id=carrier.id,
             name=carrier.name,
+            alias=carrier.alias,  # NEW
             ico=carrier.ico,
             dic=carrier.dic,
             address=carrier.address,

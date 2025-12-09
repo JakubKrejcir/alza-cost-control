@@ -115,48 +115,62 @@ Zboží jede **linehaulem na depo**, kde se přetřídí, a pak dodávky rozvá�
 
 ---
 
-## 4. Sloupec DR/LH - význam
+## 4. Sloupec DR/LH - význam a počítání trips
 
-### 4.1 Pravidla pro počítání rozjezdů
+### 4.1 Základní pravidla
 
-| Hodnota | Popis | Rozjezdů | Linehaul | Poznámka |
-|---------|-------|----------|----------|----------|
-| **DR** | Direct 1x denně | 1 | Ne | DPO svoz |
-| **DR-DR** | Direct 2x denně | 2 | Ne | DPO + SD svoz |
-| **DR-DR-DR** | Direct 3x denně | 3 | Ne | DPO + 2x SD svoz |
-| **LH** | Linehaul | 1 | Ano | Nenásobí se! |
-| **LH-LH** | Linehaul 2x | 1 | Ano | Nenásobí se! |
-| **LH-LH-LH** | Linehaul 3x | 1 | Ano | Nenásobí se! |
+| Hodnota | Popis | Počet trips (DPO+SD) | Linehaul |
+|---------|-------|----------------------|----------|
+| **DR** | Direct 1x denně | 1 (1 DPO + 0 SD) | Ne |
+| **DR-DR** | Direct 2x denně | 2 (1 DPO + 1 SD) | Ne |
+| **DR-DR-DR** | Direct 3x denně | 3 (1 DPO + 2 SD) | Ne |
+| **LH** | Linehaul 1x denně | 1 (1 DPO + 0 SD) | Ano |
+| **LH-LH** | Linehaul 2x denně | 1 (1 DPO + 0 SD) | Ano |
+| **LH-LH-LH** | Linehaul 3x denně | 1 (1 DPO + 0 SD) | Ano |
 
-> ⚠️ **DŮLEŽITÉ**: 
-> - Počet rozjezdů se násobí POUZE u DR vzorů!
-> - LH vzory se NENÁSOBÍ - vždy 1 rozjezd bez ohledu na počet LH
-> - Počet linehaulů se počítá z **jiného souboru** (ne z plánovacího souboru)
+### 4.2 Klíčové pravidlo: DR vs LH
 
-### 4.2 Rozdíl mezi kombinovaným a oddělenými plány
+> ⚠️ **DŮLEŽITÉ**: DR patterny se NÁSOBÍ (DR-DR = 2 trips), ale LH patterny se NENÁSOBÍ (LH-LH = 1 trip)!
 
-**Kombinovaný plán** (jeden soubor pro celý den):
-- DR-DR = 2 rozjezdy (DPO + SD)
-- DR-DR-DR = 3 rozjezdy
+**Proč?**
+- DR (Direct) = každá jízda je samostatná rozvozová trasa
+- LH (Linehaul) = linehaul je pouze přeprava na depo, počet linehauls se počítá z jiného zdroje
 
-**Oddělené plány** (DPO a SD soubory zvlášť):
-- Každý soubor obsahuje své trasy
-- NENÁSOBÍME - každá trasa = 1 rozjezd
-- Typ plánu se pozná z názvu souboru: `*_DPO.xlsx` nebo `*_SD.xlsx`
+### 4.3 Příklady výpočtů
 
-### 4.3 Příklad výpočtu
+**Soubor: Drivecool 25-09-05.xlsx (23 tras)**
 
-```
-Kombinovaný plán "Drivecool 25-11-07.xlsx":
-- Trasa A (DR) = 1 rozjezd
-- Trasa B (DR-DR) = 2 rozjezdy
-- Trasa C (LH-LH) = 1 rozjezd
-CELKEM: 4 rozjezdy
+| Typ tras | Počet | DR/LH pattern | DPO | SD | Trips celkem |
+|----------|-------|---------------|-----|-----|--------------|
+| LH trasy | 17 | LH, LH-LH | 17 | 0 | 17 |
+| DR-DR trasy | 6 | DR-DR | 6 | 6 | 12 |
+| **Celkem** | **23** | - | **23** | **6** | **29** |
 
-Oddělené plány:
-"Drivecool 25-11-07_DPO.xlsx" - 23 tras = 23 rozjezdů
-"Drivecool 25-11-07_SD.xlsx" - 12 tras = 12 rozjezdů
-CELKEM: 35 rozjezdů
+### 4.4 Implementace count_trips()
+
+```python
+def count_trips(dr_lh: str, plan_type: str = 'BOTH') -> int:
+    """
+    Počítá trips z DR/LH sloupce.
+    
+    PRAVIDLA:
+    - DR pattern se násobí: DR=1, DR-DR=2, DR-DR-DR=3
+    - LH pattern se NENÁSOBÍ: LH=1, LH-LH=1, LH-LH-LH=1
+    - Pro separátní plány (DPO/SD) vždy vrací 1
+    """
+    if not dr_lh:
+        return 1
+    
+    # Separátní plány - vždy 1 trip
+    if plan_type in ('DPO', 'SD'):
+        return 1
+    
+    dr_lh_upper = dr_lh.upper().strip()
+    
+    # Počítej pouze DR patterny (LH se nenásobí!)
+    dr_count = dr_lh_upper.count('DR')
+    
+    return max(dr_count, 1)
 ```
 
 ---
@@ -370,10 +384,10 @@ def calculate_planned_cost(route: RoutePlanRoute, prices: PriceConfig) -> dict:
         depot = detect_depot_from_route_name(route.route_name)
         fix_rate = prices.get_fix_rate(f"DIRECT_{depot}")  # 2500 Kč
     
-    # 3. Spočítat počet rozjezdů z DR/LH
-    # DŮLEŽITÉ: Násobí se POUZE DR vzory, LH se NENÁSOBÍ!
-    # DR-DR = 2, DR-DR-DR = 3, ale LH-LH = 1!
-    trips = count_trips(route.dr_lh, plan.plan_type)
+    # 3. Spočítat počet jízd z DR/LH
+    # DR pattern se násobí: DR=1, DR-DR=2, DR-DR-DR=3
+    # LH pattern se NENÁSOBÍ: LH=1, LH-LH=1
+    trips = count_trips(route.dr_lh, plan_type)
     
     result["fix"] = fix_rate * trips
     
@@ -382,9 +396,8 @@ def calculate_planned_cost(route: RoutePlanRoute, prices: PriceConfig) -> dict:
     result["km"] = km_rate * route.total_distance_km * trips
     
     # 5. Linehaul (pouze pro VIA LINEHAUL trasy)
-    # TODO: Linehauly se počítají z jiného souboru!
     if route_type == "VIA_LINEHAUL" and "LH" in route.dr_lh:
-        linehaul_count = get_linehaul_count_from_external_file(...)  # Z jiného souboru
+        linehaul_count = count_linehauls(route.dr_lh)
         linehaul_rate = prices.get_linehaul_rate(...)  # Podle warehouse a vehicle
         result["linehaul"] = linehaul_rate * linehaul_count
     
@@ -395,12 +408,57 @@ def calculate_planned_cost(route: RoutePlanRoute, prices: PriceConfig) -> dict:
 
 ---
 
+## 11. Dopravci a aliasy
+
+### 11.1 Problém s názvy dopravců
+
+Smlouvy obsahují **oficiální názvy** jako "ASEN Logistic Group s.r.o.", ale plánovací soubory používají **zkrácené aliasy** jako "Asen".
+
+### 11.2 Mapování dopravců
+
+| ID | Oficiální název (smlouva) | Alias (Excel) | Depo |
+|----|---------------------------|---------------|------|
+| 1 | Drivecool | Drivecool | Vratimov, Nový Bydžov |
+| 2 | FA Dvořáček s.r.o. | FADvořáček | - |
+| 3 | ASEN Logistic Group s.r.o. | Asen | Depo Východ |
+| 4 | L Car Care s.r.o. | L-CarCare | - |
+| 6 | GEM | GEM | Brno |
+| 7 | Zítek | Zítek | Rakovník |
+| 8 | Lantaron | Lantaron | České Budějovice |
+| 10 | Fismo | Fismo | TC1 |
+| 11 | Davcol | Davcol | TC1 |
+
+### 11.3 Matching v plánovacích souborech
+
+Při importu plánovacích souborů se dopravce hledá:
+1. Nejprve podle **alias** (přesná shoda, case-insensitive)
+2. Pokud nenalezeno, podle **name**
+
+```
+Excel soubor: "Asen_Depo_Vy_chod_25-11-21.xlsx"
+                ↓
+Název dopravce z Excelu: "Asen"
+                ↓
+Hledání v DB: alias = 'asen' OR name = 'asen'
+                ↓
+Nalezeno: id=3 (ASEN Logistic Group s.r.o.)
+```
+
+### 11.4 Správa aliasů
+
+Aliasy se spravují v UI aplikace:
+- **Dopravci** → klik na dopravce → pole "Alias"
+- Při vytvoření dopravce ze smlouvy se alias automaticky navrhne
+
+---
+
 ## Historie změn
 
 | Datum | Změna | Autor |
 |-------|-------|-------|
-| 2025-12-08 | Oprava logiky počítání rozjezdů: LH vzory se NENÁSOBÍ, pouze DR vzory. Přidána podpora DR-DR-DR. Linehauly se počítají z jiného souboru. | Claude |
 | 2025-12-05 | Vytvoření dokumentace | Claude |
+| 2025-12-09 | Přidána sekce 11 - Dopravci a aliasy | Claude |
+| 2025-12-09 | Oprava sekce 4 - logika počítání trips (DR vs LH) | Claude |
 
 ---
 

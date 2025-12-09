@@ -1,6 +1,6 @@
 """
 AlzaBox Router - Import dat a BI API (ASYNC verze)
-Verze: 3.10.2 - Opravený parser pro nový formát XLSX
+Verze: 3.11.0 - Carrier matching pomocí name + alias
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ import logging
 
 from app.database import get_db
 from app.models import AlzaBox, AlzaBoxAssignment, AlzaBoxDelivery, Carrier
+from app.carrier_matching import build_carrier_lookup, find_carrier_id
 
 router = APIRouter(tags=["alzabox"])
 logger = logging.getLogger(__name__)
@@ -65,10 +66,11 @@ async def import_alzabox_locations(
         
         logger.info(f"Importing locations from sheet: {sheet.title}, rows: {sheet.max_row}")
         
-        # Načti existující dopravce
+        # Načti existující dopravce - lookup podle name I alias
         result = await db.execute(select(Carrier))
-        carriers = {c.name: c.id for c in result.scalars().all()}
-        logger.info(f"Found {len(carriers)} carriers in DB")
+        carriers_list = result.scalars().all()
+        carrier_lookup = build_carrier_lookup(carriers_list)
+        logger.info(f"Found {len(carriers_list)} carriers in DB")
         
         # Načti existující boxy
         result = await db.execute(select(AlzaBox))
@@ -131,8 +133,8 @@ async def import_alzabox_locations(
                 existing_boxes[code] = box
                 created += 1
             
-            # Přiřazení k dopravci
-            carrier_id = carriers.get(carrier_name) if carrier_name else None
+            # Přiřazení k dopravci (hledá podle name i alias)
+            carrier_id = find_carrier_id(carrier_name, carrier_lookup) if carrier_name else None
             
             if carrier_id or route_group:
                 assignment = AlzaBoxAssignment(
