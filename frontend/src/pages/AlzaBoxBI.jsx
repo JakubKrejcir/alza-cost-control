@@ -209,6 +209,88 @@ function CarrierDelayBreakdown({ data, isLoading }) {
 }
 
 // =============================================================================
+// HOURLY BREAKDOWN COMPONENT
+// =============================================================================
+
+function HourlyBreakdown({ data, isLoading }) {
+  if (isLoading) {
+    return (
+      <div className="text-sm p-4" style={{ color: 'var(--color-text-muted)' }}>
+        Načítání...
+      </div>
+    )
+  }
+  
+  if (!data || !data.hours) {
+    return (
+      <div className="text-sm p-4" style={{ color: 'var(--color-text-muted)' }}>
+        Žádná data
+      </div>
+    )
+  }
+
+  const maxPlanned = Math.max(...data.hours.map(h => h.planned), 1)
+
+  return (
+    <div className="space-y-1">
+      {/* Header */}
+      <div className="flex items-center text-xs font-medium py-1 px-2" 
+        style={{ color: 'var(--color-text-muted)', backgroundColor: 'var(--color-bg)' }}>
+        <div className="w-8">Hod</div>
+        <div className="w-16 text-right">Plán</div>
+        <div className="w-16 text-right">Skut.</div>
+        <div className="w-14 text-right">Rozdíl</div>
+        <div className="flex-1 ml-3"></div>
+      </div>
+      
+      {/* Hours */}
+      {data.hours.filter(h => h.planned > 0 || h.actual > 0).map((h) => {
+        const barWidth = Math.round((h.actual / maxPlanned) * 100)
+        const diffColor = h.diff >= 0 ? 'var(--color-green)' : 'var(--color-red)'
+        const barColor = h.diff >= 0 ? 'var(--color-green)' : 'var(--color-orange-light)'
+        
+        return (
+          <div key={h.hour} className="flex items-center text-xs py-1 px-2 hover:bg-white/5 rounded">
+            <div className="w-8 font-medium" style={{ color: 'var(--color-text-dark)' }}>
+              {h.hour.toString().padStart(2, '0')}
+            </div>
+            <div className="w-16 text-right" style={{ color: 'var(--color-text-muted)' }}>
+              {h.planned.toLocaleString('cs-CZ')}
+            </div>
+            <div className="w-16 text-right font-medium" style={{ color: 'var(--color-text-dark)' }}>
+              {h.actual.toLocaleString('cs-CZ')}
+            </div>
+            <div className="w-14 text-right font-medium" style={{ color: diffColor }}>
+              {h.diff >= 0 ? '+' : ''}{h.diff.toLocaleString('cs-CZ')}
+            </div>
+            <div className="flex-1 ml-3">
+              <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-border)' }}>
+                <div 
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${barWidth}%`, backgroundColor: barColor }}
+                />
+              </div>
+            </div>
+          </div>
+        )
+      })}
+      
+      {/* Totals */}
+      <div className="flex items-center text-xs font-medium py-2 px-2 mt-1 border-t" 
+        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-dark)' }}>
+        <div className="w-8">Σ</div>
+        <div className="w-16 text-right">{data.totals.planned.toLocaleString('cs-CZ')}</div>
+        <div className="w-16 text-right">{data.totals.actual.toLocaleString('cs-CZ')}</div>
+        <div className="w-14 text-right" style={{ color: data.totals.diff >= 0 ? 'var(--color-green)' : 'var(--color-red)' }}>
+          {data.totals.diff >= 0 ? '+' : ''}{data.totals.diff.toLocaleString('cs-CZ')}
+        </div>
+        <div className="flex-1 ml-3"></div>
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
 // DAILY CHART COMPONENT
 // =============================================================================
 
@@ -527,6 +609,11 @@ export default function AlzaBoxBI() {
     queryFn: () => alzaboxApi.getByDay(filters)
   })
 
+  const { data: hourlyStats, isLoading: hourlyStatsLoading } = useQuery({
+    queryKey: ['alzabox-hourly', filters],
+    queryFn: () => alzaboxApi.getByHour(filters)
+  })
+
   const { data: boxStats } = useQuery({
     queryKey: ['alzabox-boxes', selectedRoute, filters],
     queryFn: () => alzaboxApi.getByBox({ ...filters, route_name: selectedRoute }),
@@ -551,7 +638,6 @@ export default function AlzaBoxBI() {
   }
 
   const summaryColors = getStatusColor(summary?.onTimePct || 0)
-  const lateDeliveries = (summary?.totalDeliveries || 0) - (summary?.onTimeDeliveries || 0)
   const routesBelowTarget = routeStats?.filter(r => r.onTimePct < TARGET_PCT).length || 0
   
   // Průměrné zpoždění tras pod cílem
@@ -672,20 +758,19 @@ export default function AlzaBoxBI() {
             >
               <CarrierBreakdown data={carrierStats} isLoading={carrierStatsLoading} />
             </StatCard>
-            <StatCard
-              icon={CheckCircle}
-              label="Včas (=1)"
-              value={summary?.onTimeDeliveries?.toLocaleString('cs-CZ') || '0'}
-              subtext="Doručeno včas nebo dříve"
-              color="green"
-            />
-            <StatCard
-              icon={XCircle}
-              label="Pozdě (=0)"
-              value={lateDeliveries.toLocaleString('cs-CZ')}
-              subtext="Doručeno po plánovaném čase"
-              color={lateDeliveries > 0 ? 'red' : 'green'}
-            />
+            
+            {/* Hourly Breakdown - span 2 columns */}
+            <div className="stat-card lg:col-span-2">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
+                  <Clock className="w-5 h-5" />
+                </div>
+                <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Dojezdy po hodinách</span>
+              </div>
+              <HourlyBreakdown data={hourlyStats} isLoading={hourlyStatsLoading} />
+            </div>
+            
             <StatCard
               icon={AlertTriangle}
               label="Trasy pod cílem"

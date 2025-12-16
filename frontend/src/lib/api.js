@@ -227,6 +227,9 @@ export const alzabox = {
   getByDay: (params = {}) => 
     api.get('/alzabox/stats/by-day', { params }).then(r => r.data),
   
+  getByHour: (params = {}) =>
+    api.get('/alzabox/stats/by-hour', { params }).then(r => r.data),
+  
   // Drill-down
   getByBox: (params = {}) =>
     api.get('/alzabox/stats/by-box', { params }).then(r => r.data),

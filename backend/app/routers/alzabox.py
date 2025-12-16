@@ -623,6 +623,105 @@ async def get_by_day(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/stats/by-hour")
+async def get_by_hour(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    carrier_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Statistiky po hodinách - plánované vs skutečné dojezdy.
+    
+    Zaokrouhlení nahoru: 06:30 -> hodina 7, 05:00 -> hodina 5
+    """
+    try:
+        # Plánované dojezdy podle hodiny (planned_time je string "HH:MM")
+        # Zaokrouhlení: pokud minuty > 0, hodina + 1
+        sql_planned = """
+        SELECT 
+            CASE 
+                WHEN CAST(SUBSTRING(d."plannedTime" FROM 4 FOR 2) AS INTEGER) > 0 
+                THEN CAST(SUBSTRING(d."plannedTime" FROM 1 FOR 2) AS INTEGER) + 1
+                ELSE CAST(SUBSTRING(d."plannedTime" FROM 1 FOR 2) AS INTEGER)
+            END as hour,
+            COUNT(*) as count
+        FROM "AlzaBoxDelivery" d
+        WHERE d."plannedTime" IS NOT NULL
+        """
+        
+        # Skutečné dojezdy podle hodiny (actual_time je timestamp)
+        # Zaokrouhlení: pokud minuty > 0, hodina + 1
+        sql_actual = """
+        SELECT 
+            CASE 
+                WHEN EXTRACT(MINUTE FROM d."actualTime") > 0 
+                THEN EXTRACT(HOUR FROM d."actualTime")::INTEGER + 1
+                ELSE EXTRACT(HOUR FROM d."actualTime")::INTEGER
+            END as hour,
+            COUNT(*) as count
+        FROM "AlzaBoxDelivery" d
+        WHERE d."actualTime" IS NOT NULL
+        """
+        
+        params = {}
+        filters = ""
+        
+        if start_date:
+            filters += ' AND d."deliveryDate" >= :start_date'
+            params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
+        if end_date:
+            filters += ' AND d."deliveryDate" <= :end_date'
+            params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        if carrier_id:
+            filters += ' AND d."carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
+        
+        sql_planned += filters + " GROUP BY hour ORDER BY hour"
+        sql_actual += filters + " GROUP BY hour ORDER BY hour"
+        
+        # Execute both queries
+        planned_result = await db.execute(text(sql_planned), params)
+        planned_rows = {row[0]: row[1] for row in planned_result.fetchall()}
+        
+        actual_result = await db.execute(text(sql_actual), params)
+        actual_rows = {row[0]: row[1] for row in actual_result.fetchall()}
+        
+        # Combine results for hours 4-14
+        hours = []
+        total_planned = 0
+        total_actual = 0
+        
+        for hour in range(4, 15):
+            planned = planned_rows.get(hour, 0)
+            actual = actual_rows.get(hour, 0)
+            diff = actual - planned
+            pct = round(actual / planned * 100, 1) if planned > 0 else 0
+            
+            total_planned += planned
+            total_actual += actual
+            
+            hours.append({
+                "hour": hour,
+                "planned": planned,
+                "actual": actual,
+                "diff": diff,
+                "pct": pct
+            })
+        
+        return {
+            "hours": hours,
+            "totals": {
+                "planned": total_planned,
+                "actual": total_actual,
+                "diff": total_actual - total_planned
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in by-hour: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/stats/by-box")
 async def get_by_box(
     route_name: Optional[str] = Query(None),
