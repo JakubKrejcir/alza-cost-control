@@ -230,6 +230,9 @@ export const alzabox = {
   getByHour: (params = {}) =>
     api.get('/alzabox/stats/by-hour', { params }).then(r => r.data),
   
+  getLateByHour: (params = {}) =>
+    api.get('/alzabox/stats/late-by-hour', { params }).then(r => r.data),
+  
   // Drill-down
   getByBox: (params = {}) =>
     api.get('/alzabox/stats/by-box', { params }).then(r => r.data),

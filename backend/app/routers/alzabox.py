@@ -1,7 +1,7 @@
 """
 AlzaBox Router - Import dat a BI API (ASYNC verze)
-Verze: 3.13.0 - Fixed carrier filtering to use AlzaBoxDelivery.carrierId directly
-Updated: 2025-12-09
+Verze: 3.14.0 - Added late-by-hour endpoint
+Updated: 2025-12-16
 """
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -719,6 +719,65 @@ async def get_by_hour(
         }
     except Exception as e:
         logger.error(f"Error in by-hour: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats/late-by-hour")
+async def get_late_by_hour(
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    carrier_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Statistiky pozdních dojezdů po hodinách skutečného příjezdu.
+    Zaokrouhlení nahoru: 06:30 -> hodina 7
+    """
+    try:
+        sql = """
+        SELECT 
+            CASE 
+                WHEN EXTRACT(MINUTE FROM d."actualTime") > 0 
+                THEN EXTRACT(HOUR FROM d."actualTime")::INTEGER + 1
+                ELSE EXTRACT(HOUR FROM d."actualTime")::INTEGER
+            END as hour,
+            COUNT(*) as late_count,
+            ROUND(AVG(d."delayMinutes")::numeric, 1) as avg_delay
+        FROM "AlzaBoxDelivery" d
+        WHERE d."onTime" = false AND d."actualTime" IS NOT NULL
+        """
+        params = {}
+        
+        if start_date:
+            sql += ' AND d."deliveryDate" >= :start_date'
+            params['start_date'] = datetime.strptime(start_date, "%Y-%m-%d")
+        if end_date:
+            sql += ' AND d."deliveryDate" <= :end_date'
+            params['end_date'] = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        if carrier_id:
+            sql += ' AND d."carrierId" = :carrier_id'
+            params['carrier_id'] = carrier_id
+        
+        sql += " GROUP BY hour ORDER BY hour"
+        
+        result = await db.execute(text(sql), params)
+        rows = result.fetchall()
+        
+        total_late = sum(row[1] for row in rows)
+        
+        return {
+            "hours": [
+                {
+                    "hour": row[0],
+                    "lateCount": row[1],
+                    "avgDelay": float(row[2]) if row[2] else 0
+                }
+                for row in rows
+            ],
+            "totalLate": total_late
+        }
+    except Exception as e:
+        logger.error(f"Error in late-by-hour: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

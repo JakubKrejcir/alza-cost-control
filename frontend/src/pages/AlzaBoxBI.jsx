@@ -209,6 +209,73 @@ function CarrierDelayBreakdown({ data, isLoading }) {
 }
 
 // =============================================================================
+// LATE BY HOUR BREAKDOWN COMPONENT
+// =============================================================================
+
+function LateByHourBreakdown({ data, isLoading }) {
+  if (isLoading) {
+    return <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Načítání...</div>
+  }
+  
+  if (!data || !data.hours || data.hours.length === 0) {
+    return <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Žádné pozdní dojezdy</div>
+  }
+
+  const maxCount = Math.max(...data.hours.map(h => h.lateCount), 1)
+
+  return (
+    <div className="space-y-1">
+      {/* Header */}
+      <div className="flex items-center text-xs font-medium py-1 px-2" 
+        style={{ color: 'var(--color-text-muted)', backgroundColor: 'var(--color-bg)' }}>
+        <div className="w-12">Hod</div>
+        <div className="w-14 text-right">Pozdě</div>
+        <div className="w-16 text-right">Ø zpožd.</div>
+        <div className="flex-1 ml-2"></div>
+      </div>
+      
+      {/* Hours */}
+      {data.hours.map((h) => {
+        const barWidth = Math.round((h.lateCount / maxCount) * 100)
+        
+        return (
+          <div key={h.hour} className="flex items-center text-xs py-1 px-2 hover:bg-white/5 rounded">
+            <div className="w-12 font-medium" style={{ color: 'var(--color-text-dark)' }}>
+              {h.hour.toString().padStart(2, '0')}:00
+            </div>
+            <div className="w-14 text-right font-medium" style={{ color: 'var(--color-red)' }}>
+              {h.lateCount}
+            </div>
+            <div className="w-16 text-right" style={{ color: 'var(--color-text-muted)' }}>
+              +{Math.round(h.avgDelay)} min
+            </div>
+            <div className="flex-1 ml-2">
+              <div className="h-2 rounded-full" style={{ backgroundColor: 'var(--color-border)' }}>
+                <div 
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${barWidth}%`, backgroundColor: 'var(--color-red)' }}
+                />
+              </div>
+            </div>
+          </div>
+        )
+      })}
+      
+      {/* Total */}
+      <div className="flex items-center text-xs font-medium py-2 px-2 mt-1 border-t" 
+        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-dark)' }}>
+        <div className="w-12">Σ</div>
+        <div className="w-14 text-right" style={{ color: 'var(--color-red)' }}>
+          {data.totalLate}
+        </div>
+        <div className="w-16 text-right"></div>
+        <div className="flex-1 ml-2"></div>
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
 // HOURLY BREAKDOWN COMPONENT
 // =============================================================================
 
@@ -614,6 +681,11 @@ export default function AlzaBoxBI() {
     queryFn: () => alzaboxApi.getByHour(filters)
   })
 
+  const { data: lateByHourStats, isLoading: lateByHourLoading } = useQuery({
+    queryKey: ['alzabox-late-by-hour', filters],
+    queryFn: () => alzaboxApi.getLateByHour(filters)
+  })
+
   const { data: boxStats } = useQuery({
     queryKey: ['alzabox-boxes', selectedRoute, filters],
     queryFn: () => alzaboxApi.getByBox({ ...filters, route_name: selectedRoute }),
@@ -746,8 +818,8 @@ export default function AlzaBoxBI() {
       {/* VIEW: OVERVIEW */}
       {view === 'overview' && (
         <>
-          {/* Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Summary Cards - 5 columns */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatCard
               icon={Target}
               label="Včasnost"
@@ -769,6 +841,18 @@ export default function AlzaBoxBI() {
                 <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Dojezdy po hodinách</span>
               </div>
               <HourlyBreakdown data={hourlyStats} isLoading={hourlyStatsLoading} />
+            </div>
+            
+            {/* Late By Hour Breakdown */}
+            <div className="stat-card">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--color-red-light)', color: 'var(--color-red)' }}>
+                  <Clock className="w-5 h-5" />
+                </div>
+                <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Pozdě po hodinách</span>
+              </div>
+              <LateByHourBreakdown data={lateByHourStats} isLoading={lateByHourLoading} />
             </div>
             
             <StatCard
